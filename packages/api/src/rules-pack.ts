@@ -135,11 +135,19 @@ export function buildGlobalRulesPack(version = "1.0.0"): RulesPackPayload {
   }
 }
 
+/**
+ * Payload servi aux agents.
+ * Recalcule checksum + signature sur les rules **telles qu’en mémoire** :
+ * Postgres JSONB peut réordonner les clés → le checksum stocké à la
+ * publication ne matche plus `JSON.stringify(rules)` côté client
+ * (erreur `pack_verify_failed:checksum_mismatch` à l’enroll PERSONAL/org).
+ */
 export function toPayload(pack: StoredRulePack): RulesPackPayload {
+  const checksum = checksumJson(pack.rules)
   return {
     version: pack.version,
-    checksum: pack.checksum,
-    signature: pack.signature,
+    checksum,
+    signature: signPackChecksum(checksum),
     rules: pack.rules,
     notes: pack.notes,
     pack_id: pack.packId,
