@@ -22,18 +22,21 @@ La **V1 produit** rend OpsGate **opérable pour un premier client** (10–50 si�
 | Polish console (sièges restants, force-sync, états licence) | V1-E4 |
 | Tests verts + checklist go | V1-E5 |
 
-## Hors V1 (reporté)
+## Hors V1 (reporté → **V2**)
 
 | Item | Cible |
 |------|--------|
-| Proxy local | v1.x / v1.2 |
-| SSO SAML/OIDC | post-V1 |
-| Portal personnel cloud / billing | post-V1 |
-| LDAP/AD | post-V1 |
-| Chrome Web Store public | post-V1 |
-| MFA TOTP / WebAuthn | post-V1 |
-| Multi-région / HA | GA enterprise |
-| Block forcé par défaut | org_managed_strict plus tard |
+| Proxy local | **V2** — [`architecture/PLATFORM-v2.md`](./architecture/PLATFORM-v2.md) |
+| SSO SAML/OIDC | **V2** |
+| MFA TOTP / WebAuthn | **V2** |
+| Multi-tenant production | **V2** |
+| Chrome Web Store | **V2** |
+| Portal personnel cloud / billing | V2.1 |
+| LDAP/AD | V2.1 |
+| Multi-région / HA | V3 / GA enterprise |
+| Block forcé par défaut | V2 (`org_managed_strict`) |
+
+Synthèse cut V2 : [`RELEASE-v2.md`](./RELEASE-v2.md)
 
 ## Critères go / no-go
 

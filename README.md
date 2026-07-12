@@ -109,7 +109,8 @@ docker compose up -d
 ```
 
 **Guide complet Docker + API + extension** : [`docs/GUIDE-STACK-LOCALE.md`](docs/GUIDE-STACK-LOCALE.md)  
-Runbook court : [`docs/RUNBOOK-OPS.md`](docs/RUNBOOK-OPS.md)
+Runbook court : [`docs/RUNBOOK-OPS.md`](docs/RUNBOOK-OPS.md)  
+**V2 (draft)** — proxy, SSO, MFA, multi-tenant, Chrome Store : [`docs/architecture/PLATFORM-v2.md`](docs/architecture/PLATFORM-v2.md) · [`docs/RELEASE-v2.md`](docs/RELEASE-v2.md)
 
 Org démo : code **`DEMO-OPSGATE`**
 
