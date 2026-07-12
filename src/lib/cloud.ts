@@ -130,14 +130,21 @@ export async function enrollAgent(
       await revokeCurrentAgent()
     }
 
+    const isPersonal = personal === true
+    const code = isPersonal ? "PERSONAL" : (orgCode || "").trim()
+    if (!isPersonal && !code) {
+      return { ok: false, error: "org_code_required" }
+    }
+
     const res = await fetch(apiUrl(base, "/v1/enroll"), {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        org_code: personal ? "PERSONAL" : orgCode.trim(),
-        personal: !!personal,
+        org_code: code,
+        // strict boolean — ne jamais envoyer true pour un enroll org
+        personal: isPersonal,
         device_label: deviceLabel || "browser-extension",
-        personal_license_key: personal
+        personal_license_key: isPersonal
           ? personalLicenseKey?.trim()
           : undefined,
         app_version: chrome.runtime.getManifest().version
@@ -154,6 +161,8 @@ export async function enrollAgent(
       return { ok: false, error: "invalid_enroll_response" }
     }
 
+    // Toujours faire confiance à la réponse serveur (org.isPersonal)
+    const enrolledPersonal = body.personal === true
     const next = await setSettings({
       mode: (body.mode as OpsGateSettings["mode"]) || "org_managed",
       orgId: body.org_id,
@@ -161,7 +170,7 @@ export async function enrollAgent(
       agentId: body.agent_id,
       agentToken: body.agent_token,
       deviceLabel: deviceLabel || "browser-extension",
-      personalAccount: !!personal,
+      personalAccount: enrolledPersonal,
       lastSyncError: undefined
     })
 
@@ -280,17 +289,16 @@ export async function syncConfig(
       mode: (body.org.mode as OpsGateSettings["mode"]) || settings.mode,
       orgId: body.org.id,
       orgName: body.org.name,
-      personalAccount:
-        body.org.personal === true || settings.personalAccount === true,
+      // Ne pas coller un ancien personalAccount=true (sticky) après enroll org
+      personalAccount: body.org.personal === true,
       rulesPackVersion: pack.version,
       rulesPackChecksum: pack.checksum,
-      eventReporting: body.policy.event_reporting !== false,
+      eventReporting: body.policy.event_reporting === true,
       scanUploads: body.policy.scan_uploads !== false,
       enabledHosts: hosts,
-      enabled: true,
       lastRulesSyncAt: pack.syncedAt,
       lastSyncError: undefined,
-      managedLockActive: !body.org.personal,
+      managedLockActive: body.org.personal !== true,
       managementPasswordHash: mgmtHash,
       adminCredentials:
         adminCredentials.length > 0 ? adminCredentials : undefined,

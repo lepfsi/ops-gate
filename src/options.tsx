@@ -7,8 +7,6 @@ function OptionsPage() {
   const [settings, setSettings] = useState<OpsGateSettings>(DEFAULT_SETTINGS)
   const [orgCode, setOrgCode] = useState("DEMO-OPSGATE")
   const [deviceLabel, setDeviceLabel] = useState("mon-pc")
-  /** organisation | personal */
-  const [enrollMode, setEnrollMode] = useState<"org" | "personal">("org")
   const [personalLicenseKey, setPersonalLicenseKey] = useState(
     "OPS-PERSONAL-DEMO-2026"
   )
@@ -56,9 +54,12 @@ function OptionsPage() {
     })
   }
 
-  const onEnroll = async () => {
-    const personal = enrollMode === "personal"
-    if (personal && !personalLicenseKey.trim()) {
+  const runEnroll = async (kind: "org" | "personal") => {
+    if (kind === "org" && !orgCode.trim()) {
+      setErr("Saisissez un code organisation (ex. DEMO-OPSGATE).")
+      return
+    }
+    if (kind === "personal" && !personalLicenseKey.trim()) {
       setErr("Saisissez une clé de licence personnelle.")
       return
     }
@@ -69,26 +70,40 @@ function OptionsPage() {
     try {
       const res = await chrome.runtime.sendMessage({
         type: "ENROLL",
-        orgCode: personal ? "PERSONAL" : orgCode,
+        orgCode: kind === "personal" ? "PERSONAL" : orgCode.trim(),
         deviceLabel,
         apiBaseUrl: settings.apiBaseUrl,
-        personal,
-        personalLicenseKey: personal ? personalLicenseKey.trim() : undefined
+        // boolean strict — org = false explicite (évite sticky personnel)
+        personal: kind === "personal",
+        personalLicenseKey:
+          kind === "personal" ? personalLicenseKey.trim() : undefined
       })
       if (res?.ok) {
         setSettings(res.settings)
+        const isPers = res.settings.personalAccount === true
         const pwdOn =
           res.settings.managementPasswordHash &&
           String(res.settings.managementPasswordHash).trim().length > 0
+        if (kind === "org" && isPers) {
+          setErr(
+            "Enroll demandé en organisation mais l’API a renvoyé un compte personnel. Vérifiez le code org et redémarrez l’API."
+          )
+          return
+        }
         setMsg(
-          `Enrôlé — ${res.settings.orgName || res.settings.orgId}, pack ${res.settings.rulesPackVersion}.` +
-            (personal
-              ? " Mode personnel : management local via cette page Options + API locale (pas encore de portal cloud)."
-              : res.settings.managedLockActive
-                ? pwdOn
-                  ? " Policies verrouillées ; désinscription protégée."
-                  : " Policies verrouillées."
-                : "")
+          `Enrôlé — ${res.settings.orgName || res.settings.orgId}` +
+            (isPers ? " (personnel)" : " (organisation)") +
+            `, pack ${res.settings.rulesPackVersion}.` +
+            (isPers
+              ? " Events cloud désactivés (privacy). Management via Options."
+              : res.settings.eventReporting
+                ? " Events activés → visibles console DEMO."
+                : " Events off en policy — activez « Collecte events » en console.") +
+            (!isPers && res.settings.managedLockActive
+              ? pwdOn
+                ? " Policies verrouillées ; désinscription protégée."
+                : " Policies verrouillées."
+              : "")
         )
       } else {
         setErr(res?.message || res?.error || "enroll_failed")
@@ -319,57 +334,8 @@ function OptionsPage() {
               style={inputStyle}
               placeholder="http://127.0.0.1:8787"
             />
-            <label style={{ ...labelStyle, marginTop: 14 }}>Mode</label>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <button
-                type="button"
-                onClick={() => setEnrollMode("org")}
-                style={enrollMode === "org" ? btnPrimary : btnGhost}>
-                Organisation
-              </button>
-              <button
-                type="button"
-                onClick={() => setEnrollMode("personal")}
-                style={enrollMode === "personal" ? btnPrimary : btnGhost}>
-                Usage personnel
-              </button>
-            </div>
-
-            {enrollMode === "org" ? (
-              <>
-                <label style={{ ...labelStyle, marginTop: 14 }}>
-                  Code organisation
-                </label>
-                <input
-                  value={orgCode}
-                  onChange={(e) => setOrgCode(e.target.value)}
-                  style={inputStyle}
-                  placeholder="DEMO-OPSGATE"
-                />
-              </>
-            ) : (
-              <>
-                <label style={{ ...labelStyle, marginTop: 14 }}>
-                  Clé de licence personnelle
-                </label>
-                <input
-                  value={personalLicenseKey}
-                  onChange={(e) => setPersonalLicenseKey(e.target.value)}
-                  style={inputStyle}
-                  placeholder="OPS-PERSONAL-DEMO-2026"
-                  autoComplete="off"
-                />
-                <p style={{ fontSize: 12, color: "#64748b", margin: "8px 0 0" }}>
-                  <strong>Management en local (pilot)</strong> : l’API locale (
-                  <code>pnpm api:dev</code>) + cette page Options. Pas encore de
-                  portal cloud. Clé démo :{" "}
-                  <code>OPS-PERSONAL-DEMO-2026</code>.
-                </p>
-              </>
-            )}
-
             <label style={{ ...labelStyle, marginTop: 14 }}>
-              Label appareil
+              Label appareil (commun)
             </label>
             <input
               value={deviceLabel}
@@ -377,20 +343,109 @@ function OptionsPage() {
               style={inputStyle}
               placeholder="mon-pc"
             />
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => void onEnroll()}
-              style={{ ...btnPrimary, marginTop: 16 }}>
-              {busy
-                ? "Enrolment…"
-                : enrollMode === "personal"
-                  ? "Activer le mode personnel"
-                  : "Enrôler cet appareil"}
-            </button>
+
+            {/* ── Parcours organisation (events console) ── */}
+            <div
+              style={{
+                marginTop: 18,
+                padding: 14,
+                borderRadius: 10,
+                border: "1px solid #cbd5e1",
+                background: "#f8fafc"
+              }}>
+              <strong style={{ fontSize: 14, color: "#0f172a" }}>
+                Organisation (équipe)
+              </strong>
+              <p style={{ fontSize: 12, color: "#64748b", margin: "6px 0 10px" }}>
+                Enrôlement <code>DEMO-OPSGATE</code> → events dans la{" "}
+                <strong>console admin</strong>, policy & packs partagés.
+              </p>
+              <label style={labelStyle}>Code organisation</label>
+              <input
+                value={orgCode}
+                onChange={(e) => setOrgCode(e.target.value)}
+                style={inputStyle}
+                placeholder="DEMO-OPSGATE"
+              />
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => void runEnroll("org")}
+                style={{ ...btnPrimary, marginTop: 12, width: "100%" }}>
+                {busy ? "Enrolment…" : "Enrôler dans l’organisation"}
+              </button>
+            </div>
+
+            {/* ── Parcours personnel (pas d’events cloud) ── */}
+            <div
+              style={{
+                marginTop: 12,
+                padding: 14,
+                borderRadius: 10,
+                border: "1px solid #99f6e4",
+                background: "#f0fdfa"
+              }}>
+              <strong style={{ fontSize: 14, color: "#134e4a" }}>
+                Usage personnel
+              </strong>
+              <p style={{ fontSize: 12, color: "#0f766e", margin: "6px 0 10px" }}>
+                Org <code>PERSONAL</code> — <strong>pas d’events</strong> vers la
+                console DEMO (privacy). Gestion ici + API locale.
+              </p>
+              <label style={labelStyle}>Clé de licence</label>
+              <input
+                value={personalLicenseKey}
+                onChange={(e) => setPersonalLicenseKey(e.target.value)}
+                style={inputStyle}
+                placeholder="OPS-PERSONAL-DEMO-2026"
+                autoComplete="off"
+              />
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => void runEnroll("personal")}
+                style={{
+                  ...btnGhost,
+                  marginTop: 12,
+                  width: "100%",
+                  borderColor: "#5eead4",
+                  color: "#0f766e"
+                }}>
+                {busy ? "Enrolment…" : "Activer le mode personnel"}
+              </button>
+            </div>
           </>
         ) : (
           <div>
+            <div
+              style={{
+                border: settings.personalAccount
+                  ? "1px solid #99f6e4"
+                  : "1px solid #bfdbfe",
+                background: settings.personalAccount ? "#f0fdfa" : "#eff6ff",
+                borderRadius: 10,
+                padding: "12px 14px",
+                marginBottom: 14,
+                fontSize: 13,
+                color: settings.personalAccount ? "#134e4a" : "#1e3a8a",
+                lineHeight: 1.5
+              }}>
+              <strong>
+                {settings.personalAccount
+                  ? "Mode personnel"
+                  : "Mode organisation"}
+              </strong>
+              <p style={{ margin: "6px 0 0" }}>
+                Org : <code>{settings.orgName || settings.orgId || "—"}</code>
+                {" · "}
+                Events cloud :{" "}
+                <strong>
+                  {settings.eventReporting ? "activés" : "désactivés"}
+                </strong>
+                {" · "}
+                Pack : <code>{settings.rulesPackVersion || "—"}</code>
+              </p>
+            </div>
             {settings.personalAccount && (
               <div
                 style={{
@@ -405,13 +460,14 @@ function OptionsPage() {
                 }}>
                 <strong>Abonnement personnel — console minimale</strong>
                 <p style={{ margin: "8px 0 0" }}>
-                  Il n’y a <em>pas</em> de console web dédiée pour l’instant.
-                  Tout se gère <strong>ici (Options)</strong> + l’API locale (
-                  <code>pnpm api:dev</code>) :
+                  Pas de console web DEMO pour ce mode. Pour remonter des events
+                  admin : désenrôlez puis utilisez{" "}
+                  <strong>Enrôler dans l’organisation</strong> (
+                  <code>DEMO-OPSGATE</code>).
                 </p>
                 <ul style={{ margin: "8px 0 0", paddingLeft: 18 }}>
                   <li>Sites surveillés / scan uploads (section bas de page)</li>
-                  <li>Sync des règles embarquées / pack PERSONAL</li>
+                  <li>Sync des règles / pack PERSONAL</li>
                   <li>État licence : {settings.licenseStatus || "licensed"}</li>
                   <li>
                     Label appareil :{" "}

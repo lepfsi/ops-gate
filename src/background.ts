@@ -203,10 +203,9 @@ async function handleMessage(message: OpsGateMessage): Promise<unknown> {
       return enrollAgent(
         message.orgCode,
         message.deviceLabel,
-        "personal" in message ? message.personal : undefined,
-        "personalLicenseKey" in message
-          ? message.personalLicenseKey
-          : undefined
+        // strict : seul true active le mode personnel
+        message.personal === true,
+        message.personal === true ? message.personalLicenseKey : undefined
       )
     }
 
