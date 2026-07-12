@@ -108,6 +108,9 @@ docker compose up -d
 # DATABASE_URL=postgres://opsgate:opsgate@127.0.0.1:5432/opsgate
 ```
 
+**Guide complet Docker + API + extension** : [`docs/GUIDE-STACK-LOCALE.md`](docs/GUIDE-STACK-LOCALE.md)  
+Runbook court : [`docs/RUNBOOK-OPS.md`](docs/RUNBOOK-OPS.md)
+
 Org démo : code **`DEMO-OPSGATE`**
 
 ## Spec produit

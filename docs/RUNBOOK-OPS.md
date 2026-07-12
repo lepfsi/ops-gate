@@ -1,5 +1,8 @@
 # OpsGate — Runbook ops (V1 / 1.2)
 
+> **Guide détaillé** (architecture, Docker ↔ extension, routine pilote) :  
+> [`GUIDE-STACK-LOCALE.md`](./GUIDE-STACK-LOCALE.md)
+
 ## Stack
 
 | Service | Port | Commande |
