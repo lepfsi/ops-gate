@@ -1,0 +1,53 @@
+{
+  "name": "ops-gate",
+  "displayName": "OpsGate",
+  "version": "1.1.0",
+  "description": "Protégez les données de votre entreprise dans chaque interaction avec l'IA.",
+  "author": "OpsGate",
+  "private": true,
+  "scripts": {
+    "dev": "plasmo dev",
+    "build": "plasmo build",
+    "package": "plasmo package",
+    "build:load": "plasmo build",
+    "test:rules": "node scripts/test-detection.mjs",
+    "test:events": "node scripts/test-event-schema.mjs",
+    "test": "pnpm test:rules",
+    "e2e": "node scripts/e2e-pilot.mjs",
+    "api:dev": "pnpm --filter @opsgate/api dev",
+    "api:start": "pnpm --filter @opsgate/api start",
+    "api:smoke": "node scripts/smoke-api.mjs",
+    "console:dev": "pnpm --filter @opsgate/console dev",
+    "console:build": "pnpm --filter @opsgate/console build",
+    "console:preview": "pnpm --filter @opsgate/console preview"
+  },
+  "dependencies": {
+    "@opsgate/engine": "workspace:*",
+    "plasmo": "0.90.5",
+    "react": "18.2.0",
+    "react-dom": "18.2.0"
+  },
+  "devDependencies": {
+    "@ianvs/prettier-plugin-sort-imports": "4.1.1",
+    "@types/chrome": "0.0.258",
+    "@types/node": "20.11.5",
+    "@types/react": "18.2.48",
+    "@types/react-dom": "18.2.18",
+    "prettier": "3.2.4",
+    "typescript": "5.3.3"
+  },
+  "manifest": {
+    "host_permissions": [
+      "https://chatgpt.com/*",
+      "https://chat.openai.com/*",
+      "https://claude.ai/*",
+      "https://gemini.google.com/*",
+      "http://127.0.0.1:8787/*",
+      "http://localhost:8787/*"
+    ],
+    "permissions": [
+      "storage",
+      "alarms"
+    ]
+  }
+}

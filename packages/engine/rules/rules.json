@@ -1,0 +1,349 @@
+[
+  {
+    "id": "aws-access-key",
+    "name": "AWS Access Key",
+    "category": "general",
+    "severity": "high",
+    "patterns": ["\\bAKIA[0-9A-Z]{16}\\b"],
+    "action_default": "mask",
+    "description": "Clé d'accès AWS (AKIA…)"
+  },
+  {
+    "id": "aws-secret-key",
+    "name": "AWS Secret Key",
+    "category": "general",
+    "severity": "high",
+    "patterns": ["(?i)aws[_\\-]?secret[_\\-]?(access[_\\-]?)?key[\\\"'\\s:=]+[A-Za-z0-9/+=]{40}"],
+    "keywords": ["aws_secret", "secretAccessKey"],
+    "action_default": "mask",
+    "description": "Secret AWS potentiel"
+  },
+  {
+    "id": "generic-api-key",
+    "name": "API Key / Token",
+    "category": "general",
+    "severity": "high",
+    "patterns": [
+      "(?i)\\b(api[_\\-]?key|apikey|access[_\\-]?token|auth[_\\-]?token|bearer)[\\\"'\\s:=]+[A-Za-z0-9_\\-.]{16,}",
+      "\\bsk-[A-Za-z0-9]{20,}\\b",
+      "\\bghp_[A-Za-z0-9]{36}\\b",
+      "\\bxox[baprs]-[A-Za-z0-9-]{10,}\\b"
+    ],
+    "action_default": "mask",
+    "description": "Clé API, token d'accès ou secret applicatif"
+  },
+  {
+    "id": "private-key",
+    "name": "Clé privée",
+    "category": "general",
+    "severity": "high",
+    "patterns": [
+      "-----BEGIN (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----"
+    ],
+    "action_default": "mask",
+    "description": "Bloc de clé privée PEM/OpenSSH"
+  },
+  {
+    "id": "password-assignment",
+    "name": "Mot de passe",
+    "category": "general",
+    "severity": "high",
+    "patterns": [
+      "(?i)\\b(password|passwd|pwd|mot[_\\-]?de[_\\-]?passe)\\s*[=:]\\s*['\\\"]?[^\\s'\\\"]{6,}"
+    ],
+    "action_default": "mask",
+    "description": "Affectation explicite d'un mot de passe"
+  },
+  {
+    "id": "email-address",
+    "name": "Adresse e-mail",
+    "category": "general",
+    "severity": "low",
+    "patterns": ["\\b[A-Za-z0-9._%+\\-]+@[A-Za-z0-9.\\-]+\\.[A-Za-z]{2,}\\b"],
+    "action_default": "warn",
+    "description": "Adresse e-mail (PII)"
+  },
+  {
+    "id": "iban",
+    "name": "IBAN",
+    "category": "general",
+    "severity": "high",
+    "patterns": ["\\b[A-Z]{2}\\d{2}[A-Z0-9]{10,30}\\b"],
+    "keywords": ["IBAN"],
+    "action_default": "mask",
+    "description": "Numéro IBAN bancaire"
+  },
+  {
+    "id": "credit-card",
+    "name": "Carte bancaire",
+    "category": "general",
+    "severity": "high",
+    "patterns": ["\\b(?:\\d[ -]*?){13,19}\\b"],
+    "keywords": ["visa", "mastercard", "carte bancaire", "credit card"],
+    "action_default": "mask",
+    "description": "Numéro de carte bancaire potentiel (13–19 chiffres)"
+  },
+  {
+    "id": "phone-fr",
+    "name": "Téléphone (FR/intl)",
+    "category": "general",
+    "severity": "low",
+    "patterns": [
+      "\\b(?:\\+33|0)\\s*[1-9](?:[\\s.\\-]*\\d{2}){4}\\b",
+      "\\b\\+\\d{1,3}[\\s.\\-]?\\(?\\d{1,4}\\)?[\\s.\\-]?\\d{3,4}[\\s.\\-]?\\d{3,4}\\b"
+    ],
+    "action_default": "warn",
+    "description": "Numéro de téléphone"
+  },
+  {
+    "id": "license-key",
+    "name": "Clé de licence",
+    "category": "general",
+    "severity": "medium",
+    "patterns": [
+      "(?i)\\b(license|licence|product)[_\\-]?key\\s*[=:]\\s*['\\\"]?[A-Z0-9\\-]{10,}",
+      "\\b[A-Z0-9]{4,5}(?:-[A-Z0-9]{4,5}){3,5}\\b"
+    ],
+    "action_default": "mask",
+    "description": "Clé de licence / activation logicielle"
+  },
+  {
+    "id": "fortinet-config",
+    "name": "Config Fortinet / FortiGate",
+    "category": "infra",
+    "severity": "high",
+    "patterns": [
+      "(?i)\\bconfig\\s+system\\s+(interface|admin|global|dns|ha)\\b",
+      "(?i)\\bconfig\\s+firewall\\s+(policy|address|service)\\b",
+      "(?i)\\bset\\s+(password|passwd|private-key|certificate)\\b",
+      "(?i)\\bedit\\s+[\"']?port\\d+"
+    ],
+    "keywords": ["fortigate", "fortinet", "config system", "config firewall"],
+    "action_default": "mask",
+    "description": "Extrait de configuration Fortinet/FortiGate"
+  },
+  {
+    "id": "cisco-config",
+    "name": "Config Cisco IOS/NX-OS",
+    "category": "infra",
+    "severity": "high",
+    "patterns": [
+      "(?i)\\benable\\s+secret\\b",
+      "(?i)\\busername\\s+\\S+\\s+privilege\\s+\\d+\\s+secret\\b",
+      "(?i)\\bcrypto\\s+isakmp\\s+key\\b",
+      "(?i)\\binterface\\s+(GigabitEthernet|FastEthernet|Ethernet|Vlan)\\S*",
+      "(?i)\\bip\\s+route\\s+\\d+\\.\\d+\\.\\d+\\.\\d+"
+    ],
+    "keywords": ["cisco", "ios-xe", "nx-os", "running-config"],
+    "action_default": "mask",
+    "description": "Extrait de configuration Cisco"
+  },
+  {
+    "id": "juniper-config",
+    "name": "Config Juniper Junos",
+    "category": "infra",
+    "severity": "high",
+    "patterns": [
+      "(?i)\\bset\\s+system\\s+root-authentication\\b",
+      "(?i)\\bset\\s+interfaces\\s+\\S+\\s+unit\\s+\\d+",
+      "(?i)\\bset\\s+security\\s+(policies|zones|ike|ipsec)\\b",
+      "(?i)\\bset\\s+routing-options\\b"
+    ],
+    "keywords": ["junos", "juniper", "root-authentication"],
+    "action_default": "mask",
+    "description": "Extrait de configuration Juniper Junos"
+  },
+  {
+    "id": "network-credentials",
+    "name": "Credentials réseau / SNMP",
+    "category": "infra",
+    "severity": "high",
+    "patterns": [
+      "(?i)\\bsnmp[_\\-]?community\\s+\\S+",
+      "(?i)\\b(community|shared[_\\-]?secret|pre[_\\-]?shared[_\\-]?key|psk)\\s*[=:]\\s*\\S+",
+      "(?i)\\bradius[_\\-]?(secret|key)\\s*[=:]\\s*\\S+"
+    ],
+    "action_default": "mask",
+    "description": "Secrets SNMP, RADIUS, PSK"
+  },
+  {
+    "id": "ip-private-block",
+    "name": "Adresses IP privées (contexte infra)",
+    "category": "infra",
+    "severity": "low",
+    "patterns": [
+      "\\b(?:10\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}|192\\.168\\.\\d{1,3}\\.\\d{1,3}|172\\.(?:1[6-9]|2\\d|3[0-1])\\.\\d{1,3}\\.\\d{1,3})\\b"
+    ],
+    "keywords": ["firewall", "vlan", "gateway", "subnet", "interface"],
+    "action_default": "warn",
+    "description": "IP privées (souvent dans une config réseau)"
+  },
+  {
+    "id": "connection-string",
+    "name": "Chaîne de connexion / URL secrète",
+    "category": "general",
+    "severity": "high",
+    "patterns": [
+      "(?i)\\b(mongodb|postgres|postgresql|mysql|redis|amqp):\\/\\/[^\\s]+:[^\\s]+@",
+      "(?i)\\bjdbc:[a-z0-9]+:[^\\s]+",
+      "(?i)\\bAccountKey=[A-Za-z0-9+/=]{20,}"
+    ],
+    "action_default": "mask",
+    "description": "URL de connexion avec credentials intégrés"
+  },
+  {
+    "id": "huawei-vrp-config",
+    "name": "Config Huawei VRP / CloudEngine",
+    "category": "infra",
+    "severity": "high",
+    "patterns": [
+      "(?i)\\bsystem-view\\b",
+      "(?i)\\binterface\\s+GigabitEthernet\\s*\\d+/\\d+/\\d+",
+      "(?i)\\bip\\s+address\\s+\\d+\\.\\d+\\.\\d+\\.\\d+\\s+\\d+\\.\\d+\\.\\d+\\.\\d+",
+      "(?i)\\baaa\\s*$",
+      "(?i)\\blocal-user\\s+\\S+\\s+password",
+      "(?i)\\bdisplay\\s+current-configuration\\b"
+    ],
+    "keywords": ["huawei", "vrp", "cloudengine", "system-view", "local-user"],
+    "action_default": "mask",
+    "description": "Extrait de configuration Huawei VRP / CloudEngine"
+  },
+  {
+    "id": "mikrotik-routeros",
+    "name": "Config MikroTik RouterOS",
+    "category": "infra",
+    "severity": "high",
+    "patterns": [
+      "(?i)(?:^|[\\s;])/ip\\s+address\\s+add\\b",
+      "(?i)(?:^|[\\s;])/interface\\s+(bridge|vlan|ethernet)\\b",
+      "(?i)(?:^|[\\s;])/user\\s+add\\s+name=",
+      "(?i)(?:^|[\\s;])/ppp\\s+secret\\s+add\\b",
+      "(?i)(?:^|[\\s;])/ip\\s+firewall\\s+(filter|nat)\\b",
+      "(?i)\\bpassword=\"[^\"]+\""
+    ],
+    "keywords": ["mikrotik", "routeros", "/ip address", "/ppp secret"],
+    "action_default": "mask",
+    "description": "Extrait de configuration MikroTik RouterOS"
+  },
+  {
+    "id": "palo-alto-config",
+    "name": "Config Palo Alto Networks",
+    "category": "infra",
+    "severity": "high",
+    "patterns": [
+      "(?i)\\bset\\s+deviceconfig\\s+system\\b",
+      "(?i)\\bset\\s+network\\s+interface\\b",
+      "(?i)\\bset\\s+rulebase\\s+security\\s+rules\\b",
+      "(?i)\\bset\\s+shared\\s+certificate\\b",
+      "(?i)\\bconfigure\\s*$",
+      "(?i)\\bset\\s+mgt-config\\s+users\\b"
+    ],
+    "keywords": ["palo alto", "pan-os", "panos", "deviceconfig", "rulebase"],
+    "action_default": "mask",
+    "description": "Extrait de configuration Palo Alto PAN-OS"
+  },
+  {
+    "id": "pfsense-opnsense",
+    "name": "Config pfSense / OPNsense",
+    "category": "infra",
+    "severity": "high",
+    "patterns": [
+      "(?i)\\b<pfsense>\\b",
+      "(?i)\\b<opnsense>\\b",
+      "(?i)\\b<gateway_item>\\b",
+      "(?i)\\b<filter>\\s*<rule>",
+      "(?i)\\b<ipsec>\\b",
+      "(?i)\\b<shared_key>[^<]{8,}</shared_key>"
+    ],
+    "keywords": ["pfsense", "opnsense", "gateway_item", "shared_key"],
+    "action_default": "mask",
+    "description": "Export XML / config pfSense ou OPNsense"
+  },
+  {
+    "id": "wireguard-openvpn",
+    "name": "Config WireGuard / OpenVPN",
+    "category": "infra",
+    "severity": "high",
+    "patterns": [
+      "(?i)\\b\\[Interface\\][\\s\\S]{0,200}PrivateKey\\s*=",
+      "(?i)\\bPrivateKey\\s*=\\s*[A-Za-z0-9+/=]{20,}",
+      "(?i)\\b\\[Peer\\][\\s\\S]{0,120}AllowedIPs\\s*=",
+      "(?i)\\b-----BEGIN\\s+OpenVPN\\s+Static\\s+key",
+      "(?i)\\bremote\\s+\\S+\\s+\\d{2,5}\\b",
+      "(?i)\\bauth-user-pass\\b"
+    ],
+    "keywords": ["wireguard", "openvpn", "PrivateKey", "AllowedIPs", "auth-user-pass"],
+    "action_default": "mask",
+    "description": "Clés ou configs VPN WireGuard / OpenVPN"
+  },
+  {
+    "id": "azure-secrets",
+    "name": "Secrets Azure",
+    "category": "general",
+    "severity": "high",
+    "patterns": [
+      "(?i)\\bDefaultEndpointsProtocol=https;AccountName=[^;]+;AccountKey=[A-Za-z0-9+/=]{20,}",
+      "(?i)\\b(ClientSecret|AZURE_CLIENT_SECRET|client_secret)\\s*[=:]\\s*['\\\"]?[A-Za-z0-9\\-._~]{8,}",
+      "(?i)\\b(TenantId|AZURE_TENANT_ID)\\s*[=:]\\s*['\\\"]?[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
+      "\\b[a-z0-9]{8}-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{12}\\.(?:vault\\.azure\\.net)\\b"
+    ],
+    "keywords": ["azure", "AccountKey", "ClientSecret", "vault.azure.net"],
+    "action_default": "mask",
+    "description": "Connection string / secrets Azure"
+  },
+  {
+    "id": "gcp-service-account",
+    "name": "Compte de service GCP",
+    "category": "general",
+    "severity": "high",
+    "patterns": [
+      "(?i)\"type\"\\s*:\\s*\"service_account\"",
+      "(?i)\"private_key_id\"\\s*:\\s*\"[a-f0-9]{10,}\"",
+      "(?i)\"private_key\"\\s*:\\s*\"-----BEGIN",
+      "(?i)\\bAIza[0-9A-Za-z\\-_]{35}"
+    ],
+    "keywords": ["service_account", "private_key", "googleapis", "gcp"],
+    "action_default": "mask",
+    "description": "JSON compte de service Google Cloud / clé API AIza"
+  },
+  {
+    "id": "stripe-keys",
+    "name": "Clés Stripe",
+    "category": "general",
+    "severity": "high",
+    "patterns": [
+      "\\bsk_live_[0-9a-zA-Z]{20,}\\b",
+      "\\brk_live_[0-9a-zA-Z]{20,}\\b",
+      "\\bpk_live_[0-9a-zA-Z]{20,}\\b",
+      "\\bsk_test_[0-9a-zA-Z]{20,}\\b"
+    ],
+    "action_default": "mask",
+    "description": "Clés secrètes / publishable Stripe"
+  },
+  {
+    "id": "jwt-token",
+    "name": "JWT / Bearer long",
+    "category": "general",
+    "severity": "medium",
+    "patterns": [
+      "\\beyJ[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}\\b"
+    ],
+    "action_default": "mask",
+    "description": "JSON Web Token (session / auth)"
+  },
+  {
+    "id": "arista-eos",
+    "name": "Config Arista EOS",
+    "category": "infra",
+    "severity": "high",
+    "patterns": [
+      "(?i)\\busername\\s+\\S+\\s+privilege\\s+\\d+\\s+secret\\b",
+      "(?i)\\binterface\\s+Ethernet\\d+",
+      "(?i)\\bip\\s+routing\\b",
+      "(?i)\\bmanagement\\s+api\\s+http-commands\\b"
+    ],
+    "keywords": ["arista", "eos", "Ethernet", "management api"],
+    "action_default": "mask",
+    "description": "Extrait de configuration Arista EOS"
+  }
+]

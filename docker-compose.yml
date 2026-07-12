@@ -1,0 +1,25 @@
+# OpsGate local Postgres (PR5)
+# Usage: docker compose up -d
+# Then:  set DATABASE_URL=postgres://opsgate:opsgate@127.0.0.1:5432/opsgate
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: opsgate-postgres
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: opsgate
+      POSTGRES_PASSWORD: opsgate
+      POSTGRES_DB: opsgate
+    volumes:
+      - opsgate_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U opsgate -d opsgate"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  opsgate_pg_data:

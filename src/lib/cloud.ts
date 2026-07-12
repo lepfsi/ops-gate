@@ -1,0 +1,409 @@
+import type { DetectionRule } from "@opsgate/engine"
+
+import {
+  getSettings,
+  setCachedRulesPack,
+  setSettings
+} from "~lib/agent-store"
+import { fetchApiPublicKey, verifyRulesPack } from "~lib/pack-verify"
+import type { CachedRulesPack, OpsGateSettings } from "~types"
+
+export interface EnrollResponse {
+  agent_id: string
+  agent_token: string
+  org_id: string
+  org_name?: string
+  mode: string
+  rules_pack_version?: string
+  policy_etag?: string
+}
+
+export interface ConfigResponse {
+  etag?: string
+  org: {
+    id: string
+    name: string
+    mode: string
+    event_payload_policy?: string
+    personal?: boolean
+  }
+  policy: {
+    version: number
+    config_epoch?: number
+    default_action: string
+    enabled_hosts: string[]
+    scan_uploads: boolean
+    event_reporting: boolean
+    rules_pack_version: string
+    protect_unenroll?: boolean
+    require_unenroll_password?: boolean
+    admin_credentials?: Array<{
+      id: string
+      label: string
+      email?: string
+      password_hash: string
+    }>
+    management_password_hash?: string
+    recovery_password_hash?: string
+    recovery_offline_after_ms?: number
+    profile_id?: string | null
+    profile_name?: string | null
+    department?: string | null
+    licensed?: boolean
+    unlicensed_since?: string | null
+    license_grace_ms?: number
+    security_active?: boolean
+    license_status?: "licensed" | "grace" | "unlicensed"
+    updated_at: string
+  }
+  rules_pack: {
+    version: string
+    checksum: string
+    signature?: string
+    rules: DetectionRule[]
+    notes?: string
+  }
+}
+
+const EVENT_QUEUE_KEY = "opsGateEventQueue"
+const MAX_QUEUE = 80
+
+function apiUrl(base: string, path: string): string {
+  return `${base.replace(/\/$/, "")}${path}`
+}
+
+async function getEventQueue(): Promise<Record<string, unknown>[]> {
+  const data = await chrome.storage.local.get(EVENT_QUEUE_KEY)
+  return (data[EVENT_QUEUE_KEY] as Record<string, unknown>[]) || []
+}
+
+async function setEventQueue(events: Record<string, unknown>[]) {
+  await chrome.storage.local.set({
+    [EVENT_QUEUE_KEY]: events.slice(-MAX_QUEUE)
+  })
+}
+
+async function enqueueEvents(events: Record<string, unknown>[]) {
+  const q = await getEventQueue()
+  await setEventQueue([...q, ...events])
+}
+
+/** Révoque le token courant + audit exit_actor (best-effort) */
+export async function revokeCurrentAgent(exit?: {
+  type: "admin" | "vendor_recovery" | "free"
+  adminId?: string
+  adminLabel?: string
+}): Promise<boolean> {
+  const settings = await getSettings()
+  if (!settings.agentToken || !settings.apiBaseUrl) return false
+  try {
+    const res = await fetch(apiUrl(settings.apiBaseUrl, "/v1/agents/me/revoke"), {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${settings.agentToken}`,
+        accept: "application/json",
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        exit_actor: exit?.type || "free",
+        admin_id: exit?.adminId,
+        admin_label: exit?.adminLabel
+      })
+    })
+    return res.ok
+  } catch {
+    return false
+  }
+}
+
+export async function enrollAgent(
+  orgCode: string,
+  deviceLabel?: string,
+  personal?: boolean,
+  personalLicenseKey?: string
+): Promise<{ ok: true; settings: OpsGateSettings } | { ok: false; error: string }> {
+  const settings = await getSettings()
+  const base = settings.apiBaseUrl
+
+  try {
+    if (settings.agentToken) {
+      await revokeCurrentAgent()
+    }
+
+    const res = await fetch(apiUrl(base, "/v1/enroll"), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        org_code: personal ? "PERSONAL" : orgCode.trim(),
+        personal: !!personal,
+        device_label: deviceLabel || "browser-extension",
+        personal_license_key: personal
+          ? personalLicenseKey?.trim()
+          : undefined,
+        app_version: chrome.runtime.getManifest().version
+      })
+    })
+    const body = (await res.json()) as EnrollResponse & {
+      error?: string
+      replaced?: boolean
+    }
+    if (!res.ok) {
+      return { ok: false, error: body.error || `http_${res.status}` }
+    }
+    if (!body.agent_token || !body.agent_id) {
+      return { ok: false, error: "invalid_enroll_response" }
+    }
+
+    const next = await setSettings({
+      mode: (body.mode as OpsGateSettings["mode"]) || "org_managed",
+      orgId: body.org_id,
+      orgName: body.org_name,
+      agentId: body.agent_id,
+      agentToken: body.agent_token,
+      deviceLabel: deviceLabel || "browser-extension",
+      personalAccount: !!personal,
+      lastSyncError: undefined
+    })
+
+    const sync = await syncConfig(next)
+    if (!sync.ok) {
+      return { ok: false, error: `enrolled_but_sync_failed:${sync.error}` }
+    }
+    return { ok: true, settings: sync.settings }
+  } catch (e) {
+    return { ok: false, error: String(e) }
+  }
+}
+
+export async function syncConfig(
+  settingsOverride?: OpsGateSettings
+): Promise<
+  | { ok: true; settings: OpsGateSettings; pack: CachedRulesPack }
+  | {
+      ok: false
+      error: string
+      recovered?: boolean
+      requiresAdminPassword?: boolean
+      settings?: OpsGateSettings
+    }
+> {
+  const settings = settingsOverride || (await getSettings())
+  if (!settings.agentToken) {
+    return { ok: false, error: "not_enrolled" }
+  }
+
+  try {
+    const res = await fetch(apiUrl(settings.apiBaseUrl, "/v1/agents/me/config"), {
+      headers: {
+        Authorization: `Bearer ${settings.agentToken}`,
+        Accept: "application/json"
+      }
+    })
+
+    if (res.status === 401 || res.status === 403) {
+      const next = await setSettings({
+        lastSyncError: "invalid_token"
+      })
+      const needsPwd = !!(
+        settings.managementPasswordHash &&
+        settings.managementPasswordHash.trim().length > 0
+      )
+      return {
+        ok: false,
+        error: "invalid_token",
+        requiresAdminPassword: needsPwd,
+        settings: next
+      }
+    }
+    if (!res.ok) {
+      const err = `http_${res.status}`
+      await setSettings({ lastSyncError: err })
+      return { ok: false, error: err, settings }
+    }
+
+    const body = (await res.json()) as ConfigResponse
+
+    const pubKey = await fetchApiPublicKey(settings.apiBaseUrl)
+    const verified = await verifyRulesPack({
+      rules: body.rules_pack.rules,
+      checksum: body.rules_pack.checksum,
+      signature: body.rules_pack.signature,
+      publicKeySpkiBase64: pubKey
+    })
+    if (!verified.ok) {
+      const err = `pack_verify_failed:${verified.error}`
+      await setSettings({ lastSyncError: err })
+      const needsPwd = !!(
+        settings.managementPasswordHash &&
+        settings.managementPasswordHash.trim().length > 0
+      )
+      return {
+        ok: false,
+        error: err,
+        requiresAdminPassword: needsPwd,
+        settings
+      }
+    }
+
+    const pack: CachedRulesPack = {
+      version: body.rules_pack.version,
+      checksum: body.rules_pack.checksum,
+      signature: body.rules_pack.signature,
+      rules: body.rules_pack.rules,
+      syncedAt: Date.now()
+    }
+    await setCachedRulesPack(pack)
+
+    const hosts =
+      body.policy.enabled_hosts?.length > 0
+        ? body.policy.enabled_hosts
+        : settings.enabledHosts
+
+    const adminCredentials = (body.policy.admin_credentials || [])
+      .filter((a) => a.password_hash?.trim())
+      .map((a) => ({
+        id: a.id,
+        label: a.label,
+        email: a.email,
+        passwordHash: a.password_hash.trim()
+      }))
+    const rawHash = (body.policy.management_password_hash || "").trim()
+    const mgmtHash =
+      adminCredentials[0]?.passwordHash ||
+      (rawHash.length > 0 ? rawHash : undefined)
+    const rawRecovery = (body.policy.recovery_password_hash || "").trim()
+    const recoveryHash = rawRecovery.length > 0 ? rawRecovery : undefined
+    const requireUnenroll = !!body.policy.require_unenroll_password
+    const protectUnenroll = !!body.policy.protect_unenroll
+
+    const next = await setSettings({
+      mode: (body.org.mode as OpsGateSettings["mode"]) || settings.mode,
+      orgId: body.org.id,
+      orgName: body.org.name,
+      personalAccount:
+        body.org.personal === true || settings.personalAccount === true,
+      rulesPackVersion: pack.version,
+      rulesPackChecksum: pack.checksum,
+      eventReporting: body.policy.event_reporting !== false,
+      scanUploads: body.policy.scan_uploads !== false,
+      enabledHosts: hosts,
+      enabled: true,
+      lastRulesSyncAt: pack.syncedAt,
+      lastSyncError: undefined,
+      managedLockActive: !body.org.personal,
+      managementPasswordHash: mgmtHash,
+      adminCredentials:
+        adminCredentials.length > 0 ? adminCredentials : undefined,
+      requireUnenrollPassword: requireUnenroll,
+      protectUnenroll,
+      recoveryPasswordHash: recoveryHash,
+      recoveryOfflineAfterMs:
+        body.policy.recovery_offline_after_ms || 2 * 60 * 60 * 1000,
+      configEpoch: body.policy.config_epoch,
+      policyProfileId: body.policy.profile_id || undefined,
+      policyProfileName: body.policy.profile_name || undefined,
+      licensed: body.policy.licensed !== false,
+      licenseStatus: body.policy.license_status || "licensed",
+      unlicensedSince: body.policy.unlicensed_since
+        ? Date.parse(body.policy.unlicensed_since)
+        : undefined,
+      licenseGraceMs: body.policy.license_grace_ms || 5 * 60 * 1000,
+      securityActive: body.policy.security_active !== false,
+      // Si unlicensed après grace → désactive la protection locale
+      enabled:
+        body.policy.security_active === false
+          ? false
+          : body.policy.license_status === "unlicensed"
+            ? false
+            : true
+    })
+
+    // Après sync OK, vider la file d'events en attente
+    void flushEventQueue(next)
+
+    return { ok: true, settings: next, pack }
+  } catch (e) {
+    const error = String(e)
+    await setSettings({ lastSyncError: error })
+    return { ok: false, error }
+  }
+}
+
+/**
+ * Envoie un batch d'events. En cas d'échec → file locale pour retry.
+ */
+export async function reportEvents(
+  events: Record<string, unknown>[]
+): Promise<boolean> {
+  const settings = await getSettings()
+  if (
+    settings.mode === "local_only" ||
+    !settings.agentToken ||
+    !settings.eventReporting ||
+    events.length === 0
+  ) {
+    return false
+  }
+
+  try {
+    const res = await fetch(apiUrl(settings.apiBaseUrl, "/v1/events/batch"), {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${settings.agentToken}`,
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({ events })
+    })
+    if (!res.ok) {
+      const text = await res.text().catch(() => "")
+      await enqueueEvents(events)
+      await setSettings({
+        lastEventError: `http_${res.status}${text ? ":" + text.slice(0, 80) : ""}`
+      })
+      return false
+    }
+    await setSettings({ lastEventError: undefined })
+    return true
+  } catch (e) {
+    await enqueueEvents(events)
+    await setSettings({ lastEventError: String(e) })
+    return false
+  }
+}
+
+/** Flush file d'attente events (auto-sync / alarm) */
+export async function flushEventQueue(
+  settingsOverride?: OpsGateSettings
+): Promise<number> {
+  const settings = settingsOverride || (await getSettings())
+  if (
+    settings.mode === "local_only" ||
+    !settings.agentToken ||
+    !settings.eventReporting
+  ) {
+    return 0
+  }
+  const q = await getEventQueue()
+  if (q.length === 0) return 0
+
+  try {
+    const res = await fetch(apiUrl(settings.apiBaseUrl, "/v1/events/batch"), {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${settings.agentToken}`,
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({ events: q })
+    })
+    if (res.ok) {
+      await setEventQueue([])
+      await setSettings({ lastEventError: undefined })
+      return q.length
+    }
+    await setSettings({ lastEventError: `flush_http_${res.status}` })
+    return 0
+  } catch (e) {
+    await setSettings({ lastEventError: String(e) })
+    return 0
+  }
+}

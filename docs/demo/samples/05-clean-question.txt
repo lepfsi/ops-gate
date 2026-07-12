@@ -1,0 +1,5 @@
+# OpsGate DEMO — fichier propre (aucune alerte attendue)
+
+Question pour l'IA :
+Peux-tu résumer les bonnes pratiques pour documenter une policy firewall
+sans y coller les mots de passe ni les clés en clair ?
