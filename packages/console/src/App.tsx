@@ -304,7 +304,8 @@ export default function App() {
           <strong>{health}</strong>
         </span>
         {primaryEmail ? <span>Install · {primaryEmail}</span> : null}
-        <span>Control plane · pilot local</span>
+        <span className="badge-v1">V1 · 1.2</span>
+        <span>Control plane</span>
       </div>
 
       {error && <p className="err flash err">{error}</p>}
@@ -313,12 +314,12 @@ export default function App() {
       <nav className="tabs">
         {(
           [
-            ["summary", "Summary"],
+            ["summary", "Tableau de bord"],
             ["policy", "Policy"],
-            ["people", "Admins & Groups"],
-            ["packs", "Rule packs"],
+            ["people", "Admins & groupes"],
+            ["packs", "Packs de règles"],
             ["agents", "Agents"],
-            ["events", "Events"]
+            ["events", "Événements"]
           ] as const
         ).map(([id, label]) => (
           <button
@@ -455,6 +456,11 @@ export default function App() {
         />
       )}
       {tab === "events" && <EventsView events={events} />}
+
+      <footer className="console-footer">
+        OpsGate Console <strong>1.2.0</strong> · early customer · privacy by
+        design (events metadata-only)
+      </footer>
     </div>
   )
 }
@@ -572,30 +578,33 @@ function SummaryView({
 
   return (
     <>
-      <div className="card">
-        <h2>Push policy → agents</h2>
-        <p className="muted">
-          Les agents pollent toutes les ~15 min. Force-sync pour rechargement
-          immédiat (epoch).
-        </p>
+      <div className="hero-card card">
+        <div className="hero-copy">
+          <p className="hero-kicker">OpsGate Console · V1</p>
+          <h2>Vue d&apos;ensemble</h2>
+          <p className="muted">
+            Agents protégés, events metadata-only, packs de règles versionnés.
+            Force-sync pour pousser policy / mdp / profils (poll agent ~2&nbsp;min).
+          </p>
+        </div>
         <button
           className="btn"
           type="button"
           disabled={busy}
           onClick={onForceSync}>
-          Forcer la synchronisation des agents
+          Forcer la synchronisation
         </button>
       </div>
 
       <div className="card">
-        <h2>Vue d’ensemble — org démo</h2>
+        <h2>Indicateurs</h2>
         <div className="grid">
           <div className="stat">
             <div className="label">Agents</div>
             <div className="value">{summary.agents}</div>
           </div>
           <div className="stat">
-            <div className="label">Events</div>
+            <div className="label">Événements</div>
             <div className="value">{summary.events_total}</div>
           </div>
           <div className="stat">
@@ -613,29 +622,38 @@ function SummaryView({
                 : ""}
             </div>
           </div>
+          {typeof summary.admins_count === "number" ? (
+            <div className="stat">
+              <div className="label">Admins</div>
+              <div className="value">{summary.admins_count}</div>
+            </div>
+          ) : null}
         </div>
       </div>
 
       <div className="card">
         <h2>Décisions utilisateur</h2>
         <p className="muted">
-          Cliquez une décision pour voir les agents / hôtes concernés.
+          Cliquez une décision pour voir les agents / sites concernés.
         </p>
         <div className="decision-grid">
-          {[
-            "mask_send",
-            "send_anyway",
-            "cancel",
-            "enroll",
-            "unenroll"
-          ].map((k) => (
+          {(
+            [
+              ["mask_send", "Masquer & envoyer"],
+              ["send_anyway", "Envoyer quand même"],
+              ["cancel", "Annuler"],
+              ["enroll", "Enrôlement"],
+              ["unenroll", "Désinscription"]
+            ] as const
+          ).map(([k, label]) => (
             <button
               key={k}
               type="button"
               className={`decision-btn ${drill === k ? "is-active" : ""}`}
               onClick={() => void openDecision(k)}>
-              <div className="decision-key">{k}</div>
+              <div className="decision-key">{label}</div>
               <div className="decision-count">{decisions[k] || 0}</div>
+              <div className="decision-code mono">{k}</div>
             </button>
           ))}
         </div>
@@ -761,11 +779,15 @@ function LoginScreen({
           </div>
           <div>
             <h1>OpsGate</h1>
-            <p>Control plane · connexion sécurisée</p>
+            <p>Console admin · V1</p>
           </div>
         </div>
         <p className="muted" style={{ marginTop: 0 }}>
-          Setup local : <code>admin@demo.local</code> / <code>0000</code>
+          Démo locale : <code>admin@demo.local</code> / <code>0000</code>
+          <br />
+          <span className="muted" style={{ fontSize: 12 }}>
+            Changez le mot de passe à la première connexion (pilote externe).
+          </span>
         </p>
         <label className="field-label">API</label>
         <div className="row">

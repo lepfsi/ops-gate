@@ -17,6 +17,7 @@
     "api:dev": "pnpm --filter @opsgate/api dev",
     "api:start": "pnpm --filter @opsgate/api start",
     "api:smoke": "node scripts/smoke-api.mjs",
+    "api:validate-pg": "node scripts/validate-pg-restart.mjs",
     "console:dev": "pnpm --filter @opsgate/console dev",
     "console:build": "pnpm --filter @opsgate/console build",
     "console:preview": "pnpm --filter @opsgate/console preview"

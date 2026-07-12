@@ -43,7 +43,7 @@ La **V1 produit** rend OpsGate **opérable pour un premier client** (10–50 si�
 - [x] ≥ 6 hosts IA injectés (8 : ChatGPT, Claude, Gemini, Copilot, Perplexity, DeepSeek, AI Studio, Bing chat)
 - [x] `pnpm test` · `pnpm api:smoke` · `pnpm e2e` verts (memory)
 - [x] Runbook + RELEASE-v1 documentés
-- [ ] Validation manuelle Postgres restart (docker) — recommandé avant client réel
+- [x] Validation Postgres restart (`pnpm api:validate-pg` — admins + sessions + epoch survivants)
 
 ## Lancer
 

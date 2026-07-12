@@ -74,6 +74,9 @@ export type Summary = {
     checksum: string
   } | null
   packs_published: number
+  admins_count?: number
+  groups_count?: number
+  users_count?: number
 }
 
 export type PackListItem = {

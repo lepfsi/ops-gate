@@ -50,6 +50,15 @@ Tables durables : organizations, policies, policy_profiles, org_admins, admin_se
 
 Restart API **conserve** admins, sessions, profils, licences et events.
 
+### Valider un restart (go client)
+
+```bash
+docker compose up -d
+# DATABASE_URL=postgres://opsgate:opsgate@127.0.0.1:5432/opsgate
+pnpm api:validate-pg
+# → PASS: Postgres control plane survives API restart
+```
+
 ## Incidents
 
 | Symptôme | Action |
