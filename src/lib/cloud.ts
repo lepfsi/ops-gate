@@ -293,7 +293,11 @@ export async function syncConfig(
       personalAccount: body.org.personal === true,
       rulesPackVersion: pack.version,
       rulesPackChecksum: pack.checksum,
-      eventReporting: body.policy.event_reporting === true,
+      // true par défaut pour org ; false seulement si policy coupe
+      eventReporting:
+        body.org.personal === true
+          ? false
+          : body.policy.event_reporting !== false,
       scanUploads: body.policy.scan_uploads !== false,
       enabledHosts: hosts,
       lastRulesSyncAt: pack.syncedAt,
@@ -347,7 +351,8 @@ export async function reportEvents(
   if (
     settings.mode === "local_only" ||
     !settings.agentToken ||
-    !settings.eventReporting ||
+    settings.personalAccount === true ||
+    settings.eventReporting === false ||
     events.length === 0
   ) {
     return false
@@ -387,7 +392,8 @@ export async function flushEventQueue(
   if (
     settings.mode === "local_only" ||
     !settings.agentToken ||
-    !settings.eventReporting
+    settings.personalAccount === true ||
+    settings.eventReporting === false
   ) {
     return 0
   }

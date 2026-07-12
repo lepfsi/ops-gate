@@ -144,6 +144,10 @@ Onglets principaux :
 | Stop + supprimer conteneur | `docker compose down` | Volume **conservé** par défaut |
 | **Wipe total** DB | `docker compose down -v` | **Efface** orgs, agents, events, admins |
 
+> **Oui, la mémoire est devenue persistante** dès que l’API tourne avec `DATABASE_URL` + Docker.  
+> Un agent créé par un test API (`test-org-enroll`, `events-fix-test`, …) **reste** en base jusqu’à révocation console ou `DELETE` / wipe volume.  
+> Ce n’est pas l’extension qui s’auto-enrôle toute seule.
+
 ### 2.6 Valider la durabilité (go client)
 
 ```powershell

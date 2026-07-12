@@ -31,18 +31,49 @@ function OptionsPage() {
     void load()
   }, [load])
 
+  // À l’ouverture Options, resync policy si déjà enrollé (corrige flags events / personal)
+  useEffect(() => {
+    if (!settings.agentToken || !settings.orgId) return
+    let cancelled = false
+    void (async () => {
+      try {
+        const res = await chrome.runtime.sendMessage({ type: "SYNC_NOW" })
+        if (!cancelled && res?.ok && res.settings) {
+          setSettings(res.settings)
+        }
+      } catch {
+        /* ignore */
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+    // une fois au mount / quand agent change
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settings.agentId])
+
   const enrolled = !!(settings.agentToken && settings.orgId)
+  /**
+   * UI exclusive : si lock org actif, on n’affiche jamais le panneau personnel
+   * (évite sticky personalAccount=true + managedLock en même temps).
+   */
+  const isPersonalUi =
+    enrolled &&
+    settings.personalAccount === true &&
+    !settings.managedLockActive
+  const isOrgUi = enrolled && !isPersonalUi
   /** Lock fort = au moins un sync org réussi (policies non modifiables) */
-  const hardLock = !!settings.managedLockActive
-  /** Soft lock = enrôlé mais pas encore de sync OK */
-  const softLock = enrolled && !hardLock
+  const hardLock = !!settings.managedLockActive && isOrgUi
+  /** Soft lock = enrôlé org mais pas encore de sync OK */
+  const softLock = isOrgUi && !settings.managedLockActive
   const locked = hardLock || softLock
   /** Mdp de sortie si policy protégée + admins configurés (flag sync API) */
   const exitPasswordRequired = !!(
-    settings.requireUnenrollPassword ||
-    (settings.protectUnenroll &&
-      (settings.adminCredentials?.length ||
-        settings.managementPasswordHash?.trim()))
+    isOrgUi &&
+    (settings.requireUnenrollPassword ||
+      (settings.protectUnenroll &&
+        (settings.adminCredentials?.length ||
+          settings.managementPasswordHash?.trim())))
   )
 
   const persistLocal = async (next: OpsGateSettings) => {
@@ -268,7 +299,7 @@ function OptionsPage() {
           L’admin doit assigner un siège licence à cet appareil.
         </div>
       )}
-      {hardLock && settings.licenseStatus !== "unlicensed" && (
+      {isOrgUi && hardLock && settings.licenseStatus !== "unlicensed" && (
         <div
           style={{
             border: "1px solid #fca5a5",
@@ -281,7 +312,7 @@ function OptionsPage() {
             lineHeight: 1.45
           }}>
           <strong>Protection endpoint active</strong> (modèle Kaspersky / Check
-          Point).
+          Point) — mode <strong>organisation</strong>.
           <ul style={{ margin: "8px 0 0", paddingLeft: 18 }}>
             <li>Policies non modifiables par l’utilisateur</li>
             <li>
@@ -293,6 +324,12 @@ function OptionsPage() {
             <li>
               Hors ligne : dernière policy reste appliquée (pas de contournement
               via token mort)
+            </li>
+            <li>
+              Events console :{" "}
+              {settings.eventReporting === false
+                ? "désactivés (policy)"
+                : "activés"}
             </li>
           </ul>
         </div>
@@ -419,34 +456,34 @@ function OptionsPage() {
           <div>
             <div
               style={{
-                border: settings.personalAccount
-                  ? "1px solid #99f6e4"
-                  : "1px solid #bfdbfe",
-                background: settings.personalAccount ? "#f0fdfa" : "#eff6ff",
+                border: isPersonalUi ? "1px solid #99f6e4" : "1px solid #bfdbfe",
+                background: isPersonalUi ? "#f0fdfa" : "#eff6ff",
                 borderRadius: 10,
                 padding: "12px 14px",
                 marginBottom: 14,
                 fontSize: 13,
-                color: settings.personalAccount ? "#134e4a" : "#1e3a8a",
+                color: isPersonalUi ? "#134e4a" : "#1e3a8a",
                 lineHeight: 1.5
               }}>
               <strong>
-                {settings.personalAccount
-                  ? "Mode personnel"
-                  : "Mode organisation"}
+                {isPersonalUi ? "Mode personnel" : "Mode organisation"}
               </strong>
               <p style={{ margin: "6px 0 0" }}>
                 Org : <code>{settings.orgName || settings.orgId || "—"}</code>
                 {" · "}
                 Events cloud :{" "}
                 <strong>
-                  {settings.eventReporting ? "activés" : "désactivés"}
+                  {isPersonalUi
+                    ? "désactivés (personnel)"
+                    : settings.eventReporting === false
+                      ? "désactivés (policy)"
+                      : "activés"}
                 </strong>
                 {" · "}
                 Pack : <code>{settings.rulesPackVersion || "—"}</code>
               </p>
             </div>
-            {settings.personalAccount && (
+            {isPersonalUi ? (
               <div
                 style={{
                   border: "1px solid #99f6e4",
@@ -461,7 +498,7 @@ function OptionsPage() {
                 <strong>Abonnement personnel — console minimale</strong>
                 <p style={{ margin: "8px 0 0" }}>
                   Pas de console web DEMO pour ce mode. Pour remonter des events
-                  admin : désenrôlez puis utilisez{" "}
+                  admin : désenrôlez puis{" "}
                   <strong>Enrôler dans l’organisation</strong> (
                   <code>DEMO-OPSGATE</code>).
                 </p>
@@ -474,12 +511,8 @@ function OptionsPage() {
                     <code>{settings.deviceLabel || "—"}</code>
                   </li>
                 </ul>
-                <p style={{ margin: "8px 0 0", fontSize: 12, color: "#0f766e" }}>
-                  Futur : portal cloud OpsGate (compte email, facturation,
-                  multi-appareils).
-                </p>
               </div>
-            )}
+            ) : null}
             <div style={{ fontSize: 13, color: "#334155", lineHeight: 1.55 }}>
               <div>
                 Agent : <code>{settings.agentId}</code>
@@ -499,6 +532,11 @@ function OptionsPage() {
                   {hardLock
                     ? " — protection maintenue avec dernière policy."
                     : ""}
+                </div>
+              )}
+              {settings.lastEventError && isOrgUi && (
+                <div style={{ color: "#b91c1c" }}>
+                  Erreur events : {settings.lastEventError}
                 </div>
               )}
             </div>

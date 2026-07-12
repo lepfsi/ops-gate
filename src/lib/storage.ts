@@ -50,8 +50,11 @@ async function maybeReport(entry: JournalEntry) {
   try {
     const settings = await getSettings()
     if (settings.mode === "local_only" || !settings.agentToken) return
-    // Si eventReporting désactivé en policy, ne pas envoyer
-    if (!settings.eventReporting) return
+    // Mode personnel : pas d’events cloud (privacy)
+    if (settings.personalAccount === true) return
+    // Org : n’envoyer que si reporting explicitement coupé
+    // (undefined/true = envoyer — évite un flag sticky false hors sync)
+    if (settings.eventReporting === false) return
 
     // cancel → severity low (spec console)
     const severity =
