@@ -63,6 +63,8 @@ export default function App() {
   const [disableRuleId, setDisableRuleId] = useState("email-address")
   const [publishNotes, setPublishNotes] = useState("console publish")
   const [primaryEmail, setPrimaryEmail] = useState("")
+  const [orgCode, setOrgCode] = useState("")
+  const [orgName, setOrgName] = useState("")
 
   const refreshHealth = useCallback(async () => {
     try {
@@ -85,9 +87,13 @@ export default function App() {
         const me = await api.me()
         setSessionAdmin(me.admin)
         if (me.org?.primary_email) setPrimaryEmail(me.org.primary_email)
+        if (me.org?.org_code) setOrgCode(me.org.org_code)
+        if (me.org?.name) setOrgName(me.org.name)
       } catch {
         setToken(null)
         setSessionAdmin(null)
+        setOrgCode("")
+        setOrgName("")
       } finally {
         setAuthChecking(false)
       }
@@ -182,8 +188,16 @@ export default function App() {
         setApiBaseState={setApiBaseState}
         onSaveApi={saveApi}
         health={health}
-        onLoggedIn={(admin) => {
+        onLoggedIn={async (admin) => {
           setSessionAdmin(admin)
+          try {
+            const me = await api.me()
+            if (me.org?.primary_email) setPrimaryEmail(me.org.primary_email)
+            if (me.org?.org_code) setOrgCode(me.org.org_code)
+            if (me.org?.name) setOrgName(me.org.name)
+          } catch {
+            /* ignore */
+          }
           setInfo(admin.must_change_password ? null : "Connecté")
         }}
       />
@@ -303,6 +317,11 @@ export default function App() {
           />
           <strong>{health}</strong>
         </span>
+        {orgCode ? (
+          <span title={orgName || orgCode}>
+            Org · <strong className="mono">{orgCode}</strong>
+          </span>
+        ) : null}
         {primaryEmail ? <span>Install · {primaryEmail}</span> : null}
         <span className="badge-v1">V1 · 1.2</span>
         <span>Control plane</span>
@@ -2409,7 +2428,22 @@ function EventsView({ events }: { events: EventRow[] }) {
       </p>
       {events.length === 0 ? (
         <div className="empty">
-          Aucun event — détection agent enrollé, ou un désenrôlement.
+          <p style={{ marginTop: 0 }}>
+            Aucun event pour <strong>cette organisation</strong>.
+          </p>
+          <ul style={{ textAlign: "left", margin: "8px auto", maxWidth: 420 }}>
+            <li>
+              Console = org <code>DEMO-OPSGATE</code> (bandeau « Org · … »)
+            </li>
+            <li>
+              Extension enrôlée avec le <strong>même</strong> code org (pas
+              PERSONAL)
+            </li>
+            <li>
+              Policy → <strong>Collecte events</strong> activée, puis sync agent
+            </li>
+            <li>Détection réelle sur un site IA (bandeau → décision)</li>
+          </ul>
         </div>
       ) : (
         <div className="table-wrap"><table className="table">

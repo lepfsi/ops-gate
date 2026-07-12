@@ -273,6 +273,8 @@ export class PgStore implements OpsGateStore {
     if (rows.length > 0) {
       await this.ensurePrincipalAdmin(rows[0].id)
       await this.ensurePersonalOrg()
+      // PERSONAL ne doit pas avoir d'admin console (même email que DEMO → login ambigu)
+      await this.scrubPersonalConsoleAdmins()
       console.log("[store:postgres] demo org already present")
       return
     }
@@ -439,9 +441,14 @@ export class PgStore implements OpsGateStore {
     }
 
     await this.ensurePersonalOrg()
+    await this.scrubPersonalConsoleAdmins()
   }
 
   private async ensurePrincipalAdmin(orgId: string) {
+    const org = await this.getOrg(orgId)
+    // Org personnelle = pas de console admin (évite collision email avec DEMO)
+    if (org?.isPersonal) return
+
     const { rows } = await this.pool.query(
       `SELECT id FROM org_admins WHERE org_id = $1 AND is_principal = TRUE LIMIT 1`,
       [orgId]
@@ -468,6 +475,23 @@ export class PgStore implements OpsGateStore {
       `UPDATE policies SET management_password_hash = $2 WHERE org_id = $1 AND (management_password_hash = '' OR management_password_hash IS NULL)`,
       [orgId, hash]
     )
+  }
+
+  /** Retire les admins console créés par erreur sur PERSONAL (events / login fantômes). */
+  private async scrubPersonalConsoleAdmins() {
+    const { rowCount: sessions } = await this.pool.query(
+      `DELETE FROM admin_sessions
+       WHERE org_id IN (SELECT id FROM organizations WHERE is_personal = TRUE)`
+    )
+    const { rowCount: admins } = await this.pool.query(
+      `DELETE FROM org_admins
+       WHERE org_id IN (SELECT id FROM organizations WHERE is_personal = TRUE)`
+    )
+    if ((admins ?? 0) > 0 || (sessions ?? 0) > 0) {
+      console.log(
+        `[store:postgres] scrubbed PERSONAL console admins=${admins ?? 0} sessions=${sessions ?? 0}`
+      )
+    }
   }
 
   private async ensurePersonalOrg() {
@@ -603,11 +627,13 @@ export class PgStore implements OpsGateStore {
   }
 
   async listAdmins(orgId: string) {
+    const org = await this.getOrg(orgId)
     const { rows } = await this.pool.query(
       `SELECT * FROM org_admins WHERE org_id = $1 ORDER BY is_principal DESC, created_at ASC`,
       [orgId]
     )
     if (rows.length === 0) {
+      if (org?.isPersonal) return []
       await this.ensurePrincipalAdmin(orgId)
       const again = await this.pool.query(
         `SELECT * FROM org_admins WHERE org_id = $1 ORDER BY is_principal DESC, created_at ASC`,
@@ -770,8 +796,19 @@ export class PgStore implements OpsGateStore {
   async createAdminSession(email: string, password: string) {
     const emailNorm = email.trim().toLowerCase()
     const hash = hashManagementPassword(password)
+    // Préférer l'org non-personnelle si le même email existe plusieurs fois
+    // (bug : principal seedé sur PERSONAL → console vide d'events DEMO)
     const { rows } = await this.pool.query(
-      `SELECT * FROM org_admins WHERE lower(email) = $1 AND active = TRUE AND password_hash = $2 LIMIT 1`,
+      `SELECT a.*
+       FROM org_admins a
+       INNER JOIN organizations o ON o.id = a.org_id
+       WHERE lower(a.email) = $1
+         AND a.active = TRUE
+         AND a.password_hash = $2
+       ORDER BY CASE WHEN o.is_personal THEN 1 ELSE 0 END ASC,
+                a.is_principal DESC,
+                a.created_at ASC
+       LIMIT 1`,
       [emailNorm, hash]
     )
     if (!rows[0]) return { ok: false as const, error: "invalid_credentials" }

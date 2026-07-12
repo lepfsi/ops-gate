@@ -469,26 +469,35 @@ export class MemoryStore implements OpsGateStore {
   async createAdminSession(email: string, password: string) {
     const emailNorm = email.trim().toLowerCase()
     const hash = hashManagementPassword(password)
+    type Cand = { orgId: string; admin: OrgAdmin; personal: boolean }
+    const candidates: Cand[] = []
     for (const [orgId, list] of this.admins) {
       const admin = list.find(
         (a) => a.active && a.email === emailNorm && a.passwordHash === hash
       )
       if (!admin) continue
       if (!admin.isPrincipal && !admin.permissions.includes("console_access")) {
-        return { ok: false as const, error: "no_console_access" }
+        continue
       }
-      const token = `ogs_${newToken().replace(/^ogt_/, "")}`
-      const session: AdminSession = {
-        token,
+      candidates.push({
         orgId,
-        adminId: admin.id,
-        expiresAt: Date.now() + 12 * 60 * 60 * 1000,
-        createdAt: Date.now()
-      }
-      this.sessions.set(token, session)
-      return { ok: true as const, session, admin }
+        admin,
+        personal: !!this.orgs.get(orgId)?.isPersonal
+      })
     }
-    return { ok: false as const, error: "invalid_credentials" }
+    candidates.sort((a, b) => Number(a.personal) - Number(b.personal))
+    const hit = candidates[0]
+    if (!hit) return { ok: false as const, error: "invalid_credentials" }
+    const token = `ogs_${newToken().replace(/^ogt_/, "")}`
+    const session: AdminSession = {
+      token,
+      orgId: hit.orgId,
+      adminId: hit.admin.id,
+      expiresAt: Date.now() + 12 * 60 * 60 * 1000,
+      createdAt: Date.now()
+    }
+    this.sessions.set(token, session)
+    return { ok: true as const, session, admin: hit.admin }
   }
 
   async resolveAdminSession(token: string) {

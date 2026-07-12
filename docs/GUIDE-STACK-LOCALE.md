@@ -292,7 +292,7 @@ Toutes ~2 min (ou après force-sync console) :
 | `store=memory` alors que Docker tourne | `DATABASE_URL` non exporté | Relancer l’API avec la variable |
 | Extension ignore l’API | Pas d’enroll / mauvais URL | Options → enroll `DEMO-OPSGATE` |
 | Sync / events en échec | API down | `pnpm api:dev` + health |
-| Détection OK, console vide | Pas enrollé, ou `eventReporting` off | Policy console + agent sync |
+| Détection OK, console vide | Mauvaise org console (PERSONAL vs DEMO), mode PERSONNEL (`event_reporting=false`), ou policy events off | Bandeau console « Org · DEMO-OPSGATE » ; extension enroll DEMO ; Policy → collecte events ON ; sync |
 | Extension « package vide » | Mauvais dossier chargé | Charger `build/chrome-mv3-prod` |
 | Données disparues | `docker compose down -v` ou memory | Ne pas utiliser `-v` ; utiliser Postgres |
 | `pack_verify_failed` | Clés ed25519 / API | Vérifier API up + clés `packages/api/keys` |
