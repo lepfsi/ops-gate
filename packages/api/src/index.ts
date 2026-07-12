@@ -1,16 +1,18 @@
 import { serve } from "@hono/node-server"
 
 import { createApp } from "./app"
+import { assertProductionSecrets } from "./crypto"
 import { initStore } from "./store"
 
 const port = Number(process.env.PORT || 8787)
 
 async function main() {
+  assertProductionSecrets()
   const store = await initStore()
   const app = createApp()
 
   console.log(
-    `[opsgate-api] PR5 listening on http://127.0.0.1:${port} (store=${store.kind})`
+    `[opsgate-api] V1 listening on http://127.0.0.1:${port} (store=${store.kind})`
   )
   console.log(`[opsgate-api] Health:  GET  /health`)
   console.log(

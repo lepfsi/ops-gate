@@ -27,7 +27,9 @@ const AI_HOST_PRESETS = [
   "claude.ai",
   "gemini.google.com",
   "copilot.microsoft.com",
-  "perplexity.ai"
+  "perplexity.ai",
+  "chat.deepseek.com",
+  "aistudio.google.com"
 ]
 
 const ALL_PERMS: AdminPermission[] = [

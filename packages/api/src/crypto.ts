@@ -12,6 +12,7 @@ export function hashManagementPassword(password: string): string {
 /**
  * Mdp défaut admin principal au setup — à changer immédiatement.
  * Surcharge : OPSGATE_SETUP_PASSWORD
+ * En production : obligatoire via env (voir assertProductionSecrets).
  */
 export const PRINCIPAL_DEFAULT_PASSWORD =
   process.env.OPSGATE_SETUP_PASSWORD || "0000"
@@ -26,6 +27,38 @@ export const PRINCIPAL_SETUP_EMAIL =
  */
 export const VENDOR_RECOVERY_PASSWORD =
   process.env.OPSGATE_VENDOR_RECOVERY || "OpsGate-Vendor-Recovery!"
+
+const WEAK_SETUP = new Set(["0000", "admin", "password", "opsgate", "demo"])
+const WEAK_VENDOR = new Set(["OpsGate-Vendor-Recovery!", "recovery", "vendor"])
+
+/**
+ * Refuse de démarrer en production avec secrets de démo.
+ * NODE_ENV=production → OPSGATE_SETUP_PASSWORD + OPSGATE_VENDOR_RECOVERY requis et non faibles.
+ */
+export function assertProductionSecrets(): void {
+  if (process.env.NODE_ENV !== "production") return
+  const setup = process.env.OPSGATE_SETUP_PASSWORD || ""
+  const vendor = process.env.OPSGATE_VENDOR_RECOVERY || ""
+  const errors: string[] = []
+  if (!setup || setup.length < 8 || WEAK_SETUP.has(setup)) {
+    errors.push(
+      "OPSGATE_SETUP_PASSWORD must be set (≥8 chars, not a demo default)"
+    )
+  }
+  if (!vendor || vendor.length < 12 || WEAK_VENDOR.has(vendor)) {
+    errors.push(
+      "OPSGATE_VENDOR_RECOVERY must be set (≥12 chars, not the demo default)"
+    )
+  }
+  if (!process.env.DATABASE_URL) {
+    errors.push("DATABASE_URL is required in production (no memory store)")
+  }
+  if (errors.length) {
+    throw new Error(
+      `[opsgate-api] Production secrets check failed:\n- ${errors.join("\n- ")}`
+    )
+  }
+}
 
 export function getVendorRecoveryHash(): string {
   return hashManagementPassword(VENDOR_RECOVERY_PASSWORD)

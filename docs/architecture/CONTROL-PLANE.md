@@ -106,9 +106,9 @@ Onglet **Policy** :
 
 ## Limites
 
-- Pas de push instantané offline (poll 15 min).
-- OTP email = stub (pas de SMTP branché en pilot).
-- Profils / admins / groups / licences PG : overlay mémoire.
+- Pas de push instantané offline (poll 15 min / 2 min force-sync).
+- OTP email = stub (pas de SMTP branché — `dev_otp` en local).
+- **V1** : profils / admins / sessions / groups / users / licences **persistés en Postgres** (plus d’overlay mémoire).
 - LDAP non branché (champs prêts).
 
 ## Build Plasmo — warning registry npm

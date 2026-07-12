@@ -2,19 +2,21 @@
 
 **Utilisez l’IA librement. Protégez vos données automatiquement.**
 
-**Version : 1.1.0 (pilot-ready)** — voir [`docs/RELEASE-v1.1.md`](docs/RELEASE-v1.1.md)
+**Version : 1.2.0 (V1 early-customer)** — voir [`docs/RELEASE-v1.md`](docs/RELEASE-v1.md) · pilote [`docs/RELEASE-v1.1.md`](docs/RELEASE-v1.1.md)
 
 OpsGate est une extension navigateur (Chrome / Edge, Manifest V3) de **Data Loss Prevention légère** pour ChatGPT, Claude et Gemini, avec control plane optionnel (API + Console).
 
 En mode local, tout le traitement est **local**. En mode org, seules des **métadonnées** d’événements peuvent être centralisées (pas le prompt).
 
-## Fonctionnalités (v1.1)
+## Fonctionnalités (V1 / 1.2)
 
 - Interception des **prompts** (Entrée / bouton Envoyer)
 - Interception des **uploads** (fichiers texte) avec quarantaine avant jointure
-- Détection **générale** : secrets, API keys, mots de passe, PII, IBAN, cartes, Azure/GCP/Stripe, JWT…
+- Détection **générale** : secrets, API keys, OpenAI/Anthropic/HF, mots de passe, PII, IBAN, cartes, Azure/GCP/Stripe, JWT, .env…
 - Détection **infra** : Fortinet, Cisco, Juniper, **Huawei**, **MikroTik**, **Palo Alto**, pfSense/OPNsense, WireGuard/OpenVPN, Arista, credentials réseau
+- Sites IA : ChatGPT, Claude, Gemini, **Copilot**, **Perplexity**, **DeepSeek**, **AI Studio**
 - Bandeau non bloquant : masquer · envoyer quand même · détails · annuler
+- Control plane : API + Console + Postgres durable (admins, profils, licences)
 - Journal local + activation ON/OFF
 - Identité visuelle (icônes + wordmark dans `assets/`)
 
@@ -66,6 +68,10 @@ rules/rules.json         # règles configurables
 - chatgpt.com / chat.openai.com
 - claude.ai
 - gemini.google.com
+- copilot.microsoft.com
+- perplexity.ai
+- chat.deepseek.com
+- aistudio.google.com
 
 ## Kit démo
 
@@ -108,6 +114,6 @@ Org démo : code **`DEMO-OPSGATE`**
 
 Voir **OpsGate - Spécification MVP v1.0** (Drive) et `README2.md` (notes dev).
 
-## Hors scope v1
+## Hors scope V1
 
-Blocage forcé, admin multi-users / SSO, proxy desktop, Chrome Web Store (après validation).
+Proxy local, SSO SAML/OIDC, portal personnel cloud, LDAP, Chrome Web Store public, MFA, block forcé par défaut — voir [`docs/RELEASE-v1.md`](docs/RELEASE-v1.md).

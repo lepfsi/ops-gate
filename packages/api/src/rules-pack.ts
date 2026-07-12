@@ -80,6 +80,21 @@ export function bumpVersion(prev?: string): string {
   return "1.0.0"
 }
 
+/** Prochaine version libre à partir du pack actif (évite collision après rollback). */
+export function nextFreeVersion(
+  existingVersions: string[],
+  activeVersion?: string
+): string {
+  const taken = new Set(existingVersions)
+  let candidate = bumpVersion(activeVersion)
+  let guard = 0
+  while (taken.has(candidate) && guard < 1000) {
+    candidate = bumpVersion(candidate)
+    guard++
+  }
+  return candidate
+}
+
 export function materializePack(input: {
   orgId: string
   version: string

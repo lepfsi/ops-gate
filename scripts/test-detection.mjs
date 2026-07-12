@@ -207,6 +207,26 @@ const cases = [
     name: "JWT token",
     text: "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U",
     expect: ["jwt-token"]
+  },
+  {
+    name: "Anthropic-like key",
+    text: "Use sk-ant-api03-" + "x".repeat(40),
+    expect: ["openai-anthropic-keys"]
+  },
+  {
+    name: "HuggingFace token",
+    text: "token hf_" + "a".repeat(30),
+    expect: ["openai-anthropic-keys"]
+  },
+  {
+    name: "GitLab PAT",
+    text: "glpat-" + "A".repeat(24),
+    expect: ["gitlab-discord-tokens"]
+  },
+  {
+    name: "DATABASE_URL in prompt",
+    text: "DATABASE_URL=postgres://user:secret@db:5432/app",
+    expect: ["dotenv-secrets"]
   }
 ]
 

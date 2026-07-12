@@ -1,7 +1,7 @@
 {
   "name": "@opsgate/api",
-  "version": "1.1.0",
-  "description": "OpsGate Control Plane API (v1.1)",
+  "version": "1.2.0",
+  "description": "OpsGate Control Plane API (V1)",
   "private": true,
   "type": "module",
   "scripts": {

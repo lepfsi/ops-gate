@@ -52,7 +52,7 @@ export function createApp() {
       name: "OpsGate API",
       version: "0.3.0",
       pr: "PR6-v1.1",
-      version_product: "1.1.0",
+      version_product: "1.2.0",
       docs: "docs/architecture/PLATFORM-v1.1.md",
       health: "/health",
       v1: "/v1",
@@ -64,7 +64,7 @@ export function createApp() {
     c.json({
       ok: true,
       service: "opsgate-api",
-      version: "1.1.0",
+      version: "1.2.0",
       ts: new Date().toISOString(),
       store: getStore().kind,
       features: [

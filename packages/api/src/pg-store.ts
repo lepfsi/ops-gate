@@ -8,6 +8,7 @@ import pg from "pg"
 import {
   hashManagementPassword,
   hashToken,
+  isValidPersonalLicenseKey,
   newId,
   newOtpCode,
   newToken,
@@ -16,14 +17,15 @@ import {
 } from "./crypto"
 import {
   buildGlobalRulesPack,
-  bumpVersion,
   materializePack,
+  nextFreeVersion,
   toPayload,
   validateRules
 } from "./rules-pack"
 import type {
   ActivatePackResult,
   AppendEventsResult,
+  EffectivePolicyBundle,
   OpsGateStore,
   OrgSummary,
   PublishPackInput,
@@ -38,7 +40,6 @@ import type {
   OrgAdmin,
   OrgUser,
   Organization,
-  PasswordResetChallenge,
   Policy,
   PolicyProfile,
   RulesPackPayload,
@@ -52,6 +53,15 @@ const { Pool } = pg
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
+const DEFAULT_HOSTS = [
+  "chatgpt.com",
+  "chat.openai.com",
+  "claude.ai",
+  "gemini.google.com",
+  "copilot.microsoft.com",
+  "perplexity.ai"
+]
+
 function rowOrg(r: pg.QueryResultRow): Organization {
   return {
     id: r.id,
@@ -61,6 +71,9 @@ function rowOrg(r: pg.QueryResultRow): Organization {
     modeDefault: r.mode_default,
     eventPayloadPolicy: r.event_payload_policy,
     primaryEmail: r.primary_email || PRINCIPAL_SETUP_EMAIL,
+    isPersonal: !!r.is_personal,
+    licenseSeats:
+      typeof r.license_seats === "number" ? r.license_seats : Number(r.license_seats) || 0,
     createdAt: new Date(r.created_at).toISOString()
   }
 }
@@ -71,7 +84,7 @@ function rowPolicy(r: pg.QueryResultRow): Policy {
     orgId: r.org_id,
     version: r.version,
     defaultAction: r.default_action,
-    enabledHosts: r.enabled_hosts,
+    enabledHosts: r.enabled_hosts || [],
     scanUploads: r.scan_uploads,
     eventReporting: r.event_reporting,
     rulesPackVersion: r.rules_pack_version,
@@ -97,7 +110,12 @@ function rowAgent(r: pg.QueryResultRow): Agent {
     policyProfileId: r.policy_profile_id ?? undefined,
     userId: r.user_id ?? undefined,
     licenseAssigned: r.license_assigned !== false,
-    personalAccount: !!r.personal_account
+    unlicensedSince: r.unlicensed_since
+      ? new Date(r.unlicensed_since).toISOString()
+      : undefined,
+    personalAccount: !!r.personal_account,
+    lastConfigEpoch:
+      typeof r.last_config_epoch === "number" ? r.last_config_epoch : undefined
   }
 }
 
@@ -139,20 +157,75 @@ function rowEvent(r: pg.QueryResultRow): StoredEvent {
   }
 }
 
+function rowAdmin(r: pg.QueryResultRow): OrgAdmin {
+  return {
+    id: r.id,
+    orgId: r.org_id,
+    label: r.label,
+    email: r.email,
+    passwordHash: r.password_hash,
+    isPrincipal: !!r.is_principal,
+    permissions: (r.permissions || []) as AdminPermission[],
+    active: r.active !== false,
+    mustChangePassword: !!r.must_change_password,
+    createdAt: new Date(r.created_at).toISOString(),
+    updatedAt: new Date(r.updated_at).toISOString()
+  }
+}
+
+function rowUser(r: pg.QueryResultRow): OrgUser {
+  return {
+    id: r.id,
+    orgId: r.org_id,
+    displayName: r.display_name,
+    email: r.email ?? undefined,
+    externalId: r.external_id ?? undefined,
+    groupIds: r.group_ids || [],
+    licenseManual:
+      r.license_manual === null || r.license_manual === undefined
+        ? null
+        : !!r.license_manual,
+    createdAt: new Date(r.created_at).toISOString()
+  }
+}
+
+function rowGroup(r: pg.QueryResultRow): UserGroup {
+  return {
+    id: r.id,
+    orgId: r.org_id,
+    name: r.name,
+    description: r.description ?? undefined,
+    policyProfileId: r.policy_profile_id ?? undefined,
+    grantsLicense: r.grants_license !== false,
+    ldapExternalId: r.ldap_external_id ?? undefined,
+    createdAt: new Date(r.created_at).toISOString(),
+    updatedAt: new Date(r.updated_at).toISOString()
+  }
+}
+
+function rowProfile(r: pg.QueryResultRow): PolicyProfile {
+  return {
+    id: r.id,
+    orgId: r.org_id,
+    name: r.name,
+    department: r.department ?? undefined,
+    defaultAction: r.default_action,
+    enabledHosts: r.enabled_hosts || [],
+    scanUploads: r.scan_uploads !== false,
+    eventReporting: r.event_reporting !== false,
+    protectUnenroll: !!r.protect_unenroll,
+    assignedGroupIds: r.assigned_group_ids || [],
+    assignedUserIds: r.assigned_user_ids || [],
+    updatedAt: new Date(r.updated_at).toISOString()
+  }
+}
+
+/**
+ * Store Postgres V1 — control plane durable (admins, sessions, profiles, …).
+ */
 export class PgStore implements OpsGateStore {
   readonly kind = "postgres" as const
   private pool: pg.Pool
-  /** Overlays pilot (migration SQL ultérieure) */
-  private profiles = new Map<string, PolicyProfile[]>()
-  private admins = new Map<string, OrgAdmin[]>()
-  private users = new Map<string, OrgUser[]>()
-  private groups = new Map<string, UserGroup[]>()
-  private otpChallenges = new Map<string, PasswordResetChallenge>()
-  private sessions = new Map<string, AdminSession>()
-  private agentProfileOverride = new Map<string, string | undefined>()
-  private agentUserOverride = new Map<string, string | undefined>()
-  private configEpochOverlay = new Map<string, number>()
-  private protectUnenrollOverlay = new Map<string, boolean>()
 
   private constructor(pool: pg.Pool) {
     this.pool = pool
@@ -169,20 +242,27 @@ export class PgStore implements OpsGateStore {
   private async migrate() {
     const sql = readFileSync(join(__dirname, "db", "schema.sql"), "utf8")
     await this.pool.query(sql)
-    // migrate douce si colonne absente (install PR5)
-    await this.pool.query(`
-      ALTER TABLE policies
-      ADD COLUMN IF NOT EXISTS management_password_hash TEXT NOT NULL DEFAULT ''
-    `)
-    await this.pool.query(`
-      ALTER TABLE policies
-      ADD COLUMN IF NOT EXISTS config_epoch INT NOT NULL DEFAULT 1
-    `)
-    await this.pool.query(`
-      ALTER TABLE policies
-      ADD COLUMN IF NOT EXISTS protect_unenroll BOOLEAN NOT NULL DEFAULT FALSE
-    `)
-    console.log("[store:postgres] schema migrated")
+
+    // Soft alters for installs that pre-date V1 full schema
+    const alters = [
+      `ALTER TABLE organizations ADD COLUMN IF NOT EXISTS primary_email TEXT NOT NULL DEFAULT 'admin@demo.local'`,
+      `ALTER TABLE organizations ADD COLUMN IF NOT EXISTS is_personal BOOLEAN NOT NULL DEFAULT FALSE`,
+      `ALTER TABLE organizations ADD COLUMN IF NOT EXISTS license_seats INT NOT NULL DEFAULT 0`,
+      `ALTER TABLE policies ADD COLUMN IF NOT EXISTS management_password_hash TEXT NOT NULL DEFAULT ''`,
+      `ALTER TABLE policies ADD COLUMN IF NOT EXISTS config_epoch INT NOT NULL DEFAULT 1`,
+      `ALTER TABLE policies ADD COLUMN IF NOT EXISTS protect_unenroll BOOLEAN NOT NULL DEFAULT FALSE`,
+      `ALTER TABLE agents ADD COLUMN IF NOT EXISTS host_name TEXT`,
+      `ALTER TABLE agents ADD COLUMN IF NOT EXISTS policy_profile_id TEXT`,
+      `ALTER TABLE agents ADD COLUMN IF NOT EXISTS user_id TEXT`,
+      `ALTER TABLE agents ADD COLUMN IF NOT EXISTS license_assigned BOOLEAN NOT NULL DEFAULT TRUE`,
+      `ALTER TABLE agents ADD COLUMN IF NOT EXISTS unlicensed_since TIMESTAMPTZ`,
+      `ALTER TABLE agents ADD COLUMN IF NOT EXISTS personal_account BOOLEAN NOT NULL DEFAULT FALSE`,
+      `ALTER TABLE agents ADD COLUMN IF NOT EXISTS last_config_epoch INT`
+    ]
+    for (const q of alters) {
+      await this.pool.query(q)
+    }
+    console.log("[store:postgres] schema migrated (V1 full control plane)")
   }
 
   private async ensureSeed() {
@@ -191,12 +271,15 @@ export class PgStore implements OpsGateStore {
       ["DEMO-OPSGATE"]
     )
     if (rows.length > 0) {
+      await this.ensurePrincipalAdmin(rows[0].id)
+      await this.ensurePersonalOrg()
       console.log("[store:postgres] demo org already present")
       return
     }
 
     const orgId = newId("org")
     const now = new Date().toISOString()
+    const setupEmail = PRINCIPAL_SETUP_EMAIL.toLowerCase()
     const global = buildGlobalRulesPack("1.0.0")
     const pack = materializePack({
       orgId,
@@ -207,13 +290,21 @@ export class PgStore implements OpsGateStore {
       active: true
     })
     const policyId = newId("pol")
+    const engId = newId("prof")
+    const financeId = newId("prof")
+    const gEng = newId("grp")
+    const gFin = newId("grp")
+    const u1 = newId("usr")
+    const u2 = newId("usr")
+    const adminId = newId("adm")
+    const mgmtHash = hashManagementPassword(PRINCIPAL_DEFAULT_PASSWORD)
 
     const client = await this.pool.connect()
     try {
       await client.query("BEGIN")
       await client.query(
-        `INSERT INTO organizations (id, name, slug, org_code, mode_default, event_payload_policy, created_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+        `INSERT INTO organizations (id, name, slug, org_code, mode_default, event_payload_policy, primary_email, is_personal, license_seats, created_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,false,25,$8)`,
         [
           orgId,
           "OpsGate Demo",
@@ -221,24 +312,20 @@ export class PgStore implements OpsGateStore {
           "DEMO-OPSGATE",
           "org_managed",
           "metadata_only",
+          setupEmail,
           now
         ]
       )
       await client.query(
-        `INSERT INTO policies (id, org_id, version, default_action, enabled_hosts, scan_uploads, event_reporting, rules_pack_version, management_password_hash, updated_at)
-         VALUES ($1,$2,1,$3,$4::jsonb,true,true,$5,$6,$7)`,
+        `INSERT INTO policies (id, org_id, version, default_action, enabled_hosts, scan_uploads, event_reporting, rules_pack_version, management_password_hash, protect_unenroll, config_epoch, updated_at)
+         VALUES ($1,$2,1,$3,$4::jsonb,true,true,$5,$6,true,1,$7)`,
         [
           policyId,
           orgId,
           "mask_recommend",
-          JSON.stringify([
-            "chatgpt.com",
-            "chat.openai.com",
-            "claude.ai",
-            "gemini.google.com"
-          ]),
+          JSON.stringify(DEFAULT_HOSTS),
           pack.version,
-          "", // mdp désinscription optionnel — défini via console
+          mgmtHash,
           now
         ]
       )
@@ -259,9 +346,90 @@ export class PgStore implements OpsGateStore {
           pack.publishedBy
         ]
       )
+      await client.query(
+        `INSERT INTO org_admins (id, org_id, label, email, password_hash, is_principal, permissions, active, must_change_password, created_at, updated_at)
+         VALUES ($1,$2,$3,$4,$5,true,$6::jsonb,true,true,$7,$7)`,
+        [
+          adminId,
+          orgId,
+          "Administrator",
+          setupEmail,
+          mgmtHash,
+          JSON.stringify(ALL_ADMIN_PERMISSIONS),
+          now
+        ]
+      )
+      await client.query(
+        `INSERT INTO policy_profiles (id, org_id, name, department, default_action, enabled_hosts, scan_uploads, event_reporting, protect_unenroll, assigned_group_ids, assigned_user_ids, updated_at)
+         VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7,$8,$9,$10::jsonb,$11::jsonb,$12)`,
+        [
+          engId,
+          orgId,
+          "Engineering",
+          "engineering",
+          "mask_recommend",
+          JSON.stringify(DEFAULT_HOSTS),
+          true,
+          true,
+          false,
+          JSON.stringify([gEng]),
+          JSON.stringify([]),
+          now
+        ]
+      )
+      await client.query(
+        `INSERT INTO policy_profiles (id, org_id, name, department, default_action, enabled_hosts, scan_uploads, event_reporting, protect_unenroll, assigned_group_ids, assigned_user_ids, updated_at)
+         VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7,$8,$9,$10::jsonb,$11::jsonb,$12)`,
+        [
+          financeId,
+          orgId,
+          "Finance",
+          "finance",
+          "mask_force",
+          JSON.stringify(["chatgpt.com", "claude.ai"]),
+          false,
+          true,
+          true,
+          JSON.stringify([gFin]),
+          JSON.stringify([]),
+          now
+        ]
+      )
+      await client.query(
+        `INSERT INTO user_groups (id, org_id, name, description, policy_profile_id, grants_license, created_at, updated_at)
+         VALUES ($1,$2,$3,$4,$5,true,$6,$6), ($7,$2,$8,$9,$10,true,$6,$6)`,
+        [
+          gEng,
+          orgId,
+          "Engineering",
+          "Équipe technique",
+          engId,
+          now,
+          gFin,
+          "Finance",
+          "Équipe finance — policy stricte",
+          financeId
+        ]
+      )
+      await client.query(
+        `INSERT INTO org_users (id, org_id, display_name, email, group_ids, license_manual, created_at)
+         VALUES ($1,$3,$4,$5,$6::jsonb,NULL,$9), ($2,$3,$7,$8,$10::jsonb,NULL,$9)`,
+        [
+          u1,
+          u2,
+          orgId,
+          "Alice Demo",
+          "alice@demo.local",
+          JSON.stringify([gEng]),
+          "Bob Finance",
+          "bob@demo.local",
+          now,
+          JSON.stringify([gFin])
+        ]
+      )
       await client.query("COMMIT")
       console.log(
-        `[store:postgres] Seeded DEMO-OPSGATE rules=${pack.version} (${pack.rules.length})`
+        `[store:postgres] Seeded DEMO-OPSGATE principal=${setupEmail} seats=25 rules=${pack.version}`
       )
     } catch (e) {
       await client.query("ROLLBACK")
@@ -269,6 +437,86 @@ export class PgStore implements OpsGateStore {
     } finally {
       client.release()
     }
+
+    await this.ensurePersonalOrg()
+  }
+
+  private async ensurePrincipalAdmin(orgId: string) {
+    const { rows } = await this.pool.query(
+      `SELECT id FROM org_admins WHERE org_id = $1 AND is_principal = TRUE LIMIT 1`,
+      [orgId]
+    )
+    if (rows.length > 0) return
+    const now = new Date().toISOString()
+    const email = PRINCIPAL_SETUP_EMAIL.toLowerCase()
+    const hash = hashManagementPassword(PRINCIPAL_DEFAULT_PASSWORD)
+    await this.pool.query(
+      `INSERT INTO org_admins (id, org_id, label, email, password_hash, is_principal, permissions, active, must_change_password, created_at, updated_at)
+       VALUES ($1,$2,$3,$4,$5,true,$6::jsonb,true,true,$7,$7)
+       ON CONFLICT (org_id, email) DO NOTHING`,
+      [
+        newId("adm"),
+        orgId,
+        "Administrator",
+        email,
+        hash,
+        JSON.stringify(ALL_ADMIN_PERMISSIONS),
+        now
+      ]
+    )
+    await this.pool.query(
+      `UPDATE policies SET management_password_hash = $2 WHERE org_id = $1 AND (management_password_hash = '' OR management_password_hash IS NULL)`,
+      [orgId, hash]
+    )
+  }
+
+  private async ensurePersonalOrg() {
+    const { rows } = await this.pool.query(
+      `SELECT id FROM organizations WHERE org_code = $1`,
+      ["PERSONAL"]
+    )
+    if (rows.length > 0) return
+
+    const orgId = newId("org")
+    const now = new Date().toISOString()
+    const global = buildGlobalRulesPack("1.0.0")
+    const pack = materializePack({
+      orgId,
+      version: global.version,
+      rules: global.rules,
+      notes: "personal-pack",
+      publishedBy: "system-seed",
+      active: true
+    })
+    const policyId = newId("pol")
+    await this.pool.query(
+      `INSERT INTO organizations (id, name, slug, org_code, mode_default, event_payload_policy, primary_email, is_personal, license_seats, created_at)
+       VALUES ($1,'OpsGate Personal','personal','PERSONAL','org_managed','metadata_only',$2,true,1,$3)`,
+      [orgId, PRINCIPAL_SETUP_EMAIL.toLowerCase(), now]
+    )
+    await this.pool.query(
+      `INSERT INTO policies (id, org_id, version, default_action, enabled_hosts, scan_uploads, event_reporting, rules_pack_version, management_password_hash, protect_unenroll, config_epoch, updated_at)
+       VALUES ($1,$2,1,'mask_recommend',$3::jsonb,true,false,$4,'',false,1,$5)`,
+      [policyId, orgId, JSON.stringify(DEFAULT_HOSTS), pack.version, now]
+    )
+    await this.pool.query(
+      `INSERT INTO rule_packs (org_id, version, pack_id, schema_version, min_engine_version, checksum, signature, rules, notes, published_at, published_by, active)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10,$11,true)`,
+      [
+        orgId,
+        pack.version,
+        pack.packId,
+        pack.schemaVersion,
+        pack.minEngineVersion ?? null,
+        pack.checksum,
+        pack.signature,
+        JSON.stringify(pack.rules),
+        pack.notes ?? null,
+        pack.publishedAt,
+        pack.publishedBy
+      ]
+    )
+    console.log("[store:postgres] Seeded PERSONAL org")
   }
 
   async findOrgByCode(code: string) {
@@ -292,14 +540,7 @@ export class PgStore implements OpsGateStore {
       `SELECT * FROM policies WHERE org_id = $1`,
       [orgId]
     )
-    if (!rows[0]) return undefined
-    const p = rowPolicy(rows[0])
-    const overlay = this.configEpochOverlay.get(orgId)
-    if (typeof overlay === "number") p.configEpoch = overlay
-    if (this.protectUnenrollOverlay.has(orgId)) {
-      p.protectUnenroll = !!this.protectUnenrollOverlay.get(orgId)
-    }
-    return p
+    return rows[0] ? rowPolicy(rows[0]) : undefined
   }
 
   async updatePolicy(
@@ -330,10 +571,6 @@ export class PgStore implements OpsGateStore {
       version: current.version + 1,
       configEpoch: nextConfigEpoch,
       updatedAt: new Date().toISOString()
-    }
-    this.configEpochOverlay.set(orgId, next.configEpoch)
-    if (typeof next.protectUnenroll === "boolean") {
-      this.protectUnenrollOverlay.set(orgId, next.protectUnenroll)
     }
     await this.pool.query(
       `UPDATE policies SET
@@ -366,32 +603,33 @@ export class PgStore implements OpsGateStore {
   }
 
   async listAdmins(orgId: string) {
-    let list = this.admins.get(orgId) || []
-    if (list.length === 0) {
-      // seed principal overlay
-      const now = new Date().toISOString()
-      list = [
-        {
-          id: newId("adm"),
-          orgId,
-          label: "Administrator",
-          email: PRINCIPAL_SETUP_EMAIL.toLowerCase(),
-          passwordHash: hashManagementPassword(PRINCIPAL_DEFAULT_PASSWORD),
-          isPrincipal: true,
-          permissions: [...ALL_ADMIN_PERMISSIONS],
-          active: true,
-          mustChangePassword: true,
-          createdAt: now,
-          updatedAt: now
-        }
-      ]
-      this.admins.set(orgId, list)
+    const { rows } = await this.pool.query(
+      `SELECT * FROM org_admins WHERE org_id = $1 ORDER BY is_principal DESC, created_at ASC`,
+      [orgId]
+    )
+    if (rows.length === 0) {
+      await this.ensurePrincipalAdmin(orgId)
+      const again = await this.pool.query(
+        `SELECT * FROM org_admins WHERE org_id = $1 ORDER BY is_principal DESC, created_at ASC`,
+        [orgId]
+      )
+      return again.rows.map(rowAdmin)
     }
-    return [...list]
+    return rows.map(rowAdmin)
   }
 
   async getPrincipalAdmin(orgId: string) {
-    return (await this.listAdmins(orgId)).find((a) => a.isPrincipal)
+    const { rows } = await this.pool.query(
+      `SELECT * FROM org_admins WHERE org_id = $1 AND is_principal = TRUE LIMIT 1`,
+      [orgId]
+    )
+    if (rows[0]) return rowAdmin(rows[0])
+    await this.ensurePrincipalAdmin(orgId)
+    const again = await this.pool.query(
+      `SELECT * FROM org_admins WHERE org_id = $1 AND is_principal = TRUE LIMIT 1`,
+      [orgId]
+    )
+    return again.rows[0] ? rowAdmin(again.rows[0]) : undefined
   }
 
   async listUnenrollAdmins(orgId: string) {
@@ -418,160 +656,196 @@ export class PgStore implements OpsGateStore {
   ) {
     const org = await this.getOrg(orgId)
     if (!org) return undefined
-    const list = await this.listAdmins(orgId)
     const now = new Date().toISOString()
     const email = input.email.trim().toLowerCase()
     if (!email.includes("@")) return undefined
+
     if (input.id) {
-      const idx = list.findIndex((a) => a.id === input.id)
-      if (idx < 0) return undefined
-      const prev = list[idx]
-      if (list.some((a) => a.id !== prev.id && a.email === email)) return undefined
-      const next: OrgAdmin = {
-        ...prev,
-        label: input.label.trim() || prev.label,
-        email,
-        active: input.active !== undefined ? input.active : prev.active,
-        permissions: prev.isPrincipal
-          ? [...ALL_ADMIN_PERMISSIONS]
-          : input.permissions ?? prev.permissions,
-        mustChangePassword:
-          input.mustChangePassword !== undefined
-            ? input.mustChangePassword
-            : prev.mustChangePassword,
-        updatedAt: now
-      }
+      const { rows } = await this.pool.query(
+        `SELECT * FROM org_admins WHERE org_id = $1 AND id = $2`,
+        [orgId, input.id]
+      )
+      if (!rows[0]) return undefined
+      const prev = rowAdmin(rows[0])
+      const dup = await this.pool.query(
+        `SELECT id FROM org_admins WHERE org_id = $1 AND email = $2 AND id <> $3`,
+        [orgId, email, prev.id]
+      )
+      if (dup.rows.length > 0) return undefined
+
+      let passwordHash = prev.passwordHash
+      let mustChange =
+        input.mustChangePassword !== undefined
+          ? input.mustChangePassword
+          : prev.mustChangePassword
       if (input.password) {
         const min = prev.isPrincipal ? 4 : 6
         if (input.password.length < min) return undefined
-        next.passwordHash = hashManagementPassword(input.password)
-        if (input.mustChangePassword === undefined) next.mustChangePassword = false
+        passwordHash = hashManagementPassword(input.password)
+        if (input.mustChangePassword === undefined) mustChange = false
       }
-      list[idx] = next
-      this.admins.set(orgId, list)
+      const permissions = prev.isPrincipal
+        ? ALL_ADMIN_PERMISSIONS
+        : input.permissions ?? prev.permissions
+      const active = input.active !== undefined ? input.active : prev.active
+      const label = input.label.trim() || prev.label
+
+      const { rows: updated } = await this.pool.query(
+        `UPDATE org_admins SET
+          label=$3, email=$4, password_hash=$5, permissions=$6::jsonb,
+          active=$7, must_change_password=$8, updated_at=$9
+         WHERE org_id=$1 AND id=$2 RETURNING *`,
+        [
+          orgId,
+          input.id,
+          label,
+          email,
+          passwordHash,
+          JSON.stringify(permissions),
+          active,
+          !!mustChange,
+          now
+        ]
+      )
+      if (prev.isPrincipal) {
+        await this.pool.query(
+          `UPDATE policies SET management_password_hash = $2 WHERE org_id = $1`,
+          [orgId, passwordHash]
+        )
+      }
       await this.forceConfigSync(orgId)
-      return next
+      return rowAdmin(updated[0])
     }
+
     if (input.isPrincipal) return undefined
     if (!input.password || input.password.length < 6) return undefined
-    if (list.some((a) => a.email === email)) return undefined
-    const created: OrgAdmin = {
-      id: newId("adm"),
-      orgId,
-      label: input.label.trim() || `admin${list.length + 1}`,
-      email,
-      passwordHash: hashManagementPassword(input.password),
-      isPrincipal: false,
-      permissions: input.permissions?.length
-        ? input.permissions
-        : ["console_access"],
-      active: input.active !== false,
-      mustChangePassword: false,
-      createdAt: now,
-      updatedAt: now
+    const exists = await this.pool.query(
+      `SELECT id FROM org_admins WHERE org_id = $1 AND email = $2`,
+      [orgId, email]
+    )
+    if (exists.rows.length > 0) return undefined
+
+    let permissions = input.permissions?.length
+      ? input.permissions
+      : (["console_access"] as AdminPermission[])
+    if (!permissions.includes("console_access")) {
+      permissions = ["console_access", ...permissions]
     }
-    if (!created.permissions.includes("console_access")) {
-      created.permissions = ["console_access", ...created.permissions]
-    }
-    list.push(created)
-    this.admins.set(orgId, list)
+    const id = newId("adm")
+    const { rows } = await this.pool.query(
+      `INSERT INTO org_admins (id, org_id, label, email, password_hash, is_principal, permissions, active, must_change_password, created_at, updated_at)
+       VALUES ($1,$2,$3,$4,$5,false,$6::jsonb,$7,false,$8,$8) RETURNING *`,
+      [
+        id,
+        orgId,
+        input.label.trim() || `admin`,
+        email,
+        hashManagementPassword(input.password),
+        JSON.stringify(permissions),
+        input.active !== false,
+        now
+      ]
+    )
     await this.forceConfigSync(orgId)
-    return created
+    return rowAdmin(rows[0])
   }
 
   async deleteAdmin(orgId: string, adminId: string) {
-    const list = await this.listAdmins(orgId)
-    const target = list.find((a) => a.id === adminId)
-    if (!target || target.isPrincipal) return false
-    this.admins.set(
-      orgId,
-      list.filter((a) => a.id !== adminId)
+    const { rows } = await this.pool.query(
+      `SELECT * FROM org_admins WHERE org_id = $1 AND id = $2`,
+      [orgId, adminId]
     )
-    for (const [tok, s] of this.sessions) {
-      if (s.adminId === adminId) this.sessions.delete(tok)
-    }
-    await this.forceConfigSync(orgId)
-    return true
+    if (!rows[0] || rows[0].is_principal) return false
+    await this.pool.query(`DELETE FROM admin_sessions WHERE admin_id = $1`, [
+      adminId
+    ])
+    const { rowCount } = await this.pool.query(
+      `DELETE FROM org_admins WHERE org_id = $1 AND id = $2 AND is_principal = FALSE`,
+      [orgId, adminId]
+    )
+    if ((rowCount ?? 0) > 0) await this.forceConfigSync(orgId)
+    return (rowCount ?? 0) > 0
   }
 
   async createAdminSession(email: string, password: string) {
     const emailNorm = email.trim().toLowerCase()
     const hash = hashManagementPassword(password)
-    for (const orgId of this.admins.keys()) {
-      const list = await this.listAdmins(orgId)
-      const admin = list.find(
-        (a) => a.active && a.email === emailNorm && a.passwordHash === hash
-      )
-      if (!admin) continue
-      if (!admin.isPrincipal && !admin.permissions.includes("console_access")) {
-        return { ok: false as const, error: "no_console_access" }
-      }
-      const token = `ogs_${newToken().replace(/^ogt_/, "")}`
-      const session: AdminSession = {
-        token,
-        orgId,
-        adminId: admin.id,
-        expiresAt: Date.now() + 12 * 60 * 60 * 1000,
-        createdAt: Date.now()
-      }
-      this.sessions.set(token, session)
-      return { ok: true as const, session, admin }
-    }
-    // try seed org from DB
     const { rows } = await this.pool.query(
-      `SELECT id FROM organizations WHERE org_code = $1`,
-      ["DEMO-OPSGATE"]
+      `SELECT * FROM org_admins WHERE lower(email) = $1 AND active = TRUE AND password_hash = $2 LIMIT 1`,
+      [emailNorm, hash]
     )
-    if (rows[0]) {
-      const list = await this.listAdmins(rows[0].id)
-      const admin = list.find(
-        (a) => a.active && a.email === emailNorm && a.passwordHash === hash
-      )
-      if (admin) {
-        if (
-          !admin.isPrincipal &&
-          !admin.permissions.includes("console_access")
-        ) {
-          return { ok: false as const, error: "no_console_access" }
-        }
-        const token = `ogs_${newToken().replace(/^ogt_/, "")}`
-        const session: AdminSession = {
-          token,
-          orgId: rows[0].id,
-          adminId: admin.id,
-          expiresAt: Date.now() + 12 * 60 * 60 * 1000,
-          createdAt: Date.now()
-        }
-        this.sessions.set(token, session)
-        return { ok: true as const, session, admin }
-      }
+    if (!rows[0]) return { ok: false as const, error: "invalid_credentials" }
+    const admin = rowAdmin(rows[0])
+    if (!admin.isPrincipal && !admin.permissions.includes("console_access")) {
+      return { ok: false as const, error: "no_console_access" }
     }
-    return { ok: false as const, error: "invalid_credentials" }
+    const token = `ogs_${newToken().replace(/^ogt_/, "")}`
+    const tokenHash = hashToken(token)
+    const expiresAt = Date.now() + 12 * 60 * 60 * 1000
+    await this.pool.query(
+      `INSERT INTO admin_sessions (token_hash, org_id, admin_id, expires_at, created_at)
+       VALUES ($1,$2,$3,to_timestamp($4/1000.0),NOW())`,
+      [tokenHash, admin.orgId, admin.id, expiresAt]
+    )
+    const session: AdminSession = {
+      token,
+      orgId: admin.orgId,
+      adminId: admin.id,
+      expiresAt,
+      createdAt: Date.now()
+    }
+    return { ok: true as const, session, admin }
   }
 
   async resolveAdminSession(token: string) {
-    const session = this.sessions.get(token)
-    if (!session) return undefined
-    if (Date.now() > session.expiresAt) {
-      this.sessions.delete(token)
+    const tokenHash = hashToken(token)
+    const { rows } = await this.pool.query(
+      `SELECT * FROM admin_sessions WHERE token_hash = $1`,
+      [tokenHash]
+    )
+    if (!rows[0]) return undefined
+    const expiresAt = new Date(rows[0].expires_at).getTime()
+    if (Date.now() > expiresAt) {
+      await this.pool.query(`DELETE FROM admin_sessions WHERE token_hash = $1`, [
+        tokenHash
+      ])
       return undefined
     }
-    const admin = (await this.listAdmins(session.orgId)).find(
-      (a) => a.id === session.adminId && a.active
+    const { rows: adminRows } = await this.pool.query(
+      `SELECT * FROM org_admins WHERE id = $1 AND active = TRUE`,
+      [rows[0].admin_id]
     )
-    if (!admin) {
-      this.sessions.delete(token)
+    if (!adminRows[0]) {
+      await this.pool.query(`DELETE FROM admin_sessions WHERE token_hash = $1`, [
+        tokenHash
+      ])
       return undefined
+    }
+    const admin = rowAdmin(adminRows[0])
+    const session: AdminSession = {
+      token,
+      orgId: rows[0].org_id,
+      adminId: rows[0].admin_id,
+      expiresAt,
+      createdAt: new Date(rows[0].created_at).getTime()
     }
     return { session, admin }
   }
 
   async revokeAdminSession(token: string) {
-    return this.sessions.delete(token)
+    const { rowCount } = await this.pool.query(
+      `DELETE FROM admin_sessions WHERE token_hash = $1`,
+      [hashToken(token)]
+    )
+    return (rowCount ?? 0) > 0
   }
 
   async listUsers(orgId: string) {
-    return [...(this.users.get(orgId) || [])]
+    const { rows } = await this.pool.query(
+      `SELECT * FROM org_users WHERE org_id = $1 ORDER BY created_at ASC`,
+      [orgId]
+    )
+    return rows.map(rowUser)
   }
 
   async upsertUser(
@@ -586,46 +860,59 @@ export class PgStore implements OpsGateStore {
   ) {
     const org = await this.getOrg(orgId)
     if (!org) return undefined
-    const list = this.users.get(orgId) || []
     if (input.id) {
-      const idx = list.findIndex((u) => u.id === input.id)
-      if (idx < 0) return undefined
-      list[idx] = {
-        ...list[idx],
-        displayName: input.displayName,
-        email: input.email ?? list[idx].email,
-        externalId: input.externalId ?? list[idx].externalId,
-        groupIds: input.groupIds ?? list[idx].groupIds
-      }
-      this.users.set(orgId, list)
+      const { rows } = await this.pool.query(
+        `SELECT * FROM org_users WHERE org_id = $1 AND id = $2`,
+        [orgId, input.id]
+      )
+      if (!rows[0]) return undefined
+      const prev = rowUser(rows[0])
+      const { rows: updated } = await this.pool.query(
+        `UPDATE org_users SET display_name=$3, email=$4, external_id=$5, group_ids=$6::jsonb
+         WHERE org_id=$1 AND id=$2 RETURNING *`,
+        [
+          orgId,
+          input.id,
+          input.displayName,
+          input.email ?? prev.email ?? null,
+          input.externalId ?? prev.externalId ?? null,
+          JSON.stringify(input.groupIds ?? prev.groupIds)
+        ]
+      )
       await this.forceConfigSync(orgId)
-      return list[idx]
+      return rowUser(updated[0])
     }
-    const created: OrgUser = {
-      id: newId("usr"),
-      orgId,
-      displayName: input.displayName,
-      email: input.email,
-      externalId: input.externalId,
-      groupIds: input.groupIds || [],
-      createdAt: new Date().toISOString()
-    }
-    list.push(created)
-    this.users.set(orgId, list)
-    return created
+    const id = newId("usr")
+    const { rows } = await this.pool.query(
+      `INSERT INTO org_users (id, org_id, display_name, email, external_id, group_ids, created_at)
+       VALUES ($1,$2,$3,$4,$5,$6::jsonb,NOW()) RETURNING *`,
+      [
+        id,
+        orgId,
+        input.displayName,
+        input.email ?? null,
+        input.externalId ?? null,
+        JSON.stringify(input.groupIds || [])
+      ]
+    )
+    return rowUser(rows[0])
   }
 
   async deleteUser(orgId: string, userId: string) {
-    const list = this.users.get(orgId) || []
-    const next = list.filter((u) => u.id !== userId)
-    if (next.length === list.length) return false
-    this.users.set(orgId, next)
-    await this.forceConfigSync(orgId)
-    return true
+    const { rowCount } = await this.pool.query(
+      `DELETE FROM org_users WHERE org_id = $1 AND id = $2`,
+      [orgId, userId]
+    )
+    if ((rowCount ?? 0) > 0) await this.forceConfigSync(orgId)
+    return (rowCount ?? 0) > 0
   }
 
   async listGroups(orgId: string) {
-    return [...(this.groups.get(orgId) || [])]
+    const { rows } = await this.pool.query(
+      `SELECT * FROM user_groups WHERE org_id = $1 ORDER BY created_at ASC`,
+      [orgId]
+    )
+    return rows.map(rowGroup)
   }
 
   async upsertGroup(
@@ -640,53 +927,67 @@ export class PgStore implements OpsGateStore {
   ) {
     const org = await this.getOrg(orgId)
     if (!org) return undefined
-    const list = this.groups.get(orgId) || []
     const now = new Date().toISOString()
     if (input.id) {
-      const idx = list.findIndex((g) => g.id === input.id)
-      if (idx < 0) return undefined
-      list[idx] = {
-        ...list[idx],
-        name: input.name,
-        description: input.description ?? list[idx].description,
-        policyProfileId:
-          input.policyProfileId === null
-            ? undefined
-            : input.policyProfileId ?? list[idx].policyProfileId,
-        ldapExternalId: input.ldapExternalId ?? list[idx].ldapExternalId,
-        updatedAt: now
-      }
-      this.groups.set(orgId, list)
+      const { rows } = await this.pool.query(
+        `SELECT * FROM user_groups WHERE org_id = $1 AND id = $2`,
+        [orgId, input.id]
+      )
+      if (!rows[0]) return undefined
+      const prev = rowGroup(rows[0])
+      const profileId =
+        input.policyProfileId === null
+          ? null
+          : input.policyProfileId ?? prev.policyProfileId ?? null
+      const { rows: updated } = await this.pool.query(
+        `UPDATE user_groups SET name=$3, description=$4, policy_profile_id=$5, ldap_external_id=$6, updated_at=$7
+         WHERE org_id=$1 AND id=$2 RETURNING *`,
+        [
+          orgId,
+          input.id,
+          input.name,
+          input.description ?? prev.description ?? null,
+          profileId,
+          input.ldapExternalId ?? prev.ldapExternalId ?? null,
+          now
+        ]
+      )
       await this.forceConfigSync(orgId)
-      return list[idx]
+      return rowGroup(updated[0])
     }
-    const created: UserGroup = {
-      id: newId("grp"),
-      orgId,
-      name: input.name,
-      description: input.description,
-      policyProfileId: input.policyProfileId || undefined,
-      ldapExternalId: input.ldapExternalId,
-      createdAt: now,
-      updatedAt: now
-    }
-    list.push(created)
-    this.groups.set(orgId, list)
+    const id = newId("grp")
+    const { rows } = await this.pool.query(
+      `INSERT INTO user_groups (id, org_id, name, description, policy_profile_id, grants_license, ldap_external_id, created_at, updated_at)
+       VALUES ($1,$2,$3,$4,$5,true,$6,$7,$7) RETURNING *`,
+      [
+        id,
+        orgId,
+        input.name,
+        input.description ?? null,
+        input.policyProfileId || null,
+        input.ldapExternalId ?? null,
+        now
+      ]
+    )
     await this.forceConfigSync(orgId)
-    return created
+    return rowGroup(rows[0])
   }
 
   async deleteGroup(orgId: string, groupId: string) {
-    const list = this.groups.get(orgId) || []
-    const next = list.filter((g) => g.id !== groupId)
-    if (next.length === list.length) return false
-    this.groups.set(orgId, next)
-    await this.forceConfigSync(orgId)
-    return true
+    const { rowCount } = await this.pool.query(
+      `DELETE FROM user_groups WHERE org_id = $1 AND id = $2`,
+      [orgId, groupId]
+    )
+    if ((rowCount ?? 0) > 0) await this.forceConfigSync(orgId)
+    return (rowCount ?? 0) > 0
   }
 
   async listProfiles(orgId: string) {
-    return [...(this.profiles.get(orgId) || [])]
+    const { rows } = await this.pool.query(
+      `SELECT * FROM policy_profiles WHERE org_id = $1 ORDER BY updated_at ASC`,
+      [orgId]
+    )
+    return rows.map(rowProfile)
   }
 
   async upsertProfile(
@@ -706,14 +1007,16 @@ export class PgStore implements OpsGateStore {
   ) {
     const org = await this.getOrg(orgId)
     if (!org) return undefined
-    const list = this.profiles.get(orgId) || []
     const now = new Date().toISOString()
+
     if (input.id) {
-      const idx = list.findIndex((p) => p.id === input.id)
-      if (idx < 0) return undefined
-      const prev = list[idx]
-      const next: PolicyProfile = {
-        ...prev,
+      const { rows } = await this.pool.query(
+        `SELECT * FROM policy_profiles WHERE org_id = $1 AND id = $2`,
+        [orgId, input.id]
+      )
+      if (!rows[0]) return undefined
+      const prev = rowProfile(rows[0])
+      const next = {
         name: input.name,
         department: input.department ?? prev.department,
         defaultAction: input.defaultAction ?? prev.defaultAction,
@@ -729,47 +1032,95 @@ export class PgStore implements OpsGateStore {
             ? input.protectUnenroll
             : prev.protectUnenroll,
         assignedGroupIds: input.assignedGroupIds ?? prev.assignedGroupIds,
-        assignedUserIds: input.assignedUserIds ?? prev.assignedUserIds,
-        updatedAt: now
+        assignedUserIds: input.assignedUserIds ?? prev.assignedUserIds
       }
-      list[idx] = next
-      this.profiles.set(orgId, list)
+      const { rows: updated } = await this.pool.query(
+        `UPDATE policy_profiles SET
+          name=$3, department=$4, default_action=$5, enabled_hosts=$6::jsonb,
+          scan_uploads=$7, event_reporting=$8, protect_unenroll=$9,
+          assigned_group_ids=$10::jsonb, assigned_user_ids=$11::jsonb, updated_at=$12
+         WHERE org_id=$1 AND id=$2 RETURNING *`,
+        [
+          orgId,
+          input.id,
+          next.name,
+          next.department ?? null,
+          next.defaultAction,
+          JSON.stringify(next.enabledHosts),
+          next.scanUploads,
+          next.eventReporting,
+          next.protectUnenroll,
+          JSON.stringify(next.assignedGroupIds),
+          JSON.stringify(next.assignedUserIds),
+          now
+        ]
+      )
+      const profile = rowProfile(updated[0])
+      await this.applyProfileGroupAssignments(orgId, profile)
       await this.forceConfigSync(orgId)
-      return next
+      return profile
     }
-    const created: PolicyProfile = {
-      id: newId("prof"),
-      orgId,
-      name: input.name,
-      department: input.department,
-      defaultAction: input.defaultAction || "mask_recommend",
-      enabledHosts: input.enabledHosts || [
-        "chatgpt.com",
-        "chat.openai.com",
-        "claude.ai",
-        "gemini.google.com"
-      ],
-      scanUploads: input.scanUploads !== false,
-      eventReporting: input.eventReporting !== false,
-      protectUnenroll: !!input.protectUnenroll,
-      assignedGroupIds: input.assignedGroupIds || [],
-      assignedUserIds: input.assignedUserIds || [],
-      updatedAt: now
-    }
-    list.push(created)
-    this.profiles.set(orgId, list)
+
+    const id = newId("prof")
+    const { rows } = await this.pool.query(
+      `INSERT INTO policy_profiles (id, org_id, name, department, default_action, enabled_hosts, scan_uploads, event_reporting, protect_unenroll, assigned_group_ids, assigned_user_ids, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7,$8,$9,$10::jsonb,$11::jsonb,$12) RETURNING *`,
+      [
+        id,
+        orgId,
+        input.name,
+        input.department ?? null,
+        input.defaultAction || "mask_recommend",
+        JSON.stringify(input.enabledHosts || DEFAULT_HOSTS),
+        input.scanUploads !== false,
+        input.eventReporting !== false,
+        !!input.protectUnenroll,
+        JSON.stringify(input.assignedGroupIds || []),
+        JSON.stringify(input.assignedUserIds || []),
+        now
+      ]
+    )
+    const profile = rowProfile(rows[0])
+    await this.applyProfileGroupAssignments(orgId, profile)
     await this.forceConfigSync(orgId)
-    return created
+    return profile
+  }
+
+  private async applyProfileGroupAssignments(
+    orgId: string,
+    profile: PolicyProfile
+  ) {
+    const assigned = new Set(profile.assignedGroupIds || [])
+    const groups = await this.listGroups(orgId)
+    for (const g of groups) {
+      if (assigned.has(g.id)) {
+        await this.pool.query(
+          `UPDATE user_groups SET policy_profile_id = $3, updated_at = NOW() WHERE org_id = $1 AND id = $2`,
+          [orgId, g.id, profile.id]
+        )
+      } else if (g.policyProfileId === profile.id && !assigned.has(g.id)) {
+        await this.pool.query(
+          `UPDATE user_groups SET policy_profile_id = NULL, updated_at = NOW() WHERE org_id = $1 AND id = $2`,
+          [orgId, g.id]
+        )
+      }
+    }
   }
 
   async deleteProfile(orgId: string, profileId: string) {
-    const list = this.profiles.get(orgId) || []
-    const next = list.filter((p) => p.id !== profileId)
-    if (next.length === list.length) return false
-    this.profiles.set(orgId, next)
-    for (const [agentId, pid] of this.agentProfileOverride) {
-      if (pid === profileId) this.agentProfileOverride.set(agentId, undefined)
-    }
+    const { rowCount } = await this.pool.query(
+      `DELETE FROM policy_profiles WHERE org_id = $1 AND id = $2`,
+      [orgId, profileId]
+    )
+    if ((rowCount ?? 0) === 0) return false
+    await this.pool.query(
+      `UPDATE agents SET policy_profile_id = NULL WHERE org_id = $1 AND policy_profile_id = $2`,
+      [orgId, profileId]
+    )
+    await this.pool.query(
+      `UPDATE user_groups SET policy_profile_id = NULL WHERE org_id = $1 AND policy_profile_id = $2`,
+      [orgId, profileId]
+    )
     await this.forceConfigSync(orgId)
     return true
   }
@@ -779,70 +1130,85 @@ export class PgStore implements OpsGateStore {
     agentId: string,
     policyProfileId: string | null
   ) {
-    const agents = await this.listAgents(orgId)
-    const agent = agents.find((a) => a.id === agentId)
-    if (!agent) return undefined
     if (policyProfileId) {
-      const list = this.profiles.get(orgId) || []
-      if (!list.some((p) => p.id === policyProfileId)) return undefined
+      const { rows } = await this.pool.query(
+        `SELECT id FROM policy_profiles WHERE org_id = $1 AND id = $2`,
+        [orgId, policyProfileId]
+      )
+      if (!rows[0]) return undefined
     }
-    this.agentProfileOverride.set(agentId, policyProfileId || undefined)
+    const { rows } = await this.pool.query(
+      `UPDATE agents SET policy_profile_id = $3, last_seen_at = NOW()
+       WHERE org_id = $1 AND id = $2 RETURNING *`,
+      [orgId, agentId, policyProfileId]
+    )
+    if (!rows[0]) return undefined
     await this.forceConfigSync(orgId)
-    return {
-      ...agent,
-      policyProfileId: policyProfileId || undefined
-    }
+    return rowAgent(rows[0])
   }
 
-  async assignAgentUser(
-    orgId: string,
-    agentId: string,
-    userId: string | null
-  ) {
-    const agents = await this.listAgents(orgId)
-    const agent = agents.find((a) => a.id === agentId)
-    if (!agent) return undefined
+  async assignAgentUser(orgId: string, agentId: string, userId: string | null) {
     if (userId) {
-      const users = this.users.get(orgId) || []
-      if (!users.some((u) => u.id === userId)) return undefined
+      const { rows } = await this.pool.query(
+        `SELECT id FROM org_users WHERE org_id = $1 AND id = $2`,
+        [orgId, userId]
+      )
+      if (!rows[0]) return undefined
     }
-    this.agentUserOverride.set(agentId, userId || undefined)
+    const { rows } = await this.pool.query(
+      `UPDATE agents SET user_id = $3, last_seen_at = NOW()
+       WHERE org_id = $1 AND id = $2 RETURNING *`,
+      [orgId, agentId, userId]
+    )
+    if (!rows[0]) return undefined
     await this.forceConfigSync(orgId)
-    return { ...agent, userId: userId || undefined }
+    return rowAgent(rows[0])
   }
 
-  async getEffectivePolicyForAgent(orgId: string, agentId: string) {
-    const policy = await this.getPolicy(orgId)
-    if (!policy) return undefined
-    const list = this.profiles.get(orgId) || []
-    let profile: PolicyProfile | null = null
-    const profileId = this.agentProfileOverride.get(agentId)
-    if (profileId) {
-      profile = list.find((p) => p.id === profileId) || null
-    } else {
-      const userId = this.agentUserOverride.get(agentId)
-      if (userId) {
-        const user = (this.users.get(orgId) || []).find((u) => u.id === userId)
-        if (user) {
-          profile =
-            list.find((p) => (p.assignedUserIds || []).includes(user.id)) ||
-            null
-          if (!profile) {
-            for (const gid of user.groupIds || []) {
-              profile =
-                list.find((p) => (p.assignedGroupIds || []).includes(gid)) ||
-                null
-              if (profile) break
-              const g = (this.groups.get(orgId) || []).find((x) => x.id === gid)
-              if (g?.policyProfileId) {
-                profile = list.find((x) => x.id === g.policyProfileId) || null
-                if (profile) break
-              }
-            }
+  private async resolveProfileForAgent(
+    orgId: string,
+    agent: Agent | undefined
+  ): Promise<PolicyProfile | null> {
+    if (!agent) return null
+    const list = await this.listProfiles(orgId)
+    if (agent.policyProfileId) {
+      return list.find((p) => p.id === agent.policyProfileId) || null
+    }
+    if (agent.userId) {
+      const users = await this.listUsers(orgId)
+      const user = users.find((u) => u.id === agent.userId)
+      if (user) {
+        const byUser = list.find((p) =>
+          (p.assignedUserIds || []).includes(user.id)
+        )
+        if (byUser) return byUser
+        const groups = await this.listGroups(orgId)
+        for (const gid of user.groupIds || []) {
+          const byGroup = list.find((p) =>
+            (p.assignedGroupIds || []).includes(gid)
+          )
+          if (byGroup) return byGroup
+          const g = groups.find((x) => x.id === gid)
+          if (g?.policyProfileId) {
+            const p = list.find((x) => x.id === g.policyProfileId)
+            if (p) return p
           }
         }
       }
     }
+    return null
+  }
+
+  async getEffectivePolicyForAgent(
+    orgId: string,
+    agentId: string
+  ): Promise<EffectivePolicyBundle | undefined> {
+    const policy = await this.getPolicy(orgId)
+    if (!policy) return undefined
+    const agents = await this.listAgents(orgId)
+    const agent = agents.find((a) => a.id === agentId)
+    const profile = await this.resolveProfileForAgent(orgId, agent)
+
     const effective = profile
       ? {
           defaultAction: profile.defaultAction,
@@ -858,6 +1224,7 @@ export class PgStore implements OpsGateStore {
           eventReporting: policy.eventReporting,
           protectUnenroll: policy.protectUnenroll
         }
+
     const unenroll = await this.listUnenrollAdmins(orgId)
     const admins = unenroll.map((a) => ({
       id: a.id,
@@ -869,37 +1236,61 @@ export class PgStore implements OpsGateStore {
     return { policy, profile, effective, admins, licensed }
   }
 
-  private agentLicenseOverride = new Map<string, boolean>()
-
   async isAgentLicensed(orgId: string, agentId: string) {
-    if (this.agentLicenseOverride.has(agentId)) {
-      return this.agentLicenseOverride.get(agentId) !== false
-    }
-    return true // défaut licensed (démo)
+    const { rows } = await this.pool.query(
+      `SELECT license_assigned FROM agents WHERE org_id = $1 AND id = $2`,
+      [orgId, agentId]
+    )
+    if (!rows[0]) return false
+    return rows[0].license_assigned !== false
   }
 
   async setAgentLicense(orgId: string, agentId: string, licensed: boolean) {
-    const agents = await this.listAgents(orgId)
-    const agent = agents.find((a) => a.id === agentId)
-    if (!agent) return undefined
-    this.agentLicenseOverride.set(agentId, licensed)
+    const org = await this.getOrg(orgId)
+    if (!org) return undefined
+    if (licensed && org.licenseSeats && org.licenseSeats > 0) {
+      const { rows: cnt } = await this.pool.query(
+        `SELECT COUNT(*)::int AS n FROM agents
+         WHERE org_id = $1 AND license_assigned = TRUE AND id <> $2`,
+        [orgId, agentId]
+      )
+      if ((cnt[0]?.n || 0) >= org.licenseSeats) return undefined
+    }
+    const { rows } = await this.pool.query(
+      `UPDATE agents SET
+         license_assigned = $3,
+         unlicensed_since = CASE WHEN $3 THEN NULL ELSE COALESCE(unlicensed_since, NOW()) END
+       WHERE org_id = $1 AND id = $2 RETURNING *`,
+      [orgId, agentId, licensed]
+    )
+    if (!rows[0]) return undefined
     await this.forceConfigSync(orgId)
-    return { ...agent, licenseAssigned: licensed }
+    return rowAgent(rows[0])
   }
 
   async getLicenseStats(orgId: string) {
+    const org = await this.getOrg(orgId)
     const agents = await this.listAgents(orgId)
     let licensed_agents = 0
     let unlicensed_agents = 0
+    let grace_agents = 0
+    const graceMs = 5 * 60 * 1000
     for (const a of agents) {
-      if (await this.isAgentLicensed(orgId, a.id)) licensed_agents++
-      else unlicensed_agents++
+      if (a.licenseAssigned !== false) {
+        licensed_agents++
+        continue
+      }
+      unlicensed_agents++
+      if (a.unlicensedSince) {
+        const age = Date.now() - new Date(a.unlicensedSince).getTime()
+        if (age < graceMs) grace_agents++
+      }
     }
-    const seats = 0 // illimité en pg pilot sans colonne seats
+    const seats = org?.licenseSeats ?? 0
     return {
       licensed_agents,
       unlicensed_agents,
-      grace_agents: 0,
+      grace_agents,
       seats,
       seats_used: licensed_agents,
       seats_available: seats > 0 ? Math.max(0, seats - licensed_agents) : null
@@ -925,7 +1316,7 @@ export class PgStore implements OpsGateStore {
         hostname: "opsgate-agent",
         decision: "unenroll",
         detection_count: 0,
-        highest_severity: "low",
+        highest_severity: "warning",
         rule_ids: ["system.unenroll"],
         types: ["unenroll", exitActor],
         exit_actor: exitActor,
@@ -952,12 +1343,15 @@ export class PgStore implements OpsGateStore {
   async requestPasswordResetOtp(orgId: string) {
     const otp = newOtpCode(6)
     const expiresIn = 10 * 60
-    this.otpChallenges.set(orgId, {
-      orgId,
-      codeHash: hashManagementPassword(otp),
-      expiresAt: Date.now() + expiresIn * 1000,
-      createdAt: Date.now()
-    })
+    await this.pool.query(
+      `INSERT INTO password_reset_challenges (org_id, code_hash, expires_at, created_at)
+       VALUES ($1, $2, to_timestamp($3/1000.0), NOW())
+       ON CONFLICT (org_id) DO UPDATE SET
+         code_hash = EXCLUDED.code_hash,
+         expires_at = EXCLUDED.expires_at,
+         created_at = NOW()`,
+      [orgId, hashManagementPassword(otp), Date.now() + expiresIn * 1000]
+    )
     console.log(
       `[opsgate-otp] org=${orgId} password-reset OTP=${otp} (dev — would email admin)`
     )
@@ -976,13 +1370,19 @@ export class PgStore implements OpsGateStore {
     newPassword: string,
     _adminId?: string
   ) {
-    const ch = this.otpChallenges.get(orgId)
-    if (!ch) return { ok: false as const, error: "no_challenge" }
-    if (Date.now() > ch.expiresAt) {
-      this.otpChallenges.delete(orgId)
+    const { rows } = await this.pool.query(
+      `SELECT * FROM password_reset_challenges WHERE org_id = $1`,
+      [orgId]
+    )
+    if (!rows[0]) return { ok: false as const, error: "no_challenge" }
+    if (Date.now() > new Date(rows[0].expires_at).getTime()) {
+      await this.pool.query(
+        `DELETE FROM password_reset_challenges WHERE org_id = $1`,
+        [orgId]
+      )
       return { ok: false as const, error: "otp_expired" }
     }
-    if (hashManagementPassword(otp.trim()) !== ch.codeHash) {
+    if (hashManagementPassword(otp.trim()) !== rows[0].code_hash) {
       return { ok: false as const, error: "otp_invalid" }
     }
     if (!newPassword || newPassword.length < 6) {
@@ -991,11 +1391,16 @@ export class PgStore implements OpsGateStore {
     const principal = await this.getPrincipalAdmin(orgId)
     if (!principal) return { ok: false as const, error: "principal_missing" }
     const hash = hashManagementPassword(newPassword)
-    principal.passwordHash = hash
-    principal.mustChangePassword = false
-    principal.updatedAt = new Date().toISOString()
+    await this.pool.query(
+      `UPDATE org_admins SET password_hash = $2, must_change_password = FALSE, updated_at = NOW()
+       WHERE id = $1`,
+      [principal.id, hash]
+    )
     await this.updatePolicy(orgId, { managementPasswordHash: hash })
-    this.otpChallenges.delete(orgId)
+    await this.pool.query(
+      `DELETE FROM password_reset_challenges WHERE org_id = $1`,
+      [orgId]
+    )
     return { ok: true as const }
   }
 
@@ -1055,10 +1460,10 @@ export class PgStore implements OpsGateStore {
 
     const existing = await this.listPacks(input.orgId)
     const base = (await this.getActivePack(input.orgId))?.version
-    const version = bumpVersion(base)
-    if (existing.some((p) => p.version === version)) {
-      return { ok: false, errors: [`version_collision:${version}`] }
-    }
+    const version = nextFreeVersion(
+      existing.map((p) => p.version),
+      base
+    )
 
     const activate = input.activate !== false
     const pack = materializePack({
@@ -1103,12 +1508,19 @@ export class PgStore implements OpsGateStore {
         nextPolicy = {
           ...policy,
           version: policy.version + 1,
+          configEpoch: (policy.configEpoch || 0) + 1,
           rulesPackVersion: pack.version,
           updatedAt: new Date().toISOString()
         }
         await client.query(
-          `UPDATE policies SET version=$2, rules_pack_version=$3, updated_at=$4 WHERE org_id=$1`,
-          [input.orgId, nextPolicy.version, pack.version, nextPolicy.updatedAt]
+          `UPDATE policies SET version=$2, rules_pack_version=$3, config_epoch=$4, updated_at=$5 WHERE org_id=$1`,
+          [
+            input.orgId,
+            nextPolicy.version,
+            pack.version,
+            nextPolicy.configEpoch,
+            nextPolicy.updatedAt
+          ]
         )
       }
       await client.query("COMMIT")
@@ -1143,12 +1555,19 @@ export class PgStore implements OpsGateStore {
       const nextPolicy: Policy = {
         ...policy,
         version: policy.version + 1,
+        configEpoch: (policy.configEpoch || 0) + 1,
         rulesPackVersion: pack.version,
         updatedAt: new Date().toISOString()
       }
       await client.query(
-        `UPDATE policies SET version=$2, rules_pack_version=$3, updated_at=$4 WHERE org_id=$1`,
-        [orgId, nextPolicy.version, pack.version, nextPolicy.updatedAt]
+        `UPDATE policies SET version=$2, rules_pack_version=$3, config_epoch=$4, updated_at=$5 WHERE org_id=$1`,
+        [
+          orgId,
+          nextPolicy.version,
+          pack.version,
+          nextPolicy.configEpoch,
+          nextPolicy.updatedAt
+        ]
       )
       await client.query("COMMIT")
       return { ok: true, pack: { ...pack, active: true }, policy: nextPolicy }
@@ -1167,10 +1586,25 @@ export class PgStore implements OpsGateStore {
     hostName?: string
     appVersion?: string
     userId?: string
+    personalLicenseKey?: string
   }): Promise<Agent & { replaced?: boolean }> {
     const now = new Date().toISOString()
     const tokenHash = hashToken(input.token)
     const label = (input.deviceLabel || "").trim()
+    const org = await this.getOrg(input.orgId)
+    const personal = !!org?.isPersonal
+
+    let assignLicense = true
+    if (personal) {
+      assignLicense = isValidPersonalLicenseKey(input.personalLicenseKey)
+    } else if (org?.licenseSeats && org.licenseSeats > 0) {
+      const { rows } = await this.pool.query(
+        `SELECT COUNT(*)::int AS n FROM agents WHERE org_id = $1 AND license_assigned = TRUE`,
+        [input.orgId]
+      )
+      // leave room if re-enrolling same label
+      assignLicense = (rows[0]?.n || 0) < org.licenseSeats
+    }
 
     if (label) {
       const { rows: existing } = await this.pool.query(
@@ -1185,7 +1619,11 @@ export class PgStore implements OpsGateStore {
              token_hash = $2,
              app_version = COALESCE($3, app_version),
              device_label = $4,
-             last_seen_at = $5
+             host_name = COALESCE($5, host_name),
+             user_id = COALESCE($6, user_id),
+             last_seen_at = $7,
+             personal_account = $8,
+             license_assigned = CASE WHEN $9 THEN TRUE ELSE license_assigned END
            WHERE id = $1
            RETURNING *`,
           [
@@ -1193,38 +1631,50 @@ export class PgStore implements OpsGateStore {
             tokenHash,
             input.appVersion ?? null,
             label,
-            now
+            input.hostName ?? null,
+            input.userId ?? null,
+            now,
+            personal,
+            assignLicense
           ]
         )
         return { ...rowAgent(rows[0]), replaced: true }
       }
     }
 
-    const agent: Agent = {
-      id: newId("agt"),
-      orgId: input.orgId,
-      deviceLabel: input.deviceLabel,
-      hostName: input.hostName,
-      enrolledAt: now,
-      tokenHash,
-      appVersion: input.appVersion,
-      lastSeenAt: now,
-      licenseAssigned: true
+    // If seats full and not personal key valid
+    if (!assignLicense && personal) {
+      // still create agent unlicensed
+    } else if (
+      !personal &&
+      org?.licenseSeats &&
+      org.licenseSeats > 0 &&
+      !assignLicense
+    ) {
+      // enroll unlicensed if no seats
     }
-    await this.pool.query(
-      `INSERT INTO agents (id, org_id, device_label, enrolled_at, token_hash, app_version, last_seen_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+
+    const agentId = newId("agt")
+    const { rows } = await this.pool.query(
+      `INSERT INTO agents (
+         id, org_id, device_label, host_name, enrolled_at, token_hash, app_version,
+         last_seen_at, user_id, license_assigned, unlicensed_since, personal_account
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$5,$8,$9,$10,$11) RETURNING *`,
       [
-        agent.id,
-        agent.orgId,
-        agent.deviceLabel ?? null,
-        agent.enrolledAt,
-        agent.tokenHash,
-        agent.appVersion ?? null,
-        agent.lastSeenAt
+        agentId,
+        input.orgId,
+        input.deviceLabel ?? null,
+        input.hostName ?? null,
+        now,
+        tokenHash,
+        input.appVersion ?? null,
+        input.userId ?? null,
+        assignLicense,
+        assignLicense ? null : now,
+        personal
       ]
     )
-    return { ...agent, replaced: false }
+    return { ...rowAgent(rows[0]), replaced: false }
   }
 
   async resolveAgentByToken(token: string): Promise<Agent | undefined> {
@@ -1238,10 +1688,6 @@ export class PgStore implements OpsGateStore {
 
   async revokeAgentByToken(token: string): Promise<boolean> {
     const hash = hashToken(token)
-    // events: garder l'historique, détacher l'agent (SET NULL agent_id impossible si FK)
-    // → on supprime l'agent ; events en CASCADE si ON DELETE CASCADE
-    // schema has ON DELETE CASCADE on events.agent_id — history lost for that agent
-    // better: ON DELETE SET NULL — for now CASCADE is ok for pilot; or delete agent only
     const { rowCount } = await this.pool.query(
       `DELETE FROM agents WHERE token_hash = $1`,
       [hash]
@@ -1292,7 +1738,7 @@ export class PgStore implements OpsGateStore {
       }
 
       try {
-        const res = await this.pool.query(
+        await this.pool.query(
           `INSERT INTO detection_events (
             id, org_id, agent_id, client_event_id, ts, source, hostname, decision,
             detection_count, highest_severity, rule_ids, types, masked, file_names, schema_version, received_at
@@ -1317,9 +1763,7 @@ export class PgStore implements OpsGateStore {
             now
           ]
         )
-        // both insert and conflict count as accepted for idempotence
         accepted++
-        void res
       } catch (e) {
         rejected.push({ index, reason: String(e) })
       }
@@ -1349,19 +1793,16 @@ export class PgStore implements OpsGateStore {
     const byDecision: Record<string, number> = {}
     for (const r of decRows) byDecision[r.decision] = r.n
 
+    const topRules: { rule_id: string; count: number }[] = []
     const { rows: ruleRows } = await this.pool.query(
       `SELECT jsonb_array_elements_text(rule_ids) AS rule_id, COUNT(*)::int AS n
        FROM detection_events WHERE org_id = $1
        GROUP BY rule_id ORDER BY n DESC LIMIT 5`,
       [orgId]
     )
-    // rule_ids may be empty from agent; fall back to types expansion not needed
-    const topRules = ruleRows.map((r) => ({
-      rule_id: r.rule_id,
-      count: r.n
-    }))
-
-    // If rule_ids empty, aggregate from types
+    for (const r of ruleRows) {
+      topRules.push({ rule_id: r.rule_id, count: r.n })
+    }
     if (topRules.length === 0) {
       const { rows: typeRows } = await this.pool.query(
         `SELECT jsonb_array_elements_text(types) AS rule_id, COUNT(*)::int AS n
@@ -1379,6 +1820,9 @@ export class PgStore implements OpsGateStore {
       `SELECT COUNT(*)::int AS n FROM rule_packs WHERE org_id = $1`,
       [orgId]
     )
+    const admins = await this.listAdmins(orgId)
+    const groups = await this.listGroups(orgId)
+    const users = await this.listUsers(orgId)
 
     return {
       org_id: orgId,
@@ -1393,11 +1837,10 @@ export class PgStore implements OpsGateStore {
             checksum: activePack.checksum
           }
         : null,
-      packs_published: packCount[0]?.n || 0
+      packs_published: packCount[0]?.n || 0,
+      admins_count: admins.length,
+      groups_count: groups.length,
+      users_count: users.length
     }
-  }
-
-  async close() {
-    await this.pool.end()
   }
 }

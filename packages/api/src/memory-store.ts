@@ -12,8 +12,8 @@ import {
 } from "./crypto"
 import {
   buildGlobalRulesPack,
-  bumpVersion,
   materializePack,
+  nextFreeVersion,
   toPayload,
   validateRules
 } from "./rules-pack"
@@ -101,7 +101,11 @@ export class MemoryStore implements OpsGateStore {
       "chatgpt.com",
       "chat.openai.com",
       "claude.ai",
-      "gemini.google.com"
+      "gemini.google.com",
+      "copilot.microsoft.com",
+      "perplexity.ai",
+      "chat.deepseek.com",
+      "aistudio.google.com"
     ]
 
     const policy: Policy = {
@@ -266,7 +270,11 @@ export class MemoryStore implements OpsGateStore {
         "chatgpt.com",
         "chat.openai.com",
         "claude.ai",
-        "gemini.google.com"
+        "gemini.google.com",
+        "copilot.microsoft.com",
+        "perplexity.ai",
+        "chat.deepseek.com",
+        "aistudio.google.com"
       ],
       scanUploads: true,
       eventReporting: false,
@@ -1092,11 +1100,7 @@ export class MemoryStore implements OpsGateStore {
 
     const versions = (this.packs.get(input.orgId) || []).map((p) => p.version)
     const base = (await this.getActivePack(input.orgId))?.version
-    const version = bumpVersion(base)
-
-    if (versions.includes(version)) {
-      return { ok: false, errors: [`version_collision:${version}`] }
-    }
+    const version = nextFreeVersion(versions, base)
 
     const activate = input.activate !== false
     const pack = materializePack({

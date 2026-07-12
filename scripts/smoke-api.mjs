@@ -1,15 +1,20 @@
 /**
- * Smoke test API PR1+PR2
+ * Smoke test API V1
  * Usage: pnpm api:dev  puis  pnpm api:smoke
  */
 const BASE = process.env.OPSGATE_API || "http://127.0.0.1:8787"
-const ADMIN = { "X-OpsGate-Dev-Admin": "demo" }
+const SETUP_EMAIL = process.env.OPSGATE_SETUP_EMAIL || "admin@demo.local"
+const SETUP_PASSWORD = process.env.OPSGATE_SETUP_PASSWORD || "0000"
+
+/** @type {Record<string, string>} */
+let ADMIN = {}
 
 async function req(path, opts = {}) {
   const res = await fetch(`${BASE}${path}`, {
     ...opts,
     headers: {
       "content-type": "application/json",
+      ...ADMIN,
       ...(opts.headers || {})
     }
   })
@@ -46,6 +51,23 @@ async function main() {
   } catch (e) {
     fail("GET /health", e)
     console.log("\nIs the API running?  pnpm api:dev")
+    process.exit(1)
+  }
+
+  try {
+    const login = await req("/v1/auth/login", {
+      method: "POST",
+      body: JSON.stringify({
+        email: SETUP_EMAIL,
+        password: SETUP_PASSWORD
+      })
+    })
+    assert(login.status === 200, `login ${login.status} ${JSON.stringify(login.body)}`)
+    assert(login.body?.token, "no admin token")
+    ADMIN = { Authorization: `Bearer ${login.body.token}` }
+    ok(`POST /v1/auth/login (${SETUP_EMAIL})`)
+  } catch (e) {
+    fail("POST /v1/auth/login", e)
     process.exit(1)
   }
 

@@ -345,5 +345,51 @@
     "keywords": ["arista", "eos", "Ethernet", "management api"],
     "action_default": "mask",
     "description": "Extrait de configuration Arista EOS"
+  },
+  {
+    "id": "openai-anthropic-keys",
+    "name": "Clés OpenAI / Anthropic / AI vendors",
+    "category": "general",
+    "severity": "high",
+    "patterns": [
+      "\\bsk-proj-[A-Za-z0-9_-]{20,}\\b",
+      "\\bsk-ant-api03-[A-Za-z0-9_-]{20,}\\b",
+      "\\bsk-or-v1-[A-Za-z0-9]{20,}\\b",
+      "\\bgsk_[A-Za-z0-9]{20,}\\b",
+      "\\br8_[A-Za-z0-9]{20,}\\b",
+      "\\bhf_[A-Za-z0-9]{20,}\\b"
+    ],
+    "keywords": ["openai", "anthropic", "groq", "replicate", "huggingface"],
+    "action_default": "mask",
+    "description": "Clés API OpenAI project, Anthropic, OpenRouter, Groq, Replicate, HuggingFace"
+  },
+  {
+    "id": "gitlab-discord-tokens",
+    "name": "GitLab / Discord tokens",
+    "category": "general",
+    "severity": "high",
+    "patterns": [
+      "\\bglpat-[A-Za-z0-9_-]{20,}\\b",
+      "\\bghp_[A-Za-z0-9]{36}\\b",
+      "\\bgho_[A-Za-z0-9]{36}\\b",
+      "\\bMT[A-Za-z0-9_-]{50,}\\.[A-Za-z0-9_-]{5,}\\.[A-Za-z0-9_-]{20,}\\b"
+    ],
+    "keywords": ["gitlab", "discord", "bot token", "personal access token"],
+    "action_default": "mask",
+    "description": "Tokens GitLab PAT, GitHub (variants), bot Discord"
+  },
+  {
+    "id": "dotenv-secrets",
+    "name": "Fichier .env / secrets app",
+    "category": "general",
+    "severity": "high",
+    "patterns": [
+      "(?i)\\b[A-Z][A-Z0-9_]*(SECRET|TOKEN|PASSWORD|API_KEY|PRIVATE_KEY)[A-Z0-9_]*\\s*=\\s*[^\\s]{8,}",
+      "(?i)\\bDATABASE_URL\\s*=\\s*(postgres|mysql|mongodb)[^\\s]+",
+      "(?i)\\b(REDIS|MONGO|MYSQL)_URL\\s*=\\s*[^\\s]+"
+    ],
+    "keywords": [".env", "DATABASE_URL", "SECRET_KEY"],
+    "action_default": "mask",
+    "description": "Variables d'environnement sensibles collées dans un prompt"
   }
 ]

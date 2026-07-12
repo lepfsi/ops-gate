@@ -1,6 +1,6 @@
 {
   "name": "@opsgate/engine",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "OpsGate detection engine — rules, detect, mask (local, shared by agent/proxy/console)",
   "private": true,
   "type": "module",

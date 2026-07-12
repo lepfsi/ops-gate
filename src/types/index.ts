@@ -112,7 +112,11 @@ export const DEFAULT_SETTINGS: OpsGateSettings = {
     "chatgpt.com",
     "chat.openai.com",
     "claude.ai",
-    "gemini.google.com"
+    "gemini.google.com",
+    "copilot.microsoft.com",
+    "perplexity.ai",
+    "chat.deepseek.com",
+    "aistudio.google.com"
   ]
 }
 

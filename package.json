@@ -1,7 +1,7 @@
 {
   "name": "ops-gate",
   "displayName": "OpsGate",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Protégez les données de votre entreprise dans chaque interaction avec l'IA.",
   "author": "OpsGate",
   "private": true,
@@ -42,6 +42,12 @@
       "https://chat.openai.com/*",
       "https://claude.ai/*",
       "https://gemini.google.com/*",
+      "https://copilot.microsoft.com/*",
+      "https://www.bing.com/*",
+      "https://perplexity.ai/*",
+      "https://www.perplexity.ai/*",
+      "https://chat.deepseek.com/*",
+      "https://aistudio.google.com/*",
       "http://127.0.0.1:8787/*",
       "http://localhost:8787/*"
     ],
