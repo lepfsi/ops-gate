@@ -9,16 +9,20 @@
 
 ## Charte rapide
 
+### Couleurs organisation (DailyOps.Tech — `docs/ChatGPT Image…png`)
+
 | Token | Hex | Usage |
 |-------|-----|--------|
-| Navy | `#0f172a` | Fonds sombres, topbar console, texte logo |
-| Navy 2 | `#1e293b` | Hover, surfaces sombres |
-| Cyan | `#22d3ee` | Accent, glow icône, badges |
-| Cyan light | `#67e8f9` | Highlights secondaires |
-| Cyan ink | `#0e7490` | Texte sur fond clair |
+| Accent teal | `#2BD9C5` | Boutons accent, badges, glow |
+| Near black | `#0A1128` | Topbar, navy primaire |
+| Deep blue | `#111C44` | Dégradés, hover sombre |
+| Slate | `#1E293B` | Surfaces secondaires |
+| Cool gray | `#94A3B8` | Texte muted |
+| White | `#FFFFFF` | Fonds clairs |
 
-**Concept logo** : filtre de sécurité devant une **porte de sortie** (gate + shield).
+### Produit OpsGate (logo gate/shield)
 
-**Raffinement** : `opsgate-icon-refined.jpg` (source pour regénérer 16–128 px store).
+**Concept** : filtre de sécurité devant une **porte de sortie** (gate + shield).  
+Assets : `assets/icons/`, `opsgate-wordmark.png`, `opsgate-icon-refined.jpg`.
 
-Ton : professionnel, ops / cybersécurité, non alarmiste.
+Ton : professionnel, ops / cybersécurité, non alarmiste. Charte DailyOps pour l’UI console ; identité OpsGate pour l’icône extension.
