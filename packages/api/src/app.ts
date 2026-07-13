@@ -557,6 +557,7 @@ export function createApp() {
         }
         return {
           id: a.id,
+          group_id: a.groupId || null,
           device_label: a.deviceLabel,
           host_name: a.hostName || null,
           app_version: a.appVersion,
@@ -1327,6 +1328,10 @@ export function createApp() {
   v1.get("/org/audit", async (c) => {
     const _gate = await requireConsoleAuth(c, "console_access")
     if (!_gate.ok) return c.json({ error: _gate.error }, _gate.status)
+    // Réservé au principal (pas les admins secondaires)
+    if (!_gate.admin.isPrincipal) {
+      return c.json({ error: "principal_only", message: "Audit réservé à l'Administrator principal." }, 403)
+    }
     const org = await store.getOrg(_gate.orgId)
     if (!org) return c.json({ error: "no_org" }, 404)
     const action = c.req.query("action") || undefined
@@ -1335,6 +1340,187 @@ export function createApp() {
       action
     })
     return c.json({ org_id: org.id, events })
+  })
+
+  // ── Moving rules (affectation auto agents → groupes) ──
+  v1.get("/org/moving-rules", async (c) => {
+    const _gate = await requireConsoleAuth(c, "console_access")
+    if (!_gate.ok) return c.json({ error: _gate.error }, _gate.status)
+    const org = await store.getOrg(_gate.orgId)
+    if (!org) return c.json({ error: "no_org" }, 404)
+    return c.json({ org_id: org.id, rules: await store.listMovingRules(org.id) })
+  })
+
+  v1.post("/org/moving-rules", async (c) => {
+    const _gate = await requireConsoleAuth(c, "manage_policies")
+    if (!_gate.ok) return c.json({ error: _gate.error }, _gate.status)
+    const org = await store.getOrg(_gate.orgId)
+    if (!org) return c.json({ error: "no_org" }, 404)
+    let body: {
+      name?: string
+      enabled?: boolean
+      match_field?: "device_label" | "host_name"
+      match_op?: "starts_with" | "contains" | "equals" | "regex"
+      match_value?: string
+      target_group_id?: string
+      priority?: number
+      only_if_unassigned?: boolean
+    }
+    try {
+      body = await c.req.json()
+    } catch {
+      return c.json({ error: "invalid_json" }, 400)
+    }
+    if (
+      !body.name?.trim() ||
+      !body.match_field ||
+      !body.match_op ||
+      !body.match_value?.trim() ||
+      !body.target_group_id
+    ) {
+      return c.json({ error: "invalid_moving_rule" }, 400)
+    }
+    const rule = await store.upsertMovingRule(org.id, {
+      name: body.name.trim(),
+      enabled: body.enabled,
+      matchField: body.match_field,
+      matchOp: body.match_op,
+      matchValue: body.match_value.trim(),
+      targetGroupId: body.target_group_id,
+      priority: body.priority,
+      onlyIfUnassigned: body.only_if_unassigned
+    })
+    await store.appendAdminAudit({
+      orgId: org.id,
+      adminId: _gate.admin.id,
+      adminEmail: _gate.admin.email,
+      adminLabel: _gate.admin.label,
+      action: "moving_rule_upsert",
+      detail: `Création règle « ${rule?.name} »`
+    })
+    return c.json({ ok: true, rule })
+  })
+
+  v1.patch("/org/moving-rules/:ruleId", async (c) => {
+    const _gate = await requireConsoleAuth(c, "manage_policies")
+    if (!_gate.ok) return c.json({ error: _gate.error }, _gate.status)
+    const org = await store.getOrg(_gate.orgId)
+    if (!org) return c.json({ error: "no_org" }, 404)
+    let body: Record<string, unknown>
+    try {
+      body = await c.req.json()
+    } catch {
+      return c.json({ error: "invalid_json" }, 400)
+    }
+    const existing = (await store.listMovingRules(org.id)).find(
+      (r) => r.id === c.req.param("ruleId")
+    )
+    if (!existing) return c.json({ error: "not_found" }, 404)
+    const rule = await store.upsertMovingRule(org.id, {
+      id: existing.id,
+      name: (body.name as string) || existing.name,
+      enabled:
+        body.enabled !== undefined ? !!body.enabled : existing.enabled,
+      matchField:
+        (body.match_field as typeof existing.matchField) || existing.matchField,
+      matchOp: (body.match_op as typeof existing.matchOp) || existing.matchOp,
+      matchValue:
+        (body.match_value as string) || existing.matchValue,
+      targetGroupId:
+        (body.target_group_id as string) || existing.targetGroupId,
+      priority:
+        body.priority !== undefined
+          ? Number(body.priority)
+          : existing.priority,
+      onlyIfUnassigned:
+        body.only_if_unassigned !== undefined
+          ? !!body.only_if_unassigned
+          : existing.onlyIfUnassigned
+    })
+    await store.appendAdminAudit({
+      orgId: org.id,
+      adminId: _gate.admin.id,
+      adminEmail: _gate.admin.email,
+      adminLabel: _gate.admin.label,
+      action: "moving_rule_upsert",
+      detail: `Modif règle « ${rule?.name} »`
+    })
+    return c.json({ ok: true, rule })
+  })
+
+  v1.delete("/org/moving-rules/:ruleId", async (c) => {
+    const _gate = await requireConsoleAuth(c, "manage_policies")
+    if (!_gate.ok) return c.json({ error: _gate.error }, _gate.status)
+    const org = await store.getOrg(_gate.orgId)
+    if (!org) return c.json({ error: "no_org" }, 404)
+    const ok = await store.deleteMovingRule(org.id, c.req.param("ruleId"))
+    if (!ok) return c.json({ error: "not_found" }, 404)
+    await store.appendAdminAudit({
+      orgId: org.id,
+      adminId: _gate.admin.id,
+      adminEmail: _gate.admin.email,
+      adminLabel: _gate.admin.label,
+      action: "moving_rule_delete",
+      detail: `Suppression règle ${c.req.param("ruleId")}`
+    })
+    return c.json({ ok: true })
+  })
+
+  v1.post("/org/moving-rules/apply-all", async (c) => {
+    const _gate = await requireConsoleAuth(c, "manage_policies")
+    if (!_gate.ok) return c.json({ error: _gate.error }, _gate.status)
+    const org = await store.getOrg(_gate.orgId)
+    if (!org) return c.json({ error: "no_org" }, 404)
+    const agents = await store.listAgents(org.id)
+    let applied = 0
+    for (const a of agents) {
+      const r = await store.applyMovingRules(org.id, a.id)
+      if (r.applied) applied++
+    }
+    await store.appendAdminAudit({
+      orgId: org.id,
+      adminId: _gate.admin.id,
+      adminEmail: _gate.admin.email,
+      adminLabel: _gate.admin.label,
+      action: "moving_rule_apply",
+      detail: `Ré-évaluation ${applied}/${agents.length} agents`
+    })
+    await store.forceConfigSync(org.id)
+    return c.json({ ok: true, applied, total: agents.length })
+  })
+
+  v1.post("/org/agents/bulk-assign", async (c) => {
+    const _gate = await requireConsoleAuth(c, "manage_policies")
+    if (!_gate.ok) return c.json({ error: _gate.error }, _gate.status)
+    const org = await store.getOrg(_gate.orgId)
+    if (!org) return c.json({ error: "no_org" }, 404)
+    let body: {
+      agent_ids?: string[]
+      policy_profile_id?: string | null
+      group_id?: string | null
+    }
+    try {
+      body = await c.req.json()
+    } catch {
+      return c.json({ error: "invalid_json" }, 400)
+    }
+    if (!body.agent_ids?.length) {
+      return c.json({ error: "agent_ids_required" }, 400)
+    }
+    const result = await store.bulkAssignAgents(org.id, body.agent_ids, {
+      policyProfileId: body.policy_profile_id,
+      groupId: body.group_id
+    })
+    await store.appendAdminAudit({
+      orgId: org.id,
+      adminId: _gate.admin.id,
+      adminEmail: _gate.admin.email,
+      adminLabel: _gate.admin.label,
+      action: "agent_assign",
+      detail: `Bulk assign ${result.updated} agent(s)`,
+      meta: body as Record<string, unknown>
+    })
+    return c.json({ ok: true, ...result })
   })
 
   v1.get("/org/events", async (c) => {
@@ -1404,14 +1590,41 @@ export function createApp() {
     }
 
     const policy = await store.updatePolicy(org.id, patch)
+    const parts: string[] = []
+    if (patch.defaultAction !== undefined)
+      parts.push(`action=${patch.defaultAction}`)
+    if (patch.enabledHosts)
+      parts.push(`hosts=[${patch.enabledHosts.slice(0, 8).join(", ")}${patch.enabledHosts.length > 8 ? "…" : ""}] (${patch.enabledHosts.length})`)
+    if (patch.scanUploads !== undefined)
+      parts.push(`uploads=${patch.scanUploads}`)
+    if (patch.eventReporting !== undefined)
+      parts.push(`events=${patch.eventReporting}`)
+    if (patch.protectUnenroll !== undefined)
+      parts.push(`protect_unenroll=${patch.protectUnenroll}`)
+    if (patch.managementPasswordHash !== undefined)
+      parts.push(
+        patch.managementPasswordHash
+          ? "mdp_désinscription=modifié"
+          : "mdp_désinscription=retiré"
+      )
+    if (patch.rulesPackVersion)
+      parts.push(`pack=${patch.rulesPackVersion}`)
+    if (patch.configEpoch !== undefined)
+      parts.push(`epoch=${patch.configEpoch}`)
     await store.appendAdminAudit({
       orgId: org.id,
       adminId: _gate.admin.id,
       adminEmail: _gate.admin.email,
       adminLabel: _gate.admin.label,
       action: "policy_update",
-      detail: "Mise à jour policy org",
-      meta: patch as Record<string, unknown>
+      detail:
+        parts.length > 0
+          ? `Policy org · ${parts.join(" · ")}`
+          : "Mise à jour policy org",
+      meta: {
+        fields: Object.keys(patch),
+        hosts_count: patch.enabledHosts?.length
+      }
     })
     return c.json({
       ok: true,

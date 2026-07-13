@@ -99,6 +99,7 @@ export type AgentRow = {
   last_seen_at: string
   policy_profile_id?: string | null
   user_id?: string | null
+  group_id?: string | null
   personal_account?: boolean
   licensed?: boolean
   license_assigned?: boolean
@@ -195,6 +196,19 @@ export type GroupRow = {
   updatedAt: string
 }
 
+export type MovingRuleRow = {
+  id: string
+  orgId: string
+  name: string
+  enabled: boolean
+  matchField: "device_label" | "host_name"
+  matchOp: "starts_with" | "contains" | "equals" | "regex"
+  matchValue: string
+  targetGroupId: string
+  priority: number
+  onlyIfUnassigned: boolean
+}
+
 export const api = {
   health: () =>
     request<{ ok: boolean; ts: string }>("/health", { auth: false }),
@@ -240,6 +254,48 @@ export const api = {
     }>(
       `/v1/org/audit${action ? `?action=${encodeURIComponent(action)}` : ""}`
     ),
+
+  movingRules: () =>
+    request<{ org_id: string; rules: MovingRuleRow[] }>(
+      "/v1/org/moving-rules"
+    ),
+
+  createMovingRule: (body: {
+    name: string
+    match_field: string
+    match_op: string
+    match_value: string
+    target_group_id: string
+    priority?: number
+    only_if_unassigned?: boolean
+    enabled?: boolean
+  }) =>
+    request<{ ok: boolean; rule: MovingRuleRow }>("/v1/org/moving-rules", {
+      method: "POST",
+      body: JSON.stringify(body)
+    }),
+
+  deleteMovingRule: (id: string) =>
+    request<{ ok: boolean }>(
+      `/v1/org/moving-rules/${encodeURIComponent(id)}`,
+      { method: "DELETE" }
+    ),
+
+  applyMovingRules: () =>
+    request<{ ok: boolean; applied: number; total: number }>(
+      "/v1/org/moving-rules/apply-all",
+      { method: "POST" }
+    ),
+
+  bulkAssignAgents: (body: {
+    agent_ids: string[]
+    policy_profile_id?: string | null
+    group_id?: string | null
+  }) =>
+    request<{ ok: boolean; updated: number }>("/v1/org/agents/bulk-assign", {
+      method: "POST",
+      body: JSON.stringify(body)
+    }),
 
   me: () =>
     request<{

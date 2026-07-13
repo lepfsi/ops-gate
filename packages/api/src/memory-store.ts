@@ -65,6 +65,7 @@ export class MemoryStore implements OpsGateStore {
   private otpChallenges = new Map<string, PasswordResetChallenge>()
   private sessions = new Map<string, AdminSession>()
   private adminAudit: import("./types").AdminAuditEvent[] = []
+  private movingRules = new Map<string, import("./types").MovingRule[]>()
 
   constructor() {
     this.seed()
@@ -1268,6 +1269,7 @@ export class MemoryStore implements OpsGateStore {
             device_label: replaced.deviceLabel,
             rule_ids: ["system.enroll"]
           })
+          await this.applyMovingRules(input.orgId, existing.id)
           return replaced
         }
       }
@@ -1294,6 +1296,7 @@ export class MemoryStore implements OpsGateStore {
       device_label: agent.deviceLabel,
       rule_ids: ["system.enroll"]
     })
+    await this.applyMovingRules(input.orgId, agent.id)
     return agent
   }
 
@@ -1481,5 +1484,149 @@ export class MemoryStore implements OpsGateStore {
       list = list.filter((e) => e.action === opts.action)
     }
     return list.slice(-(opts?.limit || 100)).reverse()
+  }
+
+  async listMovingRules(orgId: string) {
+    return [...(this.movingRules.get(orgId) || [])].sort(
+      (a, b) => a.priority - b.priority
+    )
+  }
+
+  async upsertMovingRule(
+    orgId: string,
+    input: {
+      id?: string
+      name: string
+      enabled?: boolean
+      matchField: import("./types").MovingMatchField
+      matchOp: import("./types").MovingMatchOp
+      matchValue: string
+      targetGroupId: string
+      priority?: number
+      onlyIfUnassigned?: boolean
+    }
+  ) {
+    if (!this.orgs.has(orgId)) return undefined
+    const list = this.movingRules.get(orgId) || []
+    const now = new Date().toISOString()
+    if (input.id) {
+      const idx = list.findIndex((r) => r.id === input.id)
+      if (idx < 0) return undefined
+      list[idx] = {
+        ...list[idx],
+        name: input.name,
+        enabled: input.enabled !== false,
+        matchField: input.matchField,
+        matchOp: input.matchOp,
+        matchValue: input.matchValue,
+        targetGroupId: input.targetGroupId,
+        priority: input.priority ?? list[idx].priority,
+        onlyIfUnassigned:
+          input.onlyIfUnassigned !== undefined
+            ? input.onlyIfUnassigned
+            : list[idx].onlyIfUnassigned,
+        updatedAt: now
+      }
+      this.movingRules.set(orgId, list)
+      return list[idx]
+    }
+    const created: import("./types").MovingRule = {
+      id: newId("mvr"),
+      orgId,
+      name: input.name,
+      enabled: input.enabled !== false,
+      matchField: input.matchField,
+      matchOp: input.matchOp,
+      matchValue: input.matchValue,
+      targetGroupId: input.targetGroupId,
+      priority: input.priority ?? 100,
+      onlyIfUnassigned: input.onlyIfUnassigned !== false,
+      createdAt: now,
+      updatedAt: now
+    }
+    list.push(created)
+    this.movingRules.set(orgId, list)
+    return created
+  }
+
+  async deleteMovingRule(orgId: string, ruleId: string) {
+    const list = this.movingRules.get(orgId) || []
+    const next = list.filter((r) => r.id !== ruleId)
+    if (next.length === list.length) return false
+    this.movingRules.set(orgId, next)
+    return true
+  }
+
+  private matchMovingRule(value: string, op: string, pattern: string): boolean {
+    const v = value || ""
+    const p = pattern || ""
+    switch (op) {
+      case "starts_with":
+        return v.toLowerCase().startsWith(p.toLowerCase())
+      case "contains":
+        return v.toLowerCase().includes(p.toLowerCase())
+      case "equals":
+        return v.toLowerCase() === p.toLowerCase()
+      case "regex":
+        try {
+          return new RegExp(p, "i").test(v)
+        } catch {
+          return false
+        }
+      default:
+        return false
+    }
+  }
+
+  async applyMovingRules(orgId: string, agentId: string) {
+    const agent = this.agents.get(agentId)
+    if (!agent || agent.orgId !== orgId) return { applied: false as const }
+    const rules = await this.listMovingRules(orgId)
+    for (const rule of rules.filter((r) => r.enabled)) {
+      if (rule.onlyIfUnassigned && (agent.policyProfileId || agent.groupId)) {
+        continue
+      }
+      const fieldVal =
+        rule.matchField === "host_name"
+          ? agent.hostName || ""
+          : agent.deviceLabel || ""
+      if (!this.matchMovingRule(fieldVal, rule.matchOp, rule.matchValue)) {
+        continue
+      }
+      const group = (this.groups.get(orgId) || []).find(
+        (g) => g.id === rule.targetGroupId
+      )
+      if (!group) continue
+      agent.groupId = group.id
+      if (group.policyProfileId) agent.policyProfileId = group.policyProfileId
+      agent.lastSeenAt = new Date().toISOString()
+      return { applied: true as const, ruleId: rule.id, groupId: group.id }
+    }
+    return { applied: false as const }
+  }
+
+  async bulkAssignAgents(
+    orgId: string,
+    agentIds: string[],
+    opts: { policyProfileId?: string | null; groupId?: string | null }
+  ) {
+    let updated = 0
+    let profileId = opts.policyProfileId
+    if (opts.groupId) {
+      const g = (this.groups.get(orgId) || []).find((x) => x.id === opts.groupId)
+      if (g?.policyProfileId && profileId === undefined) {
+        profileId = g.policyProfileId
+      }
+    }
+    for (const id of agentIds) {
+      const a = this.agents.get(id)
+      if (!a || a.orgId !== orgId) continue
+      if (opts.groupId !== undefined) a.groupId = opts.groupId || undefined
+      if (profileId !== undefined) a.policyProfileId = profileId || undefined
+      a.lastSeenAt = new Date().toISOString()
+      updated++
+    }
+    if (updated > 0) await this.forceConfigSync(orgId)
+    return { updated }
   }
 }

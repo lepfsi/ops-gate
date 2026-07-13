@@ -28,11 +28,12 @@
 | Extension **non désinstallable** Chrome | **V2** — force-install MDM / Chrome enterprise policy |
 | Préférences système (thème, idle custom) | **V2** — fondation audit + idle fixe 5 min |
 
-## V2 — Durcissement client
+## V2 — Durcissement client & suite
 
 - Extension force-install via Google Admin / Intune  
 - Policy Chrome `ExtensionInstallForcelist` + bloquer désinstallation  
-- Voir `architecture/PLATFORM-v2.md`
+- Parser PDF/DOCX/Office réel  
+- Voir `architecture/PLATFORM-v2.md` et **`docs/V2-BACKLOG.md`**
 
 ## Groupes & agents (comment scaler)
 

@@ -130,7 +130,8 @@ function rowAgent(r: pg.QueryResultRow): Agent {
       : undefined,
     personalAccount: !!r.personal_account,
     lastConfigEpoch:
-      typeof r.last_config_epoch === "number" ? r.last_config_epoch : undefined
+      typeof r.last_config_epoch === "number" ? r.last_config_epoch : undefined,
+    groupId: r.group_id ?? undefined
   }
 }
 
@@ -277,6 +278,7 @@ export class PgStore implements OpsGateStore {
       `ALTER TABLE agents ADD COLUMN IF NOT EXISTS unlicensed_since TIMESTAMPTZ`,
       `ALTER TABLE agents ADD COLUMN IF NOT EXISTS personal_account BOOLEAN NOT NULL DEFAULT FALSE`,
       `ALTER TABLE agents ADD COLUMN IF NOT EXISTS last_config_epoch INT`,
+      `ALTER TABLE agents ADD COLUMN IF NOT EXISTS group_id TEXT`,
       `ALTER TABLE detection_events ADD COLUMN IF NOT EXISTS device_label TEXT`,
       `ALTER TABLE detection_events ADD COLUMN IF NOT EXISTS exit_actor TEXT`,
       `ALTER TABLE detection_events ADD COLUMN IF NOT EXISTS exit_admin_id TEXT`,
@@ -1753,6 +1755,7 @@ export class PgStore implements OpsGateStore {
           device_label: agent.deviceLabel,
           rule_ids: ["system.enroll"]
         })
+        await this.applyMovingRules(input.orgId, agent.id)
         return agent
       }
     }
@@ -1794,6 +1797,7 @@ export class PgStore implements OpsGateStore {
       device_label: agent.deviceLabel,
       rule_ids: ["system.enroll"]
     })
+    await this.applyMovingRules(input.orgId, agent.id)
     return agent
   }
 
@@ -1960,6 +1964,191 @@ export class PgStore implements OpsGateStore {
       [orgId, limit]
     )
     return rows.map(rowEvent)
+  }
+
+  async listMovingRules(orgId: string) {
+    const { rows } = await this.pool.query(
+      `SELECT * FROM moving_rules WHERE org_id = $1 ORDER BY priority ASC, created_at ASC`,
+      [orgId]
+    )
+    return rows.map((r) => ({
+      id: r.id,
+      orgId: r.org_id,
+      name: r.name,
+      enabled: r.enabled !== false,
+      matchField: r.match_field,
+      matchOp: r.match_op,
+      matchValue: r.match_value,
+      targetGroupId: r.target_group_id,
+      priority: r.priority ?? 100,
+      onlyIfUnassigned: r.only_if_unassigned !== false,
+      createdAt: new Date(r.created_at).toISOString(),
+      updatedAt: new Date(r.updated_at).toISOString()
+    }))
+  }
+
+  async upsertMovingRule(
+    orgId: string,
+    input: {
+      id?: string
+      name: string
+      enabled?: boolean
+      matchField: import("./types").MovingMatchField
+      matchOp: import("./types").MovingMatchOp
+      matchValue: string
+      targetGroupId: string
+      priority?: number
+      onlyIfUnassigned?: boolean
+    }
+  ) {
+    const org = await this.getOrg(orgId)
+    if (!org) return undefined
+    const now = new Date().toISOString()
+    if (input.id) {
+      const { rows } = await this.pool.query(
+        `UPDATE moving_rules SET
+          name=$3, enabled=$4, match_field=$5, match_op=$6, match_value=$7,
+          target_group_id=$8, priority=$9, only_if_unassigned=$10, updated_at=$11
+         WHERE org_id=$1 AND id=$2 RETURNING *`,
+        [
+          orgId,
+          input.id,
+          input.name,
+          input.enabled !== false,
+          input.matchField,
+          input.matchOp,
+          input.matchValue,
+          input.targetGroupId,
+          input.priority ?? 100,
+          input.onlyIfUnassigned !== false,
+          now
+        ]
+      )
+      if (!rows[0]) return undefined
+      return (await this.listMovingRules(orgId)).find((r) => r.id === input.id)
+    }
+    const id = newId("mvr")
+    await this.pool.query(
+      `INSERT INTO moving_rules (id, org_id, name, enabled, match_field, match_op, match_value, target_group_id, priority, only_if_unassigned, created_at, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$11)`,
+      [
+        id,
+        orgId,
+        input.name,
+        input.enabled !== false,
+        input.matchField,
+        input.matchOp,
+        input.matchValue,
+        input.targetGroupId,
+        input.priority ?? 100,
+        input.onlyIfUnassigned !== false,
+        now
+      ]
+    )
+    return (await this.listMovingRules(orgId)).find((r) => r.id === id)
+  }
+
+  async deleteMovingRule(orgId: string, ruleId: string) {
+    const { rowCount } = await this.pool.query(
+      `DELETE FROM moving_rules WHERE org_id = $1 AND id = $2`,
+      [orgId, ruleId]
+    )
+    return (rowCount ?? 0) > 0
+  }
+
+  private matchMovingRule(
+    value: string,
+    op: string,
+    pattern: string
+  ): boolean {
+    const v = value || ""
+    const p = pattern || ""
+    switch (op) {
+      case "starts_with":
+        return v.toLowerCase().startsWith(p.toLowerCase())
+      case "contains":
+        return v.toLowerCase().includes(p.toLowerCase())
+      case "equals":
+        return v.toLowerCase() === p.toLowerCase()
+      case "regex":
+        try {
+          return new RegExp(p, "i").test(v)
+        } catch {
+          return false
+        }
+      default:
+        return false
+    }
+  }
+
+  async applyMovingRules(orgId: string, agentId: string) {
+    const agents = await this.listAgents(orgId)
+    const agent = agents.find((a) => a.id === agentId)
+    if (!agent) return { applied: false as const }
+    const rules = (await this.listMovingRules(orgId)).filter((r) => r.enabled)
+    for (const rule of rules) {
+      if (rule.onlyIfUnassigned && (agent.policyProfileId || agent.groupId)) {
+        continue
+      }
+      const fieldVal =
+        rule.matchField === "host_name"
+          ? agent.hostName || ""
+          : agent.deviceLabel || ""
+      if (!this.matchMovingRule(fieldVal, rule.matchOp, rule.matchValue)) {
+        continue
+      }
+      const groups = await this.listGroups(orgId)
+      const group = groups.find((g) => g.id === rule.targetGroupId)
+      if (!group) continue
+      const profileId = group.policyProfileId || null
+      await this.pool.query(
+        `UPDATE agents SET group_id = $3, policy_profile_id = COALESCE($4, policy_profile_id), last_seen_at = NOW()
+         WHERE org_id = $1 AND id = $2`,
+        [orgId, agentId, group.id, profileId]
+      )
+      return {
+        applied: true as const,
+        ruleId: rule.id,
+        groupId: group.id
+      }
+    }
+    return { applied: false as const }
+  }
+
+  async bulkAssignAgents(
+    orgId: string,
+    agentIds: string[],
+    opts: { policyProfileId?: string | null; groupId?: string | null }
+  ) {
+    let updated = 0
+    let profileId = opts.policyProfileId
+    if (opts.groupId) {
+      const g = (await this.listGroups(orgId)).find((x) => x.id === opts.groupId)
+      if (g?.policyProfileId && profileId === undefined) {
+        profileId = g.policyProfileId
+      }
+    }
+    for (const agentId of agentIds) {
+      const sets: string[] = []
+      const params: unknown[] = [orgId, agentId]
+      if (opts.groupId !== undefined) {
+        params.push(opts.groupId)
+        sets.push(`group_id = $${params.length}`)
+      }
+      if (profileId !== undefined) {
+        params.push(profileId)
+        sets.push(`policy_profile_id = $${params.length}`)
+      }
+      if (!sets.length) continue
+      sets.push("last_seen_at = NOW()")
+      const { rowCount } = await this.pool.query(
+        `UPDATE agents SET ${sets.join(", ")} WHERE org_id = $1 AND id = $2`,
+        params
+      )
+      if ((rowCount ?? 0) > 0) updated++
+    }
+    if (updated > 0) await this.forceConfigSync(orgId)
+    return { updated }
   }
 
   async appendAdminAudit(input: {
