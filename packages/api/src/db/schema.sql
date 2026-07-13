@@ -123,7 +123,8 @@ CREATE TABLE IF NOT EXISTS agents (
   license_assigned BOOLEAN NOT NULL DEFAULT TRUE,
   unlicensed_since TIMESTAMPTZ,
   personal_account BOOLEAN NOT NULL DEFAULT FALSE,
-  last_config_epoch INT
+  last_config_epoch INT,
+  group_id TEXT
 );
 
 CREATE INDEX IF NOT EXISTS agents_org_idx ON agents(org_id);
@@ -200,3 +201,21 @@ CREATE TABLE IF NOT EXISTS admin_audit_events (
 
 CREATE INDEX IF NOT EXISTS admin_audit_org_ts_idx
   ON admin_audit_events(org_id, created_at DESC);
+
+-- ── Moving rules (auto-assign agents → groups) ─────────────────
+CREATE TABLE IF NOT EXISTS moving_rules (
+  id TEXT PRIMARY KEY,
+  org_id TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  enabled BOOLEAN NOT NULL DEFAULT TRUE,
+  match_field TEXT NOT NULL,
+  match_op TEXT NOT NULL,
+  match_value TEXT NOT NULL,
+  target_group_id TEXT NOT NULL,
+  priority INT NOT NULL DEFAULT 100,
+  only_if_unassigned BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS moving_rules_org_idx ON moving_rules(org_id);

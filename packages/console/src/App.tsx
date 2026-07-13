@@ -27,6 +27,7 @@ type Tab =
   | "agents"
   | "events"
   | "audit"
+  | "moving"
 
 const IDLE_MS = 5 * 60 * 1000
 
@@ -155,20 +156,23 @@ export default function App() {
         setPacks(p.packs || [])
         setActiveVersion(p.active_version)
       } else if (t === "agents") {
-        const [a, pr, u] = await Promise.all([
+        const [a, pr, u, g] = await Promise.all([
           api.agents(),
           api.profiles(),
-          api.users()
+          api.users(),
+          api.groups()
         ])
         setAgents(a.agents || [])
         setProfiles(pr.profiles || [])
         setUsers(u.users || [])
+        setGroups(g.groups || [])
       } else if (t === "events") {
         const e = await api.events()
         const raw = (e.events || []) as unknown as Record<string, unknown>[]
         setEvents(raw.map((r) => normalizeEvent(r)))
-      } else if (t === "audit") {
-        /* loaded in AuditView */
+      } else if (t === "audit" || t === "moving") {
+        const g = await api.groups()
+        setGroups(g.groups || [])
       }
     } catch (e) {
       const msg = String(e)
@@ -391,6 +395,7 @@ export default function App() {
             ["packs", "Packs de règles"],
             ["agents", "Agents"],
             ["events", "Événements"],
+            ["moving", "Règles auto"],
             ["audit", "Audit admin"]
           ] as const
         ).map(([id, label]) => (
@@ -477,6 +482,7 @@ export default function App() {
           agents={agents}
           profiles={profiles}
           users={users}
+          groups={groups}
           busy={busy}
           setBusy={setBusy}
           setError={setError}
@@ -534,7 +540,18 @@ export default function App() {
         />
       )}
       {tab === "events" && <EventsView events={events} />}
-      {tab === "audit" && <AuditView />}
+      {tab === "moving" && (
+        <MovingRulesView
+          groups={groups}
+          setBusy={setBusy}
+          setError={setError}
+          setInfo={setInfo}
+          busy={busy}
+        />
+      )}
+      {tab === "audit" && sessionAdmin && (
+        <AuditView isPrincipal={!!sessionAdmin.is_principal} />
+      )}
 
       <footer className="console-footer">
         OpsGate Console <strong>1.2.0</strong> · early customer · privacy by
@@ -1757,7 +1774,9 @@ function PeopleView({
   const [userEmail, setUserEmail] = useState("")
   const [userGroups, setUserGroups] = useState<string[]>([])
   const [grpName, setGrpName] = useState("")
+  const [grpDesc, setGrpDesc] = useState("")
   const [grpProfile, setGrpProfile] = useState("")
+  const [grpEditId, setGrpEditId] = useState<string | null>(null)
 
   const isPrincipal = !!sessionAdmin.is_principal
 
@@ -2025,8 +2044,8 @@ function PeopleView({
             <thead>
               <tr>
                 <th>Nom</th>
+                <th>Description</th>
                 <th>Policy profil</th>
-                <th>LDAP id</th>
                 <th></th>
               </tr>
             </thead>
@@ -2035,9 +2054,9 @@ function PeopleView({
                 <tr key={g.id}>
                   <td>
                     <strong>{g.name}</strong>
-                    <div className="muted" style={{ fontSize: 12 }}>
-                      {g.description || ""}
-                    </div>
+                  </td>
+                  <td className="muted" style={{ fontSize: 12 }}>
+                    {g.description || "—"}
                   </td>
                   <td className="mono" style={{ fontSize: 12 }}>
                     {g.policyProfileId
@@ -2045,39 +2064,61 @@ function PeopleView({
                           ?.name || g.policyProfileId
                       : "—"}
                   </td>
-                  <td className="muted">{g.ldapExternalId || "—"}</td>
                   <td>
-                    <button
-                      className="btn danger"
-                      type="button"
-                      disabled={busy}
-                      onClick={async () => {
-                        if (!confirm(`Supprimer groupe ${g.name}?`)) return
-                        setBusy(true)
-                        try {
-                          await api.deleteGroup(g.id)
-                          onReload()
-                        } catch (e) {
-                          setError(String(e))
-                        } finally {
-                          setBusy(false)
-                        }
-                      }}>
-                      Suppr.
-                    </button>
+                    <div className="btn-group">
+                      <button
+                        className="btn secondary btn-sm"
+                        type="button"
+                        disabled={busy}
+                        onClick={() => {
+                          setGrpEditId(g.id)
+                          setGrpName(g.name)
+                          setGrpDesc(g.description || "")
+                          setGrpProfile(g.policyProfileId || "")
+                        }}>
+                        Modifier
+                      </button>
+                      <button
+                        className="btn danger btn-sm"
+                        type="button"
+                        disabled={busy}
+                        onClick={async () => {
+                          if (!confirm(`Supprimer groupe ${g.name}?`)) return
+                          setBusy(true)
+                          try {
+                            await api.deleteGroup(g.id)
+                            onReload()
+                          } catch (e) {
+                            setError(String(e))
+                          } finally {
+                            setBusy(false)
+                          }
+                        }}>
+                        Suppr.
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table></div>
         )}
-        <div className="row" style={{ marginTop: 12 }}>
+        <div className="form-stack" style={{ maxWidth: 520, marginTop: 12 }}>
+          <label className="field-label">Nom</label>
           <input
             className="input"
             value={grpName}
             onChange={(e) => setGrpName(e.target.value)}
-            placeholder="Nom groupe"
+            placeholder="Finance"
           />
+          <label className="field-label">Description</label>
+          <input
+            className="input"
+            value={grpDesc}
+            onChange={(e) => setGrpDesc(e.target.value)}
+            placeholder="Équipe finance — policy stricte"
+          />
+          <label className="field-label">Profil policy lié</label>
           <select
             className="input"
             value={grpProfile}
@@ -2089,31 +2130,60 @@ function PeopleView({
               </option>
             ))}
           </select>
-          <button
-            className="btn"
-            type="button"
-            disabled={busy || !grpName.trim()}
-            onClick={async () => {
-              setBusy(true)
-              try {
-                await api.createGroup({
-                  name: grpName.trim(),
-                  policy_profile_id: grpProfile || null
-                })
-                setGrpName("")
-                setInfo("Groupe créé")
-                onReload()
-              } catch (e) {
-                setError(String(e))
-              } finally {
-                setBusy(false)
-              }
-            }}>
-            Créer groupe
-          </button>
+          <div className="row" style={{ marginTop: 10 }}>
+            <button
+              className="btn"
+              type="button"
+              disabled={busy || !grpName.trim()}
+              onClick={async () => {
+                setBusy(true)
+                try {
+                  if (grpEditId) {
+                    await api.updateGroup(grpEditId, {
+                      name: grpName.trim(),
+                      description: grpDesc || undefined,
+                      policy_profile_id: grpProfile || null
+                    })
+                    setInfo("Groupe mis à jour")
+                  } else {
+                    await api.createGroup({
+                      name: grpName.trim(),
+                      description: grpDesc || undefined,
+                      policy_profile_id: grpProfile || null
+                    })
+                    setInfo("Groupe créé")
+                  }
+                  setGrpName("")
+                  setGrpDesc("")
+                  setGrpProfile("")
+                  setGrpEditId(null)
+                  onReload()
+                } catch (e) {
+                  setError(String(e))
+                } finally {
+                  setBusy(false)
+                }
+              }}>
+              {grpEditId ? "Enregistrer le groupe" : "Créer groupe"}
+            </button>
+            {grpEditId && (
+              <button
+                className="btn secondary"
+                type="button"
+                onClick={() => {
+                  setGrpEditId(null)
+                  setGrpName("")
+                  setGrpDesc("")
+                  setGrpProfile("")
+                }}>
+                Annuler
+              </button>
+            )}
+          </div>
         </div>
         <p className="muted" style={{ marginTop: 10 }}>
-          Roadmap : import LDAP (mapping groupe AD → policy profil, agents auto).
+          Affectation auto agents → groupe : onglet <strong>Règles auto</strong>{" "}
+          (moving rules). LDAP : V2.1.
         </p>
       </div>
 
@@ -2239,6 +2309,7 @@ function AgentsView({
   agents,
   profiles,
   users,
+  groups,
   busy,
   onRevoke,
   onAssign,
@@ -2251,6 +2322,7 @@ function AgentsView({
   agents: AgentRow[]
   profiles: ProfileRow[]
   users: UserRow[]
+  groups: GroupRow[]
   busy: boolean
   onRevoke: (id: string) => void
   onAssign: (agentId: string, profileId: string | null) => void
@@ -2268,10 +2340,18 @@ function AgentsView({
     seats_used: number
     seats_available: number | null
   } | null>(null)
+  const [selected, setSelected] = useState<string[]>([])
+  const [bulkGroup, setBulkGroup] = useState("")
+  const [bulkProfile, setBulkProfile] = useState("")
 
   useEffect(() => {
     void api.licenses().then(setStats).catch(() => setStats(null))
   }, [agents])
+
+  const toggleSel = (id: string) =>
+    setSelected((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    )
 
   return (
     <>
@@ -2339,9 +2419,78 @@ function AgentsView({
       <div className="card">
         <h2>Agents enrollés</h2>
         <p className="muted">
-          Identifiant = label appareil. Assigner / retirer une{" "}
-          <strong>licence siège</strong> par agent.
+          Multi-sélection → bulk vers un <strong>groupe</strong> (hérite de sa
+          policy) ou un profil. Code org = tenant commercial.
         </p>
+        {selected.length > 0 && (
+          <div
+            className="row"
+            style={{
+              marginBottom: 12,
+              padding: 12,
+              background: "var(--accent-soft)",
+              borderRadius: 8,
+              flexWrap: "wrap",
+              gap: 8
+            }}>
+            <strong>{selected.length} sélectionné(s)</strong>
+            <select
+              className="input"
+              value={bulkGroup}
+              onChange={(e) => setBulkGroup(e.target.value)}>
+              <option value="">→ Groupe…</option>
+              {groups.map((g) => (
+                <option key={g.id} value={g.id}>
+                  {g.name}
+                </option>
+              ))}
+            </select>
+            <select
+              className="input"
+              value={bulkProfile}
+              onChange={(e) => setBulkProfile(e.target.value)}>
+              <option value="">→ Profil (optionnel)</option>
+              {profiles.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+            <button
+              className="btn btn-sm"
+              type="button"
+              disabled={busy || (!bulkGroup && !bulkProfile)}
+              onClick={async () => {
+                setBusy(true)
+                try {
+                  const r = await api.bulkAssignAgents({
+                    agent_ids: selected,
+                    group_id: bulkGroup || null,
+                    policy_profile_id: bulkProfile
+                      ? bulkProfile
+                      : bulkGroup
+                        ? undefined
+                        : null
+                  })
+                  setInfo(`Bulk : ${r.updated} agent(s) mis à jour`)
+                  setSelected([])
+                  onReload()
+                } catch (e) {
+                  setError(String(e))
+                } finally {
+                  setBusy(false)
+                }
+              }}>
+              Appliquer
+            </button>
+            <button
+              className="btn secondary btn-sm"
+              type="button"
+              onClick={() => setSelected([])}>
+              Tout désélectionner
+            </button>
+          </div>
+        )}
         {agents.length === 0 ? (
           <div className="empty">
             Aucun agent. Code org <code>DEMO-OPSGATE</code> ou{" "}
@@ -2351,8 +2500,22 @@ function AgentsView({
           <div className="table-wrap"><table className="table">
             <thead>
               <tr>
+                <th>
+                  <input
+                    type="checkbox"
+                    checked={
+                      agents.length > 0 && selected.length === agents.length
+                    }
+                    onChange={(e) =>
+                      setSelected(
+                        e.target.checked ? agents.map((a) => a.id) : []
+                      )
+                    }
+                  />
+                </th>
                 <th>Label appareil</th>
                 <th>Licence</th>
+                <th>Groupe</th>
                 <th>User</th>
                 <th>Profil</th>
                 <th>Last seen</th>
@@ -2362,6 +2525,13 @@ function AgentsView({
             <tbody>
               {agents.map((a) => (
                 <tr key={a.id}>
+                  <td>
+                    <input
+                      type="checkbox"
+                      checked={selected.includes(a.id)}
+                      onChange={() => toggleSel(a.id)}
+                    />
+                  </td>
                   <td>
                     <strong>{a.device_label || "—"}</strong>
                     <div className="mono muted" style={{ fontSize: 11 }}>
@@ -2381,6 +2551,12 @@ function AgentsView({
                     ) : (
                       <span className="badge active">licensed</span>
                     )}
+                  </td>
+                  <td className="muted" style={{ fontSize: 12 }}>
+                    {a.group_id
+                      ? groups.find((g) => g.id === a.group_id)?.name ||
+                        a.group_id
+                      : "—"}
                   </td>
                   <td className="cell-select">
                     <select
@@ -2597,7 +2773,7 @@ function EventsView({ events }: { events: EventRow[] }) {
   )
 }
 
-function AuditView() {
+function AuditView({ isPrincipal }: { isPrincipal: boolean }) {
   const [rows, setRows] = useState<
     Array<{
       id: string
@@ -2613,6 +2789,7 @@ function AuditView() {
   const [err, setErr] = useState<string | null>(null)
 
   const load = useCallback(async () => {
+    if (!isPrincipal) return
     setBusy(true)
     setErr(null)
     try {
@@ -2623,19 +2800,31 @@ function AuditView() {
     } finally {
       setBusy(false)
     }
-  }, [filter])
+  }, [filter, isPrincipal])
 
   useEffect(() => {
     void load()
   }, [load])
 
+  if (!isPrincipal) {
+    return (
+      <div className="card">
+        <h2>Audit administration</h2>
+        <div className="empty">
+          Réservé à l’<strong>Administrator principal</strong>. Les admins
+          secondaires n’ont pas accès à ce journal.
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="card">
       <h2>Audit administration</h2>
       <p className="muted">
-        Connexions, déconnexions (manuel / auto), policy, packs, révocation
-        agents… Session console : déconnexion auto après{" "}
-        <strong>5 minutes</strong> d’inactivité.
+        Connexions, déconnexions (manuel / auto), policy (détail des champs),
+        packs, révocation, moving rules… Idle logout{" "}
+        <strong>5 min</strong>.
       </p>
       <div className="row" style={{ marginBottom: 12 }}>
         <select
@@ -2745,7 +2934,11 @@ export function HostPicker({
           type="button"
           className="btn secondary btn-sm"
           onClick={() => {
-            const h = custom.trim().toLowerCase().replace(/^https?:\/\//, "").split("/")[0]
+            const h = custom
+              .trim()
+              .toLowerCase()
+              .replace(/^https?:\/\//, "")
+              .split("/")[0]
             if (!h) return
             if (!set.has(h)) onChange([...value, h])
             setCustom("")
@@ -2754,5 +2947,228 @@ export function HostPicker({
         </button>
       </div>
     </div>
+  )
+}
+
+function MovingRulesView({
+  groups,
+  busy,
+  setBusy,
+  setError,
+  setInfo
+}: {
+  groups: GroupRow[]
+  busy: boolean
+  setBusy: (b: boolean) => void
+  setError: (e: string | null) => void
+  setInfo: (i: string | null) => void
+}) {
+  const [rules, setRules] = useState<
+    import("./api").MovingRuleRow[]
+  >([])
+  const [name, setName] = useState("FIN → Finance")
+  const [field, setField] = useState<"device_label" | "host_name">(
+    "device_label"
+  )
+  const [op, setOp] = useState<
+    "starts_with" | "contains" | "equals" | "regex"
+  >("starts_with")
+  const [value, setValue] = useState("FIN")
+  const [groupId, setGroupId] = useState("")
+  const [onlyUnassigned, setOnlyUnassigned] = useState(true)
+
+  const load = useCallback(async () => {
+    try {
+      const r = await api.movingRules()
+      setRules(r.rules || [])
+    } catch (e) {
+      setError(String(e))
+    }
+  }, [setError])
+
+  useEffect(() => {
+    void load()
+  }, [load])
+
+  return (
+    <>
+      <div className="pack-help">
+        <strong>Règles d’affectation auto</strong> (inspiré Kaspersky{" "}
+        <em>moving rules</em>) : si le <strong>label</strong> ou le{" "}
+        <strong>hostname</strong> de l’agent matche (ex. commence par{" "}
+        <code>FIN</code>), il est placé dans le groupe cible et hérite de sa
+        policy profil. Appliqué à l’enroll et via « Ré-évaluer ».
+      </div>
+      <div className="card">
+        <h2>Règles actives</h2>
+        {rules.length === 0 ? (
+          <div className="empty">Aucune règle — créez-en une ci-dessous</div>
+        ) : (
+          <div className="table-wrap">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Nom</th>
+                  <th>Condition</th>
+                  <th>Groupe</th>
+                  <th>Prio</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {rules.map((r) => (
+                  <tr key={r.id}>
+                    <td>
+                      <strong>{r.name}</strong>
+                      {!r.enabled && (
+                        <span className="muted"> · off</span>
+                      )}
+                    </td>
+                    <td className="mono" style={{ fontSize: 12 }}>
+                      {r.matchField} {r.matchOp} « {r.matchValue} »
+                    </td>
+                    <td>
+                      {groups.find((g) => g.id === r.targetGroupId)?.name ||
+                        r.targetGroupId}
+                    </td>
+                    <td>{r.priority}</td>
+                    <td>
+                      <button
+                        className="btn danger btn-sm"
+                        type="button"
+                        disabled={busy}
+                        onClick={async () => {
+                          setBusy(true)
+                          try {
+                            await api.deleteMovingRule(r.id)
+                            setInfo("Règle supprimée")
+                            await load()
+                          } catch (e) {
+                            setError(String(e))
+                          } finally {
+                            setBusy(false)
+                          }
+                        }}>
+                        Suppr.
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        <button
+          className="btn secondary"
+          type="button"
+          style={{ marginTop: 12 }}
+          disabled={busy}
+          onClick={async () => {
+            setBusy(true)
+            try {
+              const r = await api.applyMovingRules()
+              setInfo(
+                `Ré-évaluation : ${r.applied} agent(s) affecté(s) / ${r.total}`
+              )
+            } catch (e) {
+              setError(String(e))
+            } finally {
+              setBusy(false)
+            }
+          }}>
+          Ré-évaluer tous les agents
+        </button>
+      </div>
+      <div className="card">
+        <h2>Nouvelle règle</h2>
+        <div className="form-stack" style={{ maxWidth: 480 }}>
+          <label className="field-label">Nom</label>
+          <input
+            className="input"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+          />
+          <label className="field-label">Champ</label>
+          <select
+            className="input"
+            value={field}
+            onChange={(e) =>
+              setField(e.target.value as "device_label" | "host_name")
+            }>
+            <option value="device_label">Label appareil</option>
+            <option value="host_name">Hostname / DNS PC</option>
+          </select>
+          <label className="field-label">Opérateur</label>
+          <select
+            className="input"
+            value={op}
+            onChange={(e) =>
+              setOp(
+                e.target.value as
+                  | "starts_with"
+                  | "contains"
+                  | "equals"
+                  | "regex"
+              )
+            }>
+            <option value="starts_with">commence par</option>
+            <option value="contains">contient</option>
+            <option value="equals">égal</option>
+            <option value="regex">regex</option>
+          </select>
+          <label className="field-label">Valeur (ex. FIN)</label>
+          <input
+            className="input"
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+          />
+          <label className="field-label">Groupe cible</label>
+          <select
+            className="input"
+            value={groupId}
+            onChange={(e) => setGroupId(e.target.value)}>
+            <option value="">—</option>
+            {groups.map((g) => (
+              <option key={g.id} value={g.id}>
+                {g.name}
+              </option>
+            ))}
+          </select>
+          <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <input
+              type="checkbox"
+              checked={onlyUnassigned}
+              onChange={(e) => setOnlyUnassigned(e.target.checked)}
+            />
+            Uniquement si agent pas encore assigné
+          </label>
+          <button
+            className="btn"
+            type="button"
+            disabled={busy || !name.trim() || !value.trim() || !groupId}
+            onClick={async () => {
+              setBusy(true)
+              try {
+                await api.createMovingRule({
+                  name: name.trim(),
+                  match_field: field,
+                  match_op: op,
+                  match_value: value.trim(),
+                  target_group_id: groupId,
+                  only_if_unassigned: onlyUnassigned
+                })
+                setInfo("Règle créée")
+                await load()
+              } catch (e) {
+                setError(String(e))
+              } finally {
+                setBusy(false)
+              }
+            }}>
+            Créer la règle
+          </button>
+        </div>
+      </div>
+    </>
   )
 }

@@ -182,6 +182,8 @@ export interface Agent {
   policyProfileId?: string
   /** Utilisateur lié (assignation console / futur LDAP) */
   userId?: string
+  /** Groupe d'affectation (moving rule ou manuel bulk) */
+  groupId?: string
   /** Dernier config_epoch appliqué (info admin) */
   lastConfigEpoch?: number
   /**
@@ -289,6 +291,9 @@ export type AdminAuditAction =
   | "group_upsert"
   | "user_upsert"
   | "agent_assign"
+  | "moving_rule_upsert"
+  | "moving_rule_delete"
+  | "moving_rule_apply"
 
 export interface AdminAuditEvent {
   id: string
@@ -300,6 +305,31 @@ export interface AdminAuditEvent {
   detail?: string
   meta?: Record<string, unknown>
   createdAt: string
+}
+
+/**
+ * Règle d'affectation automatique d'agents (inspiré Kaspersky « moving rules »).
+ * Ex. : device_label starts_with "FIN" → groupe Finance (+ policy du groupe).
+ */
+export type MovingMatchField = "device_label" | "host_name"
+export type MovingMatchOp = "starts_with" | "contains" | "equals" | "regex"
+
+export interface MovingRule {
+  id: string
+  orgId: string
+  name: string
+  enabled: boolean
+  matchField: MovingMatchField
+  matchOp: MovingMatchOp
+  matchValue: string
+  /** Groupe cible (hérite policyProfileId du groupe si présent) */
+  targetGroupId: string
+  /** Priorité : plus petit = évalué en premier */
+  priority: number
+  /** true = n'applique que si l'agent n'a pas encore de profil/groupe (défaut) */
+  onlyIfUnassigned: boolean
+  createdAt: string
+  updatedAt: string
 }
 
 /** Identité du secret utilisé pour sortir */

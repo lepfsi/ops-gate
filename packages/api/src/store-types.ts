@@ -290,4 +290,33 @@ export interface OpsGateStore {
     orgId: string,
     opts?: { limit?: number; action?: string }
   ): Promise<import("./types").AdminAuditEvent[]>
+
+  /** Moving rules (auto-affectation agents → groupe) */
+  listMovingRules(orgId: string): Promise<import("./types").MovingRule[]>
+  upsertMovingRule(
+    orgId: string,
+    input: {
+      id?: string
+      name: string
+      enabled?: boolean
+      matchField: import("./types").MovingMatchField
+      matchOp: import("./types").MovingMatchOp
+      matchValue: string
+      targetGroupId: string
+      priority?: number
+      onlyIfUnassigned?: boolean
+    }
+  ): Promise<import("./types").MovingRule | undefined>
+  deleteMovingRule(orgId: string, ruleId: string): Promise<boolean>
+  /** Évalue les règles et applique profil/groupe sur l'agent. Retourne true si match. */
+  applyMovingRules(
+    orgId: string,
+    agentId: string
+  ): Promise<{ applied: boolean; ruleId?: string; groupId?: string }>
+  /** Bulk : assigne un profil et/ou un groupe à plusieurs agents */
+  bulkAssignAgents(
+    orgId: string,
+    agentIds: string[],
+    opts: { policyProfileId?: string | null; groupId?: string | null }
+  ): Promise<{ updated: number }>
 }
