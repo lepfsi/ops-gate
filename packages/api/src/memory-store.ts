@@ -521,7 +521,14 @@ export class MemoryStore implements OpsGateStore {
     policy.managementPasswordHash = principal?.passwordHash || ""
   }
 
-  async createAdminSession(email: string, password: string) {
+  /** Idle serveur : sans heartbeat console, la session expire (évite lockout fantôme). */
+  private static readonly SESSION_IDLE_MS = 10 * 60 * 1000
+
+  async createAdminSession(
+    email: string,
+    password: string,
+    opts?: { force?: boolean }
+  ) {
     const emailNorm = email.trim().toLowerCase()
     const hash = hashManagementPassword(password)
     type Cand = { orgId: string; admin: OrgAdmin; personal: boolean }
@@ -543,12 +550,19 @@ export class MemoryStore implements OpsGateStore {
     candidates.sort((a, b) => Number(a.personal) - Number(b.personal))
     const hit = candidates[0]
     if (!hit) return { ok: false as const, error: "invalid_credentials" }
-    // Un seul login actif par compte admin — le 2e doit attendre la déconnexion
     const now = Date.now()
+    const idleMs = MemoryStore.SESSION_IDLE_MS
+    let forced = false
     for (const [tok, sess] of this.sessions) {
       if (sess.adminId !== hit.admin.id) continue
-      if (now > sess.expiresAt) {
+      const last = sess.lastActivityAt || sess.createdAt
+      if (now > sess.expiresAt || now - last > idleMs) {
         this.sessions.delete(tok)
+        continue
+      }
+      if (opts?.force) {
+        this.sessions.delete(tok)
+        forced = true
         continue
       }
       return { ok: false as const, error: "session_already_active" }
@@ -559,16 +573,22 @@ export class MemoryStore implements OpsGateStore {
       orgId: hit.orgId,
       adminId: hit.admin.id,
       expiresAt: now + 12 * 60 * 60 * 1000,
-      createdAt: now
+      createdAt: now,
+      lastActivityAt: now
     }
     this.sessions.set(token, session)
-    return { ok: true as const, session, admin: hit.admin }
+    return { ok: true as const, session, admin: hit.admin, forced }
   }
 
   async resolveAdminSession(token: string) {
     const session = this.sessions.get(token)
     if (!session) return undefined
-    if (Date.now() > session.expiresAt) {
+    const now = Date.now()
+    const last = session.lastActivityAt || session.createdAt
+    if (
+      now > session.expiresAt ||
+      now - last > MemoryStore.SESSION_IDLE_MS
+    ) {
       this.sessions.delete(token)
       return undefined
     }
@@ -579,6 +599,7 @@ export class MemoryStore implements OpsGateStore {
       this.sessions.delete(token)
       return undefined
     }
+    session.lastActivityAt = now
     return { session, admin }
   }
 
@@ -962,7 +983,7 @@ export class MemoryStore implements OpsGateStore {
   async isAgentLicensed(orgId: string, agentId: string) {
     const agent = this.agents.get(agentId)
     if (!agent || agent.orgId !== orgId) return false
-    return agent.licenseAssigned !== false
+    return agent.licenseAssigned === true
   }
 
   async setAgentLicense(orgId: string, agentId: string, licensed: boolean) {
@@ -1274,16 +1295,13 @@ export class MemoryStore implements OpsGateStore {
     const org = this.orgs.get(input.orgId)
     const personal = !!org?.isPersonal
 
-    // Sièges / licence personnelle
-    let assignLicense = true
+    // Licence :
+    // - personal : clé valide
+    // - org : PAS de licence tant qu'aucun groupe (moving rule / admin).
+    //   Évite qu'un externe avec le code org profite d'un siège + protection.
+    let assignLicense = false
     if (personal) {
-      // Usage personnel : clé de licence obligatoire pour activer le siège
       assignLicense = isValidPersonalLicenseKey(input.personalLicenseKey)
-    } else if (org?.licenseSeats && org.licenseSeats > 0) {
-      const used = [...this.agents.values()].filter(
-        (a) => a.orgId === input.orgId && a.licenseAssigned
-      ).length
-      assignLicense = used < org.licenseSeats
     }
 
     if (labelKey) {
@@ -1302,8 +1320,18 @@ export class MemoryStore implements OpsGateStore {
             hostName: input.hostName ?? existing.hostName,
             userId: input.userId ?? existing.userId,
             personalAccount: personal,
-            licenseAssigned:
-              existing.licenseAssigned || assignLicense || personal,
+            // re-enroll : conserve licence/groupe existants ; personal = clé
+            licenseAssigned: personal
+              ? assignLicense
+              : existing.licenseAssigned === true,
+            unlicensedSince:
+              personal
+                ? assignLicense
+                  ? undefined
+                  : now
+                : existing.licenseAssigned
+                  ? existing.unlicensedSince
+                  : existing.unlicensedSince || now,
             replaced: true
           }
           this.agents.set(existing.id, replaced)
@@ -1314,7 +1342,8 @@ export class MemoryStore implements OpsGateStore {
             rule_ids: ["system.enroll"]
           })
           await this.applyMovingRules(input.orgId, existing.id)
-          return replaced
+          const final = this.agents.get(existing.id)!
+          return { ...final, replaced: true }
         }
       }
     }
@@ -1329,9 +1358,9 @@ export class MemoryStore implements OpsGateStore {
       appVersion: input.appVersion,
       lastSeenAt: now,
       userId: input.userId,
-      licenseAssigned: personal ? true : assignLicense,
+      licenseAssigned: personal ? assignLicense : false,
       personalAccount: personal,
-      unlicensedSince: assignLicense || personal ? undefined : now,
+      unlicensedSince: personal && assignLicense ? undefined : now,
       replaced: false
     }
     this.agents.set(agent.id, agent)
@@ -1341,7 +1370,28 @@ export class MemoryStore implements OpsGateStore {
       rule_ids: ["system.enroll"]
     })
     await this.applyMovingRules(input.orgId, agent.id)
-    return agent
+    return this.agents.get(agent.id)!
+  }
+
+  /** Si groupe présent et siège dispo → licence auto. Sinon retire si plus de groupe. */
+  private async syncLicenseWithGroup(orgId: string, agentId: string) {
+    const agent = this.agents.get(agentId)
+    if (!agent || agent.orgId !== orgId || agent.personalAccount) return
+    const org = this.orgs.get(orgId)
+    if (agent.groupId) {
+      if (agent.licenseAssigned) return
+      if (org?.licenseSeats && org.licenseSeats > 0) {
+        const used = [...this.agents.values()].filter(
+          (a) => a.orgId === orgId && a.licenseAssigned && a.id !== agentId
+        ).length
+        if (used >= org.licenseSeats) return
+      }
+      agent.licenseAssigned = true
+      agent.unlicensedSince = undefined
+    } else if (agent.licenseAssigned) {
+      // Sans groupe : admin peut re-licencer manuellement ; on ne retire ici
+      // que si on retire le groupe via bulk (appel explicite revoke).
+    }
   }
 
   async resolveAgentByToken(token: string): Promise<Agent | undefined> {
@@ -1694,6 +1744,7 @@ export class MemoryStore implements OpsGateStore {
       agent.groupId = group.id
       if (group.policyProfileId) agent.policyProfileId = group.policyProfileId
       agent.lastSeenAt = new Date().toISOString()
+      await this.syncLicenseWithGroup(orgId, agentId)
       return { applied: true as const, ruleId: rule.id, groupId: group.id }
     }
     return { applied: false as const }
@@ -1712,10 +1763,33 @@ export class MemoryStore implements OpsGateStore {
         profileId = g.policyProfileId
       }
     }
+    const org = this.orgs.get(orgId)
     for (const id of agentIds) {
       const a = this.agents.get(id)
       if (!a || a.orgId !== orgId) continue
-      if (opts.groupId !== undefined) a.groupId = opts.groupId || undefined
+      if (opts.groupId !== undefined) {
+        a.groupId = opts.groupId || undefined
+        if (opts.groupId) {
+          // Groupe → licence auto si sièges
+          if (!a.licenseAssigned) {
+            let can = true
+            if (org?.licenseSeats && org.licenseSeats > 0) {
+              const used = [...this.agents.values()].filter(
+                (x) => x.orgId === orgId && x.licenseAssigned && x.id !== id
+              ).length
+              can = used < org.licenseSeats
+            }
+            if (can) {
+              a.licenseAssigned = true
+              a.unlicensedSince = undefined
+            }
+          }
+        } else {
+          // Retrait du groupe → plus de licence (admin peut re-attribuer manuellement)
+          a.licenseAssigned = false
+          a.unlicensedSince = a.unlicensedSince || new Date().toISOString()
+        }
+      }
       if (profileId !== undefined) a.policyProfileId = profileId || undefined
       a.lastSeenAt = new Date().toISOString()
       updated++

@@ -228,17 +228,18 @@ export const api = {
       note: string
     }>("/v1/auth/setup-info", { auth: false }),
 
-  login: (email: string, password: string) =>
+  login: (email: string, password: string, force?: boolean) =>
     request<{
       ok: boolean
       token: string
       expires_at: number
       admin: AdminRow
       hint?: string
+      forced?: boolean
     }>("/v1/auth/login", {
       method: "POST",
       auth: false,
-      body: JSON.stringify({ email, password })
+      body: JSON.stringify({ email, password, force: !!force })
     }),
 
   logout: (reason?: "manual" | "idle") =>
@@ -288,6 +289,9 @@ export const api = {
     body: {
       name?: string
       conditions?: MovingCondition[]
+      match_field?: string
+      match_op?: string
+      match_value?: string
       target_group_id?: string
       priority?: number
       only_if_unassigned?: boolean

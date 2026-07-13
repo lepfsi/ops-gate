@@ -118,15 +118,20 @@ export interface OpsGateStore {
     }
   ): Promise<OrgAdmin | undefined>
   deleteAdmin(orgId: string, adminId: string): Promise<boolean>
-  /** Login console */
+  /**
+   * Login console.
+   * @param force si true, révoque la session existante du même compte (prise de contrôle).
+   */
   createAdminSession(
     email: string,
-    password: string
+    password: string,
+    opts?: { force?: boolean }
   ): Promise<
     | {
         ok: true
         session: AdminSession
         admin: OrgAdmin
+        forced?: boolean
       }
     | { ok: false; error: string }
   >

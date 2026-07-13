@@ -145,7 +145,7 @@ function rowAgent(r: pg.QueryResultRow): Agent {
     modeOverride: r.mode_override ?? undefined,
     policyProfileId: r.policy_profile_id ?? undefined,
     userId: r.user_id ?? undefined,
-    licenseAssigned: r.license_assigned !== false,
+    licenseAssigned: r.license_assigned === true,
     unlicensedSince: r.unlicensed_since
       ? new Date(r.unlicensed_since).toISOString()
       : undefined,
@@ -304,11 +304,36 @@ export class PgStore implements OpsGateStore {
       `ALTER TABLE detection_events ADD COLUMN IF NOT EXISTS exit_actor TEXT`,
       `ALTER TABLE detection_events ADD COLUMN IF NOT EXISTS exit_admin_id TEXT`,
       `ALTER TABLE detection_events ADD COLUMN IF NOT EXISTS exit_admin_label TEXT`,
-      `ALTER TABLE moving_rules ADD COLUMN IF NOT EXISTS conditions_json TEXT NOT NULL DEFAULT '[]'`
+      `ALTER TABLE moving_rules ADD COLUMN IF NOT EXISTS conditions_json TEXT NOT NULL DEFAULT '[]'`,
+      `ALTER TABLE admin_sessions ADD COLUMN IF NOT EXISTS last_activity_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`,
+      // Nouveaux agents : pas de licence tant qu'aucun groupe (sauf assignation manuelle)
+      `ALTER TABLE agents ALTER COLUMN license_assigned SET DEFAULT FALSE`
     ]
     for (const q of alters) {
       await this.pool.query(q)
     }
+    // Heartbeat manquant sur vieilles sessions → baser sur created_at
+    await this.pool
+      .query(
+        `UPDATE admin_sessions
+         SET last_activity_at = created_at
+         WHERE last_activity_at IS NULL
+            OR last_activity_at > created_at + interval '1 minute'
+               AND created_at < NOW() - interval '15 minutes'`
+      )
+      .catch(() => {
+        /* ignore */
+      })
+    // Purge idle / expiré au démarrage (évite lockout admin fantôme)
+    await this.pool
+      .query(
+        `DELETE FROM admin_sessions
+         WHERE expires_at < NOW()
+            OR COALESCE(last_activity_at, created_at) < NOW() - interval '10 minutes'`
+      )
+      .catch(() => {
+        /* ignore */
+      })
     // Events survivant à la révocation agent (CASCADE → SET NULL)
     await this.migrateEventsAgentFk()
     console.log("[store:postgres] schema migrated (V1 full control plane)")
@@ -889,7 +914,14 @@ export class PgStore implements OpsGateStore {
     return (rowCount ?? 0) > 0
   }
 
-  async createAdminSession(email: string, password: string) {
+  /** Idle serveur 10 min sans heartbeat — évite lockout si onglet fermé sans logout. */
+  private static readonly SESSION_IDLE_MS = 10 * 60 * 1000
+
+  async createAdminSession(
+    email: string,
+    password: string,
+    opts?: { force?: boolean }
+  ) {
     const emailNorm = email.trim().toLowerCase()
     const hash = hashManagementPassword(password)
     // Préférer l'org non-personnelle si le même email existe plusieurs fois
@@ -912,9 +944,13 @@ export class PgStore implements OpsGateStore {
     if (!admin.isPrincipal && !admin.permissions.includes("console_access")) {
       return { ok: false as const, error: "no_console_access" }
     }
-    // Nettoyer sessions expirées + un seul login actif par compte
+    // Purge : expirées OU idle serveur (last_activity / created)
+    const idleSec = Math.floor(PgStore.SESSION_IDLE_MS / 1000)
     await this.pool.query(
-      `DELETE FROM admin_sessions WHERE expires_at < NOW()`
+      `DELETE FROM admin_sessions
+       WHERE expires_at < NOW()
+          OR COALESCE(last_activity_at, created_at) < NOW() - ($1 || ' seconds')::interval`,
+      [String(idleSec)]
     )
     const { rows: active } = await this.pool.query(
       `SELECT 1 FROM admin_sessions
@@ -922,15 +958,24 @@ export class PgStore implements OpsGateStore {
        LIMIT 1`,
       [admin.id]
     )
+    let forced = false
     if (active[0]) {
-      return { ok: false as const, error: "session_already_active" }
+      if (opts?.force) {
+        await this.pool.query(`DELETE FROM admin_sessions WHERE admin_id = $1`, [
+          admin.id
+        ])
+        forced = true
+      } else {
+        return { ok: false as const, error: "session_already_active" }
+      }
     }
     const token = `ogs_${newToken().replace(/^ogt_/, "")}`
     const tokenHash = hashToken(token)
-    const expiresAt = Date.now() + 12 * 60 * 60 * 1000
+    const now = Date.now()
+    const expiresAt = now + 12 * 60 * 60 * 1000
     await this.pool.query(
-      `INSERT INTO admin_sessions (token_hash, org_id, admin_id, expires_at, created_at)
-       VALUES ($1,$2,$3,to_timestamp($4/1000.0),NOW())`,
+      `INSERT INTO admin_sessions (token_hash, org_id, admin_id, expires_at, created_at, last_activity_at)
+       VALUES ($1,$2,$3,to_timestamp($4/1000.0),NOW(),NOW())`,
       [tokenHash, admin.orgId, admin.id, expiresAt]
     )
     const session: AdminSession = {
@@ -938,9 +983,10 @@ export class PgStore implements OpsGateStore {
       orgId: admin.orgId,
       adminId: admin.id,
       expiresAt,
-      createdAt: Date.now()
+      createdAt: now,
+      lastActivityAt: now
     }
-    return { ok: true as const, session, admin }
+    return { ok: true as const, session, admin, forced }
   }
 
   async resolveAdminSession(token: string) {
@@ -951,12 +997,24 @@ export class PgStore implements OpsGateStore {
     )
     if (!rows[0]) return undefined
     const expiresAt = new Date(rows[0].expires_at).getTime()
-    if (Date.now() > expiresAt) {
+    const lastAct = new Date(
+      rows[0].last_activity_at || rows[0].created_at
+    ).getTime()
+    const now = Date.now()
+    if (
+      now > expiresAt ||
+      now - lastAct > PgStore.SESSION_IDLE_MS
+    ) {
       await this.pool.query(`DELETE FROM admin_sessions WHERE token_hash = $1`, [
         tokenHash
       ])
       return undefined
     }
+    // Heartbeat
+    await this.pool.query(
+      `UPDATE admin_sessions SET last_activity_at = NOW() WHERE token_hash = $1`,
+      [tokenHash]
+    )
     const { rows: adminRows } = await this.pool.query(
       `SELECT * FROM org_admins WHERE id = $1 AND active = TRUE`,
       [rows[0].admin_id]
@@ -973,7 +1031,8 @@ export class PgStore implements OpsGateStore {
       orgId: rows[0].org_id,
       adminId: rows[0].admin_id,
       expiresAt,
-      createdAt: new Date(rows[0].created_at).getTime()
+      createdAt: new Date(rows[0].created_at).getTime(),
+      lastActivityAt: now
     }
     return { session, admin }
   }
@@ -1388,7 +1447,7 @@ export class PgStore implements OpsGateStore {
       [orgId, agentId]
     )
     if (!rows[0]) return false
-    return rows[0].license_assigned !== false
+    return rows[0].license_assigned === true
   }
 
   async setAgentLicense(orgId: string, agentId: string, licensed: boolean) {
@@ -1422,7 +1481,7 @@ export class PgStore implements OpsGateStore {
     let grace_agents = 0
     const graceMs = 5 * 60 * 1000
     for (const a of agents) {
-      if (a.licenseAssigned !== false) {
+      if (a.licenseAssigned === true) {
         licensed_agents++
         continue
       }
@@ -1740,16 +1799,11 @@ export class PgStore implements OpsGateStore {
     const org = await this.getOrg(input.orgId)
     const personal = !!org?.isPersonal
 
-    let assignLicense = true
+    // Licence org : false tant qu'aucun groupe (moving rule / bulk / admin manuel)
+    // Personal : clé valide
+    let assignLicense = false
     if (personal) {
       assignLicense = isValidPersonalLicenseKey(input.personalLicenseKey)
-    } else if (org?.licenseSeats && org.licenseSeats > 0) {
-      const { rows } = await this.pool.query(
-        `SELECT COUNT(*)::int AS n FROM agents WHERE org_id = $1 AND license_assigned = TRUE`,
-        [input.orgId]
-      )
-      // leave room if re-enrolling same label
-      assignLicense = (rows[0]?.n || 0) < org.licenseSeats
     }
 
     if (label) {
@@ -1769,7 +1823,15 @@ export class PgStore implements OpsGateStore {
              user_id = COALESCE($6, user_id),
              last_seen_at = $7,
              personal_account = $8,
-             license_assigned = CASE WHEN $9 THEN TRUE ELSE license_assigned END
+             license_assigned = CASE
+               WHEN $9 THEN $10
+               ELSE license_assigned
+             END,
+             unlicensed_since = CASE
+               WHEN $9 AND $10 THEN NULL
+               WHEN $9 AND NOT $10 THEN COALESCE(unlicensed_since, $7::timestamptz)
+               ELSE unlicensed_since
+             END
            WHERE id = $1
            RETURNING *`,
           [
@@ -1781,6 +1843,7 @@ export class PgStore implements OpsGateStore {
             input.userId ?? null,
             now,
             personal,
+            personal,
             assignLicense
           ]
         )
@@ -1791,20 +1854,11 @@ export class PgStore implements OpsGateStore {
           rule_ids: ["system.enroll"]
         })
         await this.applyMovingRules(input.orgId, agent.id)
-        return agent
+        const refreshed = (await this.listAgents(input.orgId)).find(
+          (a) => a.id === agent.id
+        )
+        return { ...(refreshed || agent), replaced: true as const }
       }
-    }
-
-    // If seats full and not personal key valid
-    if (!assignLicense && personal) {
-      // still create agent unlicensed
-    } else if (
-      !personal &&
-      org?.licenseSeats &&
-      org.licenseSeats > 0 &&
-      !assignLicense
-    ) {
-      // enroll unlicensed if no seats
     }
 
     const agentId = newId("agt")
@@ -1822,8 +1876,8 @@ export class PgStore implements OpsGateStore {
         tokenHash,
         input.appVersion ?? null,
         input.userId ?? null,
-        assignLicense,
-        assignLicense ? null : now,
+        personal ? assignLicense : false,
+        personal && assignLicense ? null : now,
         personal
       ]
     )
@@ -1833,7 +1887,35 @@ export class PgStore implements OpsGateStore {
       rule_ids: ["system.enroll"]
     })
     await this.applyMovingRules(input.orgId, agent.id)
-    return agent
+    const refreshed = (await this.listAgents(input.orgId)).find(
+      (a) => a.id === agent.id
+    )
+    return { ...(refreshed || agent), replaced: false as const }
+  }
+
+  /** Groupe → siège auto si dispo */
+  private async tryAssignLicenseForGroup(orgId: string, agentId: string) {
+    const org = await this.getOrg(orgId)
+    if (org?.isPersonal) return
+    const { rows } = await this.pool.query(
+      `SELECT * FROM agents WHERE org_id = $1 AND id = $2`,
+      [orgId, agentId]
+    )
+    if (!rows[0] || !rows[0].group_id) return
+    if (rows[0].license_assigned === true) return
+    if (org?.licenseSeats && org.licenseSeats > 0) {
+      const { rows: cnt } = await this.pool.query(
+        `SELECT COUNT(*)::int AS n FROM agents
+         WHERE org_id = $1 AND license_assigned = TRUE AND id <> $2`,
+        [orgId, agentId]
+      )
+      if ((cnt[0]?.n || 0) >= org.licenseSeats) return
+    }
+    await this.pool.query(
+      `UPDATE agents SET license_assigned = TRUE, unlicensed_since = NULL
+       WHERE org_id = $1 AND id = $2`,
+      [orgId, agentId]
+    )
   }
 
   private async pushSystemEvent(
@@ -1952,8 +2034,18 @@ export class PgStore implements OpsGateStore {
         continue
       }
 
+      // Normaliser sévérité (évite rejets côté consumers)
+      let severity = ev.highest_severity || "low"
+      if (ev.decision === "cancel") severity = "low"
+      if (
+        ev.decision === "unenroll" ||
+        (ev.rule_ids || []).includes("system.unenroll")
+      ) {
+        severity = "warning"
+      }
+
       try {
-        await this.pool.query(
+        const { rowCount } = await this.pool.query(
           `INSERT INTO detection_events (
             id, org_id, agent_id, client_event_id, ts, source, hostname, decision,
             detection_count, highest_severity, rule_ids, types, masked, file_names,
@@ -1964,14 +2056,14 @@ export class PgStore implements OpsGateStore {
           [
             newId("evt"),
             orgId,
-            agentId,
+            agentId || null,
             ev.client_event_id,
             ev.ts,
-            ev.source,
+            ev.source || "text",
             ev.hostname,
             ev.decision,
-            ev.detection_count,
-            ev.highest_severity,
+            ev.detection_count ?? 0,
+            severity,
             JSON.stringify(ev.rule_ids || []),
             JSON.stringify(ev.types || []),
             ev.masked ?? null,
@@ -1984,9 +2076,55 @@ export class PgStore implements OpsGateStore {
             now
           ]
         )
+        // DO NOTHING (duplicate) compte aussi comme accepté (idempotent)
         accepted++
+        if (rowCount === 0) {
+          /* duplicate — ok */
+        }
       } catch (e) {
-        rejected.push({ index, reason: String(e) })
+        const msg = String(e)
+        // Si contrainte unique absente (migration partielle) : insert sans ON CONFLICT
+        if (msg.includes("no unique") || msg.includes("ON CONFLICT")) {
+          try {
+            await this.pool.query(
+              `INSERT INTO detection_events (
+                id, org_id, agent_id, client_event_id, ts, source, hostname, decision,
+                detection_count, highest_severity, rule_ids, types, masked, file_names,
+                device_label, exit_actor, exit_admin_id, exit_admin_label,
+                schema_version, received_at
+              ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12::jsonb,$13,$14::jsonb,$15,$16,$17,$18,$19,$20)`,
+              [
+                newId("evt"),
+                orgId,
+                agentId || null,
+                ev.client_event_id,
+                ev.ts,
+                ev.source || "text",
+                ev.hostname,
+                ev.decision,
+                ev.detection_count ?? 0,
+                severity,
+                JSON.stringify(ev.rule_ids || []),
+                JSON.stringify(ev.types || []),
+                ev.masked ?? null,
+                ev.file_names ? JSON.stringify(ev.file_names) : null,
+                ev.device_label ?? null,
+                ev.exit_actor ?? null,
+                ev.exit_admin_id ?? null,
+                ev.exit_admin_label ?? null,
+                ev.schema_version || 1,
+                now
+              ]
+            )
+            accepted++
+            continue
+          } catch (e2) {
+            rejected.push({ index, reason: String(e2) })
+            continue
+          }
+        }
+        console.error("[store:postgres] appendEvents failed", msg)
+        rejected.push({ index, reason: msg })
       }
     }
 
@@ -2239,6 +2377,7 @@ export class PgStore implements OpsGateStore {
          WHERE org_id = $1 AND id = $2`,
         [orgId, agentId, group.id, profileId]
       )
+      await this.tryAssignLicenseForGroup(orgId, agentId)
       return {
         applied: true as const,
         ruleId: rule.id,
@@ -2265,8 +2404,17 @@ export class PgStore implements OpsGateStore {
       const sets: string[] = []
       const params: unknown[] = [orgId, agentId]
       if (opts.groupId !== undefined) {
-        params.push(opts.groupId)
+        params.push(opts.groupId || null)
         sets.push(`group_id = $${params.length}`)
+        if (opts.groupId) {
+          // licence auto si sièges (appliqué après update)
+        } else {
+          // retrait groupe → retrait licence
+          sets.push(`license_assigned = FALSE`)
+          sets.push(
+            `unlicensed_since = COALESCE(unlicensed_since, NOW())`
+          )
+        }
       }
       if (profileId !== undefined) {
         params.push(profileId)
@@ -2278,7 +2426,12 @@ export class PgStore implements OpsGateStore {
         `UPDATE agents SET ${sets.join(", ")} WHERE org_id = $1 AND id = $2`,
         params
       )
-      if ((rowCount ?? 0) > 0) updated++
+      if ((rowCount ?? 0) > 0) {
+        updated++
+        if (opts.groupId) {
+          await this.tryAssignLicenseForGroup(orgId, agentId)
+        }
+      }
     }
     if (updated > 0) await this.forceConfigSync(orgId)
     return { updated }

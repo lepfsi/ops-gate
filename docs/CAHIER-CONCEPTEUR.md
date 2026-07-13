@@ -257,7 +257,25 @@ Voir `docs/V2-BACKLOG.md` et `docs/architecture/PLATFORM-v2.md` :
 
 ---
 
-## 10. Glossaire rapide
+## 10. Multi-navigateur (état & plan)
+
+| Navigateur | Support V1 | Comment |
+|------------|------------|---------|
+| **Chrome** | Oui (cible principale) | Plasmo MV3 + `chrome.*` APIs |
+| **Edge** | Oui (Chromium) | Même package que Chrome, store Edge optionnel |
+| **Brave / Opera / Vivaldi** | Oui en pratique | Chromium : charger le même `.zip` unpacked / store Chromium |
+| **Firefox** | Pas packagé V1 | Faisable en V1.x/V2 via `plasmo build --target=firefox-mv3` + tests `browser.*` polyfill ; permissions/content scripts légèrement différents |
+| **Safari** | V2 / produit séparé | Pas de MV3 Plasmo direct : port Apple (Xcode, notarization, App Store), APIs limitées |
+
+**Décision produit :** multi-**Chromium** = solvable **maintenant** (même build). Firefox = effort build+QA (backlog V2 court). Safari = chantier V2 dédié.
+
+Licence / protection : un agent sans **groupe** n’a pas de siège par défaut → `security_active=false` après grace → pas de protection (évite enroll opportuniste avec le seul code org).
+
+Session admin : un login à la fois par compte + idle serveur 10 min + bouton **Forcer la déconnexion**.
+
+---
+
+## 11. Glossaire rapide
 
 | Terme | Sens |
 |-------|------|
