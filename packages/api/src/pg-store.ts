@@ -140,7 +140,7 @@ function rowEvent(r: pg.QueryResultRow): StoredEvent {
   return {
     id: r.id,
     orgId: r.org_id,
-    agentId: r.agent_id,
+    agentId: r.agent_id ?? undefined,
     client_event_id: r.client_event_id,
     ts: new Date(r.ts).toISOString(),
     source: r.source,
@@ -152,6 +152,10 @@ function rowEvent(r: pg.QueryResultRow): StoredEvent {
     types: r.types || [],
     masked: r.masked ?? undefined,
     file_names: r.file_names ?? null,
+    device_label: r.device_label ?? undefined,
+    exit_actor: r.exit_actor ?? undefined,
+    exit_admin_id: r.exit_admin_id ?? undefined,
+    exit_admin_label: r.exit_admin_label ?? undefined,
     schema_version: r.schema_version,
     receivedAt: new Date(r.received_at).toISOString()
   }
@@ -257,12 +261,65 @@ export class PgStore implements OpsGateStore {
       `ALTER TABLE agents ADD COLUMN IF NOT EXISTS license_assigned BOOLEAN NOT NULL DEFAULT TRUE`,
       `ALTER TABLE agents ADD COLUMN IF NOT EXISTS unlicensed_since TIMESTAMPTZ`,
       `ALTER TABLE agents ADD COLUMN IF NOT EXISTS personal_account BOOLEAN NOT NULL DEFAULT FALSE`,
-      `ALTER TABLE agents ADD COLUMN IF NOT EXISTS last_config_epoch INT`
+      `ALTER TABLE agents ADD COLUMN IF NOT EXISTS last_config_epoch INT`,
+      `ALTER TABLE detection_events ADD COLUMN IF NOT EXISTS device_label TEXT`,
+      `ALTER TABLE detection_events ADD COLUMN IF NOT EXISTS exit_actor TEXT`,
+      `ALTER TABLE detection_events ADD COLUMN IF NOT EXISTS exit_admin_id TEXT`,
+      `ALTER TABLE detection_events ADD COLUMN IF NOT EXISTS exit_admin_label TEXT`
     ]
     for (const q of alters) {
       await this.pool.query(q)
     }
+    // Events survivant à la révocation agent (CASCADE → SET NULL)
+    await this.migrateEventsAgentFk()
     console.log("[store:postgres] schema migrated (V1 full control plane)")
+  }
+
+  /** detection_events.agent_id : NOT NULL CASCADE → NULL SET NULL + unique org-level */
+  private async migrateEventsAgentFk() {
+    try {
+      await this.pool.query(
+        `ALTER TABLE detection_events ALTER COLUMN agent_id DROP NOT NULL`
+      )
+    } catch {
+      /* already nullable */
+    }
+    // Drop old FKs / unique on (agent_id, client_event_id)
+    const { rows: fks } = await this.pool.query<{ conname: string }>(
+      `SELECT conname FROM pg_constraint
+       WHERE conrelid = 'detection_events'::regclass
+         AND contype = 'f'
+         AND pg_get_constraintdef(oid) ILIKE '%agent_id%'`
+    )
+    for (const r of fks) {
+      await this.pool.query(
+        `ALTER TABLE detection_events DROP CONSTRAINT IF EXISTS ${r.conname}`
+      )
+    }
+    const { rows: uniqs } = await this.pool.query<{ conname: string }>(
+      `SELECT conname FROM pg_constraint
+       WHERE conrelid = 'detection_events'::regclass
+         AND contype = 'u'`
+    )
+    for (const r of uniqs) {
+      await this.pool.query(
+        `ALTER TABLE detection_events DROP CONSTRAINT IF EXISTS ${r.conname}`
+      )
+    }
+    await this.pool.query(
+      `ALTER TABLE detection_events
+         ADD CONSTRAINT detection_events_agent_id_fkey
+         FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE SET NULL`
+    ).catch(() => {
+      /* exists */
+    })
+    await this.pool.query(
+      `ALTER TABLE detection_events
+         ADD CONSTRAINT detection_events_org_client_event_unique
+         UNIQUE (org_id, client_event_id)`
+    ).catch(() => {
+      /* exists */
+    })
   }
 
   private async ensureSeed() {
@@ -1675,7 +1732,13 @@ export class PgStore implements OpsGateStore {
             assignLicense
           ]
         )
-        return { ...rowAgent(rows[0]), replaced: true }
+        const agent = { ...rowAgent(rows[0]), replaced: true as const }
+        await this.pushSystemEvent(input.orgId, agent.id, "enroll", {
+          types: ["enroll", "re_enroll"],
+          device_label: agent.deviceLabel,
+          rule_ids: ["system.enroll"]
+        })
+        return agent
       }
     }
 
@@ -1711,7 +1774,39 @@ export class PgStore implements OpsGateStore {
         personal
       ]
     )
-    return { ...rowAgent(rows[0]), replaced: false }
+    const agent = { ...rowAgent(rows[0]), replaced: false as const }
+    await this.pushSystemEvent(input.orgId, agent.id, "enroll", {
+      device_label: agent.deviceLabel,
+      rule_ids: ["system.enroll"]
+    })
+    return agent
+  }
+
+  private async pushSystemEvent(
+    orgId: string,
+    agentId: string,
+    decision: "enroll" | "unenroll",
+    extra: Partial<DetectionEventInput> = {}
+  ) {
+    await this.appendEvents(orgId, agentId, [
+      {
+        schema_version: 1,
+        client_event_id: `${decision}-${agentId}-${Date.now()}`,
+        ts: new Date().toISOString(),
+        source: "system",
+        hostname: "opsgate-agent",
+        decision,
+        detection_count: 0,
+        highest_severity: decision === "unenroll" ? "warning" : "low",
+        rule_ids: extra.rule_ids || [`system.${decision}`],
+        types: extra.types || [decision],
+        masked: false,
+        device_label: extra.device_label,
+        exit_actor: extra.exit_actor,
+        exit_admin_id: extra.exit_admin_id,
+        exit_admin_label: extra.exit_admin_label
+      }
+    ])
   }
 
   async resolveAgentByToken(token: string): Promise<Agent | undefined> {
@@ -1725,6 +1820,12 @@ export class PgStore implements OpsGateStore {
 
   async revokeAgentByToken(token: string): Promise<boolean> {
     const hash = hashToken(token)
+    const { rows } = await this.pool.query(
+      `SELECT * FROM agents WHERE token_hash = $1`,
+      [hash]
+    )
+    if (!rows[0]) return false
+    // Ne pas logger ici — recordUnenrollAndRevoke le fait avant
     const { rowCount } = await this.pool.query(
       `DELETE FROM agents WHERE token_hash = $1`,
       [hash]
@@ -1732,7 +1833,30 @@ export class PgStore implements OpsGateStore {
     return (rowCount ?? 0) > 0
   }
 
-  async revokeAgentById(orgId: string, agentId: string): Promise<boolean> {
+  async revokeAgentById(
+    orgId: string,
+    agentId: string,
+    exit?: ExitActor
+  ): Promise<boolean> {
+    const { rows } = await this.pool.query(
+      `SELECT * FROM agents WHERE id = $1 AND org_id = $2`,
+      [agentId, orgId]
+    )
+    if (!rows[0]) return false
+    const agent = rowAgent(rows[0])
+    const exitActor =
+      exit?.type === "admin"
+        ? `admin:${exit.admin_label || exit.admin_id || "unknown"}`
+        : exit?.type || "admin:console"
+    // Event AVANT delete — agent_id passera à NULL (SET NULL), log conservé
+    await this.pushSystemEvent(orgId, agentId, "unenroll", {
+      types: ["unenroll", exitActor, "console_revoke"],
+      device_label: agent.deviceLabel,
+      rule_ids: ["system.unenroll"],
+      exit_actor: exitActor,
+      exit_admin_id: exit?.admin_id,
+      exit_admin_label: exit?.admin_label
+    })
     const { rowCount } = await this.pool.query(
       `DELETE FROM agents WHERE id = $1 AND org_id = $2`,
       [agentId, orgId]
@@ -1778,9 +1902,11 @@ export class PgStore implements OpsGateStore {
         await this.pool.query(
           `INSERT INTO detection_events (
             id, org_id, agent_id, client_event_id, ts, source, hostname, decision,
-            detection_count, highest_severity, rule_ids, types, masked, file_names, schema_version, received_at
-          ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12::jsonb,$13,$14::jsonb,$15,$16)
-          ON CONFLICT (agent_id, client_event_id) DO NOTHING`,
+            detection_count, highest_severity, rule_ids, types, masked, file_names,
+            device_label, exit_actor, exit_admin_id, exit_admin_label,
+            schema_version, received_at
+          ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12::jsonb,$13,$14::jsonb,$15,$16,$17,$18,$19,$20)
+          ON CONFLICT (org_id, client_event_id) DO NOTHING`,
           [
             newId("evt"),
             orgId,
@@ -1796,6 +1922,10 @@ export class PgStore implements OpsGateStore {
             JSON.stringify(ev.types || []),
             ev.masked ?? null,
             ev.file_names ? JSON.stringify(ev.file_names) : null,
+            ev.device_label ?? null,
+            ev.exit_actor ?? null,
+            ev.exit_admin_id ?? null,
+            ev.exit_admin_label ?? null,
             ev.schema_version || 1,
             now
           ]

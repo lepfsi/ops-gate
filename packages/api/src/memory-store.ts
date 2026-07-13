@@ -1296,11 +1296,28 @@ export class MemoryStore implements OpsGateStore {
     return true
   }
 
-  async revokeAgentById(orgId: string, agentId: string): Promise<boolean> {
+  async revokeAgentById(
+    orgId: string,
+    agentId: string,
+    exit?: ExitActor
+  ): Promise<boolean> {
     const agent = this.agents.get(agentId)
     if (!agent || agent.orgId !== orgId) return false
+    const exitActor =
+      exit?.type === "admin"
+        ? `admin:${exit.admin_label || exit.admin_id || "unknown"}`
+        : exit?.type || "admin:console"
+    this.pushSystemEvent(orgId, agentId, "unenroll", {
+      types: ["unenroll", exitActor, "console_revoke"],
+      device_label: agent.deviceLabel,
+      rule_ids: ["system.unenroll"],
+      exit_actor: exitActor,
+      exit_admin_id: exit?.admin_id,
+      exit_admin_label: exit?.admin_label
+    })
     this.agentsByTokenHash.delete(agent.tokenHash)
     this.agents.delete(agentId)
+    // events conservés en mémoire (agentId orphelin OK)
     return true
   }
 

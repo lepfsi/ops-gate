@@ -148,10 +148,12 @@ CREATE TABLE IF NOT EXISTS rule_packs (
 CREATE INDEX IF NOT EXISTS rule_packs_active_idx ON rule_packs(org_id) WHERE active = TRUE;
 
 -- ── Detection events ───────────────────────────────────────────
+-- agent_id nullable + ON DELETE SET NULL : garder l'historique après
+-- révocation / désinscription console (pas de CASCADE wipe).
 CREATE TABLE IF NOT EXISTS detection_events (
   id TEXT PRIMARY KEY,
   org_id TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
-  agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+  agent_id TEXT REFERENCES agents(id) ON DELETE SET NULL,
   client_event_id TEXT NOT NULL,
   ts TIMESTAMPTZ NOT NULL,
   source TEXT NOT NULL,
@@ -163,12 +165,17 @@ CREATE TABLE IF NOT EXISTS detection_events (
   types JSONB NOT NULL DEFAULT '[]',
   masked BOOLEAN,
   file_names JSONB,
+  device_label TEXT,
+  exit_actor TEXT,
+  exit_admin_id TEXT,
+  exit_admin_label TEXT,
   schema_version INT NOT NULL DEFAULT 1,
   received_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  UNIQUE (agent_id, client_event_id)
+  UNIQUE (org_id, client_event_id)
 );
 
 CREATE INDEX IF NOT EXISTS events_org_ts_idx ON detection_events(org_id, received_at DESC);
+CREATE INDEX IF NOT EXISTS events_agent_idx ON detection_events(agent_id);
 
 -- ── Password reset OTP ─────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS password_reset_challenges (

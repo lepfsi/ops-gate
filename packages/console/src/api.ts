@@ -120,6 +120,7 @@ export type EventRow = {
   exit_actor?: string
   exit_admin_label?: string
   device_label?: string
+  file_names?: string[] | null
 }
 
 export type PolicyDoc = {
@@ -547,6 +548,7 @@ export const api = {
 }
 
 export function normalizeEvent(raw: Record<string, unknown>): EventRow {
+  const files = (raw.file_names ?? raw.fileNames) as string[] | null | undefined
   return {
     id: String(raw.id || ""),
     ts: String(raw.ts || raw.receivedAt || ""),
@@ -572,6 +574,7 @@ export function normalizeEvent(raw: Record<string, unknown>): EventRow {
       ? String(raw.device_label)
       : raw.deviceLabel
         ? String(raw.deviceLabel)
-        : undefined
+        : undefined,
+    file_names: Array.isArray(files) ? files : null
   }
 }

@@ -267,7 +267,8 @@ export interface DetectionEventInput {
 export interface StoredEvent extends DetectionEventInput {
   id: string
   orgId: string
-  agentId: string
+  /** Null si l’agent a été révoqué (historique conservé) */
+  agentId?: string
   receivedAt: string
 }
 

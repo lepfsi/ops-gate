@@ -1254,15 +1254,23 @@ export function createApp() {
     })
   })
 
-  /** Admin : révoquer un agent */
+  /** Admin : révoquer un agent — l’historique events est conservé */
   v1.delete("/org/agents/:agentId", async (c) => {
     const _gate = await requireConsoleAuth(c, "unenroll_agents")
     if (!_gate.ok) return c.json({ error: _gate.error }, _gate.status)
     const org = await store.getOrg(_gate.orgId)
     if (!org) return c.json({ error: "no_org" }, 404)
-    const ok = await store.revokeAgentById(org.id, c.req.param("agentId"))
+    const ok = await store.revokeAgentById(org.id, c.req.param("agentId"), {
+      type: "admin",
+      admin_id: _gate.admin.id,
+      admin_label: _gate.admin.label
+    })
     if (!ok) return c.json({ error: "agent_not_found" }, 404)
-    return c.json({ ok: true, agent_id: c.req.param("agentId") })
+    return c.json({
+      ok: true,
+      agent_id: c.req.param("agentId"),
+      events_retained: true
+    })
   })
 
   v1.get("/org/events", async (c) => {

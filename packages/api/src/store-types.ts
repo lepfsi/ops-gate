@@ -261,7 +261,12 @@ export interface OpsGateStore {
   }): Promise<Agent & { replaced?: boolean }>
   resolveAgentByToken(token: string): Promise<Agent | undefined>
   revokeAgentByToken(token: string): Promise<boolean>
-  revokeAgentById(orgId: string, agentId: string): Promise<boolean>
+  /** Révocation admin console — conserve les events (pas de wipe). */
+  revokeAgentById(
+    orgId: string,
+    agentId: string,
+    exit?: ExitActor
+  ): Promise<boolean>
   listAgents(orgId: string): Promise<Agent[]>
 
   appendEvents(

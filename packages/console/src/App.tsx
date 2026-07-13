@@ -2436,13 +2436,20 @@ function EventsView({ events }: { events: EventRow[] }) {
               Console = org <code>DEMO-OPSGATE</code> (bandeau « Org · … »)
             </li>
             <li>
-              Extension enrôlée avec le <strong>même</strong> code org (pas
-              PERSONAL)
+              Extension enrôlée org (pas PERSONAL) +{" "}
+              <strong>Events cloud : activés</strong> dans Options
             </li>
             <li>
-              Policy → <strong>Collecte events</strong> activée, puis sync agent
+              Policy → Collecte events ON · puis <strong>Synchroniser</strong>
             </li>
-            <li>Détection réelle sur un site IA (bandeau → décision)</li>
+            <li>
+              L’enroll / unenroll / détections génèrent des events système ou
+              détection
+            </li>
+            <li>
+              Révoquer un agent <strong>conserve</strong> l’historique (ne
+              l’efface plus)
+            </li>
           </ul>
         </div>
       ) : (
@@ -2469,11 +2476,16 @@ function EventsView({ events }: { events: EventRow[] }) {
                     <div className="muted" style={{ fontSize: 11 }}>
                       site · {e.hostname}
                     </div>
+                  ) : e.source === "system" ? (
+                    <div className="muted" style={{ fontSize: 11 }}>
+                      système
+                    </div>
                   ) : null}
                 </td>
                 <td>
                   {e.decision}
                   {e.source === "system" ? " · system" : ""}
+                  {e.source === "file" ? " · fichier" : ""}
                 </td>
                 <td className="mono" style={{ fontSize: 12 }}>
                   {e.exit_actor ||
@@ -2494,6 +2506,12 @@ function EventsView({ events }: { events: EventRow[] }) {
                 </td>
                 <td className="muted">
                   {(e.types || []).join(", ")}
+                  {e.file_names?.length ? (
+                    <div style={{ fontSize: 11 }}>
+                      fichiers · {e.file_names.slice(0, 3).join(", ")}
+                      {e.masked === false ? " (non masqué)" : e.masked ? " (masqué)" : ""}
+                    </div>
+                  ) : null}
                   {e.rule_ids?.length ? (
                     <div className="mono" style={{ fontSize: 11 }}>
                       {e.rule_ids.join(", ")}
