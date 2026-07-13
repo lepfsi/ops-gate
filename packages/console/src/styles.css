@@ -13,14 +13,16 @@
   --muted: #64748b;
   --line: #e2e8f0;
   --line-2: #cbd5e1;
-  /* Charte OpsGate (logo): navy #0f172a + cyan #22d3ee */
-  --navy: #0f172a;
-  --navy-2: #1e293b;
-  --accent: #22d3ee;
-  --accent-hover: #06b6d4;
-  --accent-soft: #ecfeff;
-  --accent-ring: rgba(34, 211, 238, 0.28);
-  --accent-ink: #0e7490;
+  /* Charte org DailyOps.Tech (docs/) appliquée à OpsGate console */
+  --navy: #0a1128;
+  --navy-2: #111c44;
+  --slate: #1e293b;
+  --accent: #2bd9c5;
+  --accent-hover: #22c3b1;
+  --accent-soft: #e6faf7;
+  --accent-ring: rgba(43, 217, 197, 0.28);
+  --accent-ink: #0d9488;
+  --gray: #94a3b8;
   --danger: #b91c1c;
   --danger-soft: #fef2f2;
   --warn: #b45309;
@@ -97,7 +99,7 @@ a {
   gap: var(--space);
   margin-bottom: var(--space);
   padding: 12px 18px;
-  background: linear-gradient(180deg, #0f2744 0%, #132f52 100%);
+  background: linear-gradient(180deg, #0a1128 0%, #111c44 100%);
   border: 1px solid rgba(255, 255, 255, 0.06);
   border-radius: var(--radius);
   box-shadow: var(--shadow-lg);
