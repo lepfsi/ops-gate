@@ -1254,7 +1254,7 @@ export function createApp() {
     })
   })
 
-  /** Admin : révoquer un agent — l’historique events est conservé */
+  /** Admin : révoquer un agent — historique events conservé ; agent reçoit 401 au prochain sync */
   v1.delete("/org/agents/:agentId", async (c) => {
     const _gate = await requireConsoleAuth(c, "unenroll_agents")
     if (!_gate.ok) return c.json({ error: _gate.error }, _gate.status)
@@ -1266,10 +1266,14 @@ export function createApp() {
       admin_label: _gate.admin.label
     })
     if (!ok) return c.json({ error: "agent_not_found" }, 404)
+    // Bump epoch pour les autres agents ; le révoqué verra invalid_token → local_only
+    await store.forceConfigSync(org.id)
     return c.json({
       ok: true,
       agent_id: c.req.param("agentId"),
-      events_retained: true
+      events_retained: true,
+      message:
+        "Agent révoqué. L’extension repasse en local_only au prochain sync (≤ 2 min) sans mot de passe local."
     })
   })
 

@@ -5,8 +5,12 @@ import {
   type DetectionRule
 } from "@opsgate/engine"
 
-/** Taille max lue (MVP) — au-delà on scanne seulement le début */
-export const MAX_FILE_BYTES = 1_500_000
+/**
+ * Taille max lue par fichier (texte).
+ * Au-delà : scan du début uniquement + flag truncated (pas un rejet silencieux).
+ * 12 Mo — configs / dumps raisonnables sans bloquer le service worker.
+ */
+export const MAX_FILE_BYTES = 12_000_000
 
 /** Extensions / types textuels scannables en MVP */
 const TEXT_EXTENSIONS = new Set([

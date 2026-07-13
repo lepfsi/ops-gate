@@ -1,6 +1,7 @@
 import type { DetectionRule } from "@opsgate/engine"
 
 import {
+  clearCloudState,
   getSettings,
   setCachedRulesPack,
   setSettings
@@ -210,17 +211,20 @@ export async function syncConfig(
     })
 
     if (res.status === 401 || res.status === 403) {
+      // Révocation console (ou token mort) : sortir du mode managé SANS mdp local.
+      // L’admin a déjà autorisé la sortie côté control plane.
+      await clearCloudState()
       const next = await setSettings({
-        lastSyncError: "invalid_token"
+        lastSyncError: "revoked_remote",
+        enabled: true
       })
-      const needsPwd = !!(
-        settings.managementPasswordHash &&
-        settings.managementPasswordHash.trim().length > 0
+      console.warn(
+        "[OpsGate] Token invalide / agent révoqué — retour local_only (sans mdp)"
       )
       return {
         ok: false,
-        error: "invalid_token",
-        requiresAdminPassword: needsPwd,
+        error: "revoked_remote",
+        recovered: true,
         settings: next
       }
     }

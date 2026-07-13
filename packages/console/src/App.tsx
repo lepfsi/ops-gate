@@ -26,10 +26,22 @@ const AI_HOST_PRESETS = [
   "chat.openai.com",
   "claude.ai",
   "gemini.google.com",
+  "bard.google.com",
   "copilot.microsoft.com",
   "perplexity.ai",
   "chat.deepseek.com",
-  "aistudio.google.com"
+  "aistudio.google.com",
+  "poe.com",
+  "you.com",
+  "chat.mistral.ai",
+  "console.groq.com",
+  "grok.x.ai",
+  "huggingface.co",
+  "phind.com",
+  "meta.ai",
+  "pi.ai",
+  "character.ai",
+  "notebooklm.google.com"
 ]
 
 const ALL_PERMS: AdminPermission[] = [
@@ -434,10 +446,16 @@ export default function App() {
             setError(null)
             setInfo(null)
             try {
-              await api.revokeAgent(id)
-              setInfo(`Agent ${id} révoqué`)
+              const r = (await api.revokeAgent(id)) as {
+                message?: string
+              }
+              setInfo(
+                r?.message ||
+                  `Agent ${id} révoqué — l’extension repasse en local_only au prochain sync (≤ 2 min), sans mot de passe local.`
+              )
               await loadTab("agents")
               await loadTab("summary")
+              await loadTab("events")
             } catch (e) {
               setError(String(e))
             } finally {
@@ -1513,9 +1531,9 @@ function PolicyView({
       <div className="card">
         <h2>Recovery concepteur (principal only)</h2>
         <p className="muted">
-          Uniquement sur agents <strong>offline &gt; 2h</strong> (sync 15 min).
-          Les postes en contact reçoivent les nouveaux mdp admin via sync — pas de
-          désinscription massive si le secret fuit.
+          Uniquement sur agents <strong>offline &gt; 2h</strong> (poll sync ~2
+          min). Les postes en contact reçoivent les nouveaux mdp admin via sync —
+          pas de désinscription massive si le secret fuit.
         </p>
         <button
           className="btn secondary"
@@ -1568,12 +1586,20 @@ function PacksView({
 }) {
   return (
     <>
+      <div className="pack-help">
+        <strong>À quoi sert un pack ?</strong> C’est le jeu de signatures de
+        détection (secrets, configs…) poussé aux agents <em>sans rebuild</em> de
+        l’extension. <strong>Publier</strong> = créer une nouvelle version
+        (souvent l’active moins des règles bruyantes).{" "}
+        <strong>Activer</strong> = choisir quelle version les agents reçoivent
+        au sync. Doc : <code>docs/RULE-PACKS.md</code>
+      </div>
       <div className="card">
-        <h2>Publier un pack (clone actif)</h2>
+        <h2>Publier un pack</h2>
         <p className="muted">
-          Clone le pack actif et retire des rule ids (séparés par virgule). Active
-          immédiatement — les agents voient la nouvelle version au prochain sync
-          (force-sync recommandé).
+          Clone le pack actif, retire éventuellement des IDs de règles (ex. faux
+          positifs), signe et active. Les agents appliquent au prochain sync
+          (≤ 2 min) ou après <strong>Forcer la synchronisation</strong>.
         </p>
         <div className="row" style={{ marginBottom: 10 }}>
           <input
@@ -1588,19 +1614,20 @@ function PacksView({
             style={{ minWidth: 200 }}
             value={publishNotes}
             onChange={(e) => onPublishNotes(e.target.value)}
-            placeholder="notes"
+            placeholder="notes (ex. pilote RH)"
           />
           <button className="btn" type="button" disabled={busy} onClick={onPublish}>
-            {busy ? "…" : "Publish & activate"}
+            {busy ? "…" : "Publier & activer"}
           </button>
         </div>
         <p className="muted">
-          Actif : <strong>{activeVersion || "—"}</strong>
+          Pack actif servi aux agents :{" "}
+          <strong>{activeVersion || "—"}</strong>
         </p>
       </div>
 
       <div className="card">
-        <h2>Versions</h2>
+        <h2>Historique des versions</h2>
         {packs.length === 0 ? (
           <div className="empty">Aucun pack</div>
         ) : (

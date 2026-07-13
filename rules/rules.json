@@ -391,5 +391,79 @@
     "keywords": [".env", "DATABASE_URL", "SECRET_KEY"],
     "action_default": "mask",
     "description": "Variables d'environnement sensibles collées dans un prompt"
+  },
+  {
+    "id": "ssh-rdp-credentials",
+    "name": "Credentials SSH / RDP / VPN collés",
+    "category": "infra",
+    "severity": "high",
+    "patterns": [
+      "(?i)\\bssh\\s+[\\w.@-]+\\s+.*password",
+      "(?i)\\b(putty|winscp|securecrt).*password\\s*[:=]",
+      "(?i)\\brdp\\s*://",
+      "(?i)\\bvnc\\s*://[^\\s]+",
+      "(?i)\\b-----BEGIN OPENSSH PRIVATE KEY-----"
+    ],
+    "keywords": ["ssh", "rdp", "vnc", "putty", "openssh"],
+    "action_default": "mask",
+    "description": "Accès distant / clés OpenSSH collés dans un chat IA"
+  },
+  {
+    "id": "cloud-iam-snippets",
+    "name": "IAM cloud / policies sensibles",
+    "category": "infra",
+    "severity": "medium",
+    "patterns": [
+      "(?i)\\b\"Effect\"\\s*:\\s*\"Allow\"[\\s\\S]{0,80}\"Action\"\\s*:\\s*\"\\*\"",
+      "(?i)\\barn:aws:(iam|s3|ec2|secretsmanager):[a-z0-9-]*:\\d{0,12}:",
+      "(?i)\\broles/owner\\b",
+      "(?i)\\b\"storage.buckets.setIamPolicy\""
+    ],
+    "keywords": ["arn:aws", "Effect", "IAM", "roles/owner"],
+    "action_default": "mask",
+    "description": "Extraits IAM AWS/GCP trop permissifs ou ARN sensibles"
+  },
+  {
+    "id": "npm-pypi-tokens",
+    "name": "Tokens npm / PyPI / NuGet",
+    "category": "general",
+    "severity": "high",
+    "patterns": [
+      "\\bnpm_[A-Za-z0-9]{30,}\\b",
+      "\\bpypi-[A-Za-z0-9_-]{20,}\\b",
+      "(?i)\\b//registry\\.npmjs\\.org/:_authToken=",
+      "(?i)\\bNUGET_API_KEY\\s*=\\s*\\S+"
+    ],
+    "keywords": ["npm_", "pypi-", "authToken", "nuget"],
+    "action_default": "mask",
+    "description": "Tokens de publication packages collés dans un prompt"
+  },
+  {
+    "id": "kubernetes-secrets",
+    "name": "Secrets Kubernetes / Docker registry",
+    "category": "infra",
+    "severity": "high",
+    "patterns": [
+      "(?i)kind:\\s*Secret\\b",
+      "(?i)\\bdockerconfigjson\\b",
+      "(?i)\\.dockerconfigjson",
+      "(?i)\\bkubectl\\s+create\\s+secret\\b",
+      "(?i)\\bapiVersion:\\s*v1\\b[\\s\\S]{0,40}kind:\\s*Secret"
+    ],
+    "keywords": ["Secret", "dockerconfigjson", "kubectl"],
+    "action_default": "mask",
+    "description": "Manifests Secret K8s / docker registry auth"
+  },
+  {
+    "id": "sftp-ftp-uris",
+    "name": "URI SFTP/FTP avec credentials",
+    "category": "infra",
+    "severity": "high",
+    "patterns": [
+      "(?i)\\b(s?ftp|ftps)://[^\\s/@:]+:[^\\s/@]+@[^\\s]+",
+      "(?i)\\bsmb://[^\\s/@:]+:[^\\s/@]+@[^\\s]+"
+    ],
+    "action_default": "mask",
+    "description": "URL de transfert de fichiers avec user:password"
   }
 ]

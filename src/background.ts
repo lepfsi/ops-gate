@@ -26,9 +26,9 @@ import type { JournalEntry, OpsGateMessage } from "~types"
 
 export {}
 
-/** Poll 15 min — force-sync console appliqué sans visite poste */
+/** Poll fréquent : force-sync + révocation console appliqués sans visite poste */
 const SYNC_ALARM = "opsgate-sync-config"
-const SYNC_PERIOD_MIN = 15
+const SYNC_PERIOD_MIN = 2
 
 chrome.runtime.onInstalled.addListener(() => {
   console.log("[OpsGate] Extension installée / mise à jour")

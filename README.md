@@ -63,15 +63,11 @@ src/
 rules/rules.json         # règles configurables
 ```
 
-## Sites supportés
+## Sites supportés (injection content-script)
 
-- chatgpt.com / chat.openai.com
-- claude.ai
-- gemini.google.com
-- copilot.microsoft.com
-- perplexity.ai
-- chat.deepseek.com
-- aistudio.google.com
+ChatGPT, Claude, Gemini/Bard, Copilot, Perplexity, DeepSeek, AI Studio, Poe, You.com, Mistral, Groq console, Grok (x.ai), HuggingFace Chat, Phind, Meta AI, Pi, Character.ai, NotebookLM — liste complète dans `package.json` / Options.
+
+Voir aussi **packs de règles** : [`docs/RULE-PACKS.md`](docs/RULE-PACKS.md)
 
 ## Kit démo
 

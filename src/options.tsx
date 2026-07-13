@@ -526,7 +526,14 @@ function OptionsPage() {
                   ? new Date(settings.lastRulesSyncAt).toLocaleString("fr-FR")
                   : "jamais"}
               </div>
-              {settings.lastSyncError && (
+              {settings.lastSyncError === "revoked_remote" && (
+                <div style={{ color: "#0f766e", fontWeight: 600 }}>
+                  Cet appareil a été révoqué depuis la console — retour en mode
+                  local (pas de mdp requis).
+                </div>
+              )}
+              {settings.lastSyncError &&
+                settings.lastSyncError !== "revoked_remote" && (
                 <div style={{ color: "#b91c1c" }}>
                   Erreur sync : {settings.lastSyncError}
                   {hardLock

@@ -102,10 +102,22 @@ export class MemoryStore implements OpsGateStore {
       "chat.openai.com",
       "claude.ai",
       "gemini.google.com",
+      "bard.google.com",
       "copilot.microsoft.com",
       "perplexity.ai",
       "chat.deepseek.com",
-      "aistudio.google.com"
+      "aistudio.google.com",
+      "poe.com",
+      "you.com",
+      "chat.mistral.ai",
+      "console.groq.com",
+      "grok.x.ai",
+      "huggingface.co",
+      "phind.com",
+      "meta.ai",
+      "pi.ai",
+      "character.ai",
+      "notebooklm.google.com"
     ]
 
     const policy: Policy = {
@@ -271,10 +283,16 @@ export class MemoryStore implements OpsGateStore {
         "chat.openai.com",
         "claude.ai",
         "gemini.google.com",
+        "bard.google.com",
         "copilot.microsoft.com",
         "perplexity.ai",
         "chat.deepseek.com",
-        "aistudio.google.com"
+        "aistudio.google.com",
+        "poe.com",
+        "you.com",
+        "chat.mistral.ai",
+        "meta.ai",
+        "notebooklm.google.com"
       ],
       scanUploads: true,
       eventReporting: false,
