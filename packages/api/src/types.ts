@@ -310,21 +310,33 @@ export interface AdminAuditEvent {
 /**
  * Règle d'affectation automatique d'agents (inspiré Kaspersky « moving rules »).
  * Ex. : device_label starts_with "FIN" → groupe Finance (+ policy du groupe).
+ * Plusieurs conditions = AND (toutes doivent matcher). Priorité plus petite = d'abord.
  */
 export type MovingMatchField = "device_label" | "host_name"
 export type MovingMatchOp = "starts_with" | "contains" | "equals" | "regex"
+
+export interface MovingCondition {
+  field: MovingMatchField
+  op: MovingMatchOp
+  value: string
+}
 
 export interface MovingRule {
   id: string
   orgId: string
   name: string
   enabled: boolean
+  /** Conditions AND — au moins une. Champs legacy ci-dessous = 1ère condition. */
+  conditions: MovingCondition[]
+  /** @deprecated use conditions[0] */
   matchField: MovingMatchField
+  /** @deprecated use conditions[0] */
   matchOp: MovingMatchOp
+  /** @deprecated use conditions[0] */
   matchValue: string
   /** Groupe cible (hérite policyProfileId du groupe si présent) */
   targetGroupId: string
-  /** Priorité : plus petit = évalué en premier */
+  /** Priorité : plus petit = évalué en premier (style firewall) */
   priority: number
   /** true = n'applique que si l'agent n'a pas encore de profil/groupe (défaut) */
   onlyIfUnassigned: boolean

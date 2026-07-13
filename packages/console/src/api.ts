@@ -196,11 +196,18 @@ export type GroupRow = {
   updatedAt: string
 }
 
+export type MovingCondition = {
+  field: "device_label" | "host_name"
+  op: "starts_with" | "contains" | "equals" | "regex"
+  value: string
+}
+
 export type MovingRuleRow = {
   id: string
   orgId: string
   name: string
   enabled: boolean
+  conditions?: MovingCondition[]
   matchField: "device_label" | "host_name"
   matchOp: "starts_with" | "contains" | "equals" | "regex"
   matchValue: string
@@ -262,9 +269,10 @@ export const api = {
 
   createMovingRule: (body: {
     name: string
-    match_field: string
-    match_op: string
-    match_value: string
+    conditions?: MovingCondition[]
+    match_field?: string
+    match_op?: string
+    match_value?: string
     target_group_id: string
     priority?: number
     only_if_unassigned?: boolean
@@ -274,6 +282,22 @@ export const api = {
       method: "POST",
       body: JSON.stringify(body)
     }),
+
+  patchMovingRule: (
+    id: string,
+    body: {
+      name?: string
+      conditions?: MovingCondition[]
+      target_group_id?: string
+      priority?: number
+      only_if_unassigned?: boolean
+      enabled?: boolean
+    }
+  ) =>
+    request<{ ok: boolean; rule: MovingRuleRow }>(
+      `/v1/org/moving-rules/${encodeURIComponent(id)}`,
+      { method: "PATCH", body: JSON.stringify(body) }
+    ),
 
   deleteMovingRule: (id: string) =>
     request<{ ok: boolean }>(

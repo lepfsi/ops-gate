@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 
 import {
   api,
@@ -44,6 +44,7 @@ const AI_HOST_PRESETS = [
   "poe.com",
   "you.com",
   "chat.mistral.ai",
+  "lechat.mistral.ai",
   "console.groq.com",
   "grok.x.ai",
   "grok.com",
@@ -52,7 +53,27 @@ const AI_HOST_PRESETS = [
   "meta.ai",
   "pi.ai",
   "character.ai",
-  "notebooklm.google.com"
+  "notebooklm.google.com",
+  "openrouter.ai",
+  "together.ai",
+  "fireworks.ai",
+  "blackbox.ai",
+  "chat.lmsys.org",
+  "lmarena.ai",
+  "typingmind.com",
+  "chat.qwen.ai",
+  "writesonic.com",
+  "jasper.ai",
+  "copy.ai",
+  "notion.so",
+  "platform.openai.com",
+  "labs.google",
+  "deepai.org",
+  "sider.ai",
+  "monica.im",
+  "chatpdf.com",
+  "consensus.app",
+  "elicit.com"
 ]
 
 const ALL_PERMS: AdminPermission[] = [
@@ -933,7 +954,17 @@ function LoginScreen({
               setToken(r.token)
               onLoggedIn(r.admin)
             } catch (e) {
-              setErr(String(e))
+              const msg = String(e)
+              if (
+                msg.includes("session_already_active") ||
+                msg.includes("409")
+              ) {
+                setErr(
+                  "Ce compte a déjà une session active. L’autre technicien doit se déconnecter (ou attendre le logout idle 5 min) avant de se reconnecter avec le même compte."
+                )
+              } else {
+                setErr(msg)
+              }
             } finally {
               setBusy(false)
             }
@@ -2665,6 +2696,42 @@ function AgentsView({
 }
 
 function EventsView({ events }: { events: EventRow[] }) {
+  const [decisionF, setDecisionF] = useState("")
+  const [severityF, setSeverityF] = useState("")
+  const [sourceF, setSourceF] = useState("")
+  const [labelF, setLabelF] = useState("")
+
+  const decisions = useMemo(
+    () =>
+      [...new Set(events.map((e) => e.decision).filter(Boolean))].sort(),
+    [events]
+  )
+  const severities = useMemo(
+    () =>
+      [
+        ...new Set(events.map((e) => e.highest_severity).filter(Boolean))
+      ].sort(),
+    [events]
+  )
+  const sources = useMemo(
+    () => [...new Set(events.map((e) => e.source).filter(Boolean))].sort(),
+    [events]
+  )
+
+  const filtered = useMemo(() => {
+    const q = labelF.trim().toLowerCase()
+    return events.filter((e) => {
+      if (decisionF && e.decision !== decisionF) return false
+      if (severityF && e.highest_severity !== severityF) return false
+      if (sourceF && e.source !== sourceF) return false
+      if (q) {
+        const hay = `${e.device_label || ""} ${e.hostname || ""} ${(e.types || []).join(" ")} ${(e.file_names || []).join(" ")}`.toLowerCase()
+        if (!hay.includes(q)) return false
+      }
+      return true
+    })
+  }, [events, decisionF, severityF, sourceF, labelF])
+
   return (
     <div className="card">
       <h2>Events (logs)</h2>
@@ -2699,75 +2766,142 @@ function EventsView({ events }: { events: EventRow[] }) {
           </ul>
         </div>
       ) : (
-        <div className="table-wrap"><table className="table">
-          <thead>
-            <tr>
-              <th>Quand</th>
-              <th>Label appareil</th>
-              <th>Décision</th>
-              <th>Acteur</th>
-              <th>Sévérité</th>
-              <th>Détail</th>
-            </tr>
-          </thead>
-          <tbody>
-            {events.map((e) => (
-              <tr key={e.id}>
-                <td className="muted">
-                  {e.ts ? new Date(e.ts).toLocaleString("fr-FR") : "—"}
-                </td>
-                <td>
-                  <strong>{e.device_label || "—"}</strong>
-                  {e.hostname && e.hostname !== "opsgate-agent" ? (
-                    <div className="muted" style={{ fontSize: 11 }}>
-                      site · {e.hostname}
-                    </div>
-                  ) : e.source === "system" ? (
-                    <div className="muted" style={{ fontSize: 11 }}>
-                      système
-                    </div>
-                  ) : null}
-                </td>
-                <td>
-                  {e.decision}
-                  {e.source === "system" ? " · system" : ""}
-                  {e.source === "file" ? " · fichier" : ""}
-                </td>
-                <td className="mono" style={{ fontSize: 12 }}>
-                  {e.exit_actor ||
-                    e.exit_admin_label ||
-                    (e.decision === "unenroll"
-                      ? (e.types || []).find(
-                          (t) =>
-                            t.startsWith("admin:") ||
-                            t === "vendor_recovery" ||
-                            t === "free"
-                        ) || "—"
-                      : "—")}
-                </td>
-                <td>
-                  <span className={`badge ${e.highest_severity}`}>
-                    {e.highest_severity}
-                  </span>
-                </td>
-                <td className="muted">
-                  {(e.types || []).join(", ")}
-                  {e.file_names?.length ? (
-                    <div style={{ fontSize: 11 }}>
-                      fichiers · {e.file_names.slice(0, 3).join(", ")}
-                      {e.masked === false ? " (non masqué)" : e.masked ? " (masqué)" : ""}
-                    </div>
-                  ) : null}
-                  {e.rule_ids?.length ? (
-                    <div className="mono" style={{ fontSize: 11 }}>
-                      {e.rule_ids.join(", ")}
-                    </div>
-                  ) : null}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table></div>
+        <>
+          <div className="row" style={{ marginBottom: 12, flexWrap: "wrap" }}>
+            <select
+              className="input"
+              value={decisionF}
+              onChange={(e) => setDecisionF(e.target.value)}>
+              <option value="">Toutes décisions</option>
+              {decisions.map((d) => (
+                <option key={d} value={d}>
+                  {d}
+                </option>
+              ))}
+            </select>
+            <select
+              className="input"
+              value={severityF}
+              onChange={(e) => setSeverityF(e.target.value)}>
+              <option value="">Toutes sévérités</option>
+              {severities.map((s) => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
+              ))}
+            </select>
+            <select
+              className="input"
+              value={sourceF}
+              onChange={(e) => setSourceF(e.target.value)}>
+              <option value="">Toutes sources</option>
+              {sources.map((s) => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
+              ))}
+            </select>
+            <input
+              className="input"
+              placeholder="Label / host / type…"
+              value={labelF}
+              onChange={(e) => setLabelF(e.target.value)}
+            />
+            <button
+              className="btn secondary btn-sm"
+              type="button"
+              onClick={() => {
+                setDecisionF("")
+                setSeverityF("")
+                setSourceF("")
+                setLabelF("")
+              }}>
+              Reset
+            </button>
+          </div>
+          <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>
+            {filtered.length} / {events.length} event(s)
+          </p>
+          {filtered.length === 0 ? (
+            <div className="empty">Aucun event pour ces filtres</div>
+          ) : (
+            <div className="table-wrap">
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>Quand</th>
+                    <th>Label appareil</th>
+                    <th>Décision</th>
+                    <th>Acteur</th>
+                    <th>Sévérité</th>
+                    <th>Détail</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.map((e) => (
+                    <tr key={e.id}>
+                      <td className="muted">
+                        {e.ts ? new Date(e.ts).toLocaleString("fr-FR") : "—"}
+                      </td>
+                      <td>
+                        <strong>{e.device_label || "—"}</strong>
+                        {e.hostname && e.hostname !== "opsgate-agent" ? (
+                          <div className="muted" style={{ fontSize: 11 }}>
+                            site · {e.hostname}
+                          </div>
+                        ) : e.source === "system" ? (
+                          <div className="muted" style={{ fontSize: 11 }}>
+                            système
+                          </div>
+                        ) : null}
+                      </td>
+                      <td>
+                        {e.decision}
+                        {e.source === "system" ? " · system" : ""}
+                        {e.source === "file" ? " · fichier" : ""}
+                      </td>
+                      <td className="mono" style={{ fontSize: 12 }}>
+                        {e.exit_actor ||
+                          e.exit_admin_label ||
+                          (e.decision === "unenroll"
+                            ? (e.types || []).find(
+                                (t) =>
+                                  t.startsWith("admin:") ||
+                                  t === "vendor_recovery" ||
+                                  t === "free"
+                              ) || "—"
+                            : "—")}
+                      </td>
+                      <td>
+                        <span className={`badge ${e.highest_severity}`}>
+                          {e.highest_severity}
+                        </span>
+                      </td>
+                      <td className="muted">
+                        {(e.types || []).join(", ")}
+                        {e.file_names?.length ? (
+                          <div style={{ fontSize: 11 }}>
+                            fichiers · {e.file_names.slice(0, 3).join(", ")}
+                            {e.masked === false
+                              ? " (non masqué)"
+                              : e.masked
+                                ? " (masqué)"
+                                : ""}
+                          </div>
+                        ) : null}
+                        {e.rule_ids?.length ? (
+                          <div className="mono" style={{ fontSize: 11 }}>
+                            {e.rule_ids.join(", ")}
+                          </div>
+                        ) : null}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
       )}
     </div>
   )
@@ -2889,7 +3023,7 @@ function AuditView({ isPrincipal }: { isPrincipal: boolean }) {
   )
 }
 
-/** Sélecteur d’hôtes IA : presets cliquables + champ « + add AI » */
+/** Sélecteur d’hôtes IA : presets cliquables + customs + champ « + add AI » */
 export function HostPicker({
   value,
   onChange
@@ -2899,9 +3033,22 @@ export function HostPicker({
 }) {
   const [custom, setCustom] = useState("")
   const set = new Set(value)
+  const customHosts = value.filter((h) => !AI_HOST_PRESETS.includes(h))
   const toggle = (h: string) => {
     if (set.has(h)) onChange(value.filter((x) => x !== h))
     else onChange([...value, h])
+  }
+  const addCustom = () => {
+    const h = custom
+      .trim()
+      .toLowerCase()
+      .replace(/^https?:\/\//, "")
+      .replace(/^www\./, "")
+      .split("/")[0]
+      .split("?")[0]
+    if (!h || !h.includes(".")) return
+    if (!set.has(h)) onChange([...value, h])
+    setCustom("")
   }
   return (
     <div>
@@ -2922,6 +3069,16 @@ export function HostPicker({
             {h}
           </button>
         ))}
+        {customHosts.map((h) => (
+          <button
+            key={`custom-${h}`}
+            type="button"
+            className="btn btn-sm accent"
+            title="Domaine personnalisé — cliquer pour retirer"
+            onClick={() => toggle(h)}>
+            ✓ {h}
+          </button>
+        ))}
       </div>
       <div className="row">
         <input
@@ -2929,26 +3086,36 @@ export function HostPicker({
           placeholder="autre-domaine.ai"
           value={custom}
           onChange={(e) => setCustom(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault()
+              addCustom()
+            }
+          }}
         />
         <button
           type="button"
           className="btn secondary btn-sm"
-          onClick={() => {
-            const h = custom
-              .trim()
-              .toLowerCase()
-              .replace(/^https?:\/\//, "")
-              .split("/")[0]
-            if (!h) return
-            if (!set.has(h)) onChange([...value, h])
-            setCustom("")
-          }}>
+          onClick={addCustom}>
           + Add AI
         </button>
       </div>
+      {customHosts.length > 0 && (
+        <p className="muted" style={{ fontSize: 12, marginTop: 6 }}>
+          Domaines custom actifs : {customHosts.join(", ")}
+        </p>
+      )}
     </div>
   )
 }
+
+type CondDraft = import("./api").MovingCondition
+
+const emptyCond = (): CondDraft => ({
+  field: "device_label",
+  op: "starts_with",
+  value: ""
+})
 
 function MovingRulesView({
   groups,
@@ -2963,18 +3130,12 @@ function MovingRulesView({
   setError: (e: string | null) => void
   setInfo: (i: string | null) => void
 }) {
-  const [rules, setRules] = useState<
-    import("./api").MovingRuleRow[]
-  >([])
-  const [name, setName] = useState("FIN → Finance")
-  const [field, setField] = useState<"device_label" | "host_name">(
-    "device_label"
-  )
-  const [op, setOp] = useState<
-    "starts_with" | "contains" | "equals" | "regex"
-  >("starts_with")
-  const [value, setValue] = useState("FIN")
+  const [rules, setRules] = useState<import("./api").MovingRuleRow[]>([])
+  const [formOpen, setFormOpen] = useState(false)
+  const [name, setName] = useState("")
+  const [conds, setConds] = useState<CondDraft[]>([emptyCond()])
   const [groupId, setGroupId] = useState("")
+  const [priority, setPriority] = useState(100)
   const [onlyUnassigned, setOnlyUnassigned] = useState(true)
 
   const load = useCallback(async () => {
@@ -2990,14 +3151,53 @@ function MovingRulesView({
     void load()
   }, [load])
 
+  const resetForm = () => {
+    setName("")
+    setConds([emptyCond()])
+    setGroupId("")
+    setPriority(100)
+    setOnlyUnassigned(true)
+  }
+
+  const condsOf = (r: import("./api").MovingRuleRow): CondDraft[] =>
+    r.conditions && r.conditions.length > 0
+      ? r.conditions
+      : [{ field: r.matchField, op: r.matchOp, value: r.matchValue }]
+
+  const swapPriority = async (idx: number, dir: -1 | 1) => {
+    const j = idx + dir
+    if (j < 0 || j >= rules.length) return
+    const reordered = [...rules]
+    const [item] = reordered.splice(idx, 1)
+    reordered.splice(j, 0, item)
+    setBusy(true)
+    try {
+      // Ré-étalonnage firewall : 10, 20, 30…
+      for (let i = 0; i < reordered.length; i++) {
+        const p = (i + 1) * 10
+        if (reordered[i].priority !== p) {
+          await api.patchMovingRule(reordered[i].id, { priority: p })
+        }
+      }
+      setInfo("Ordre mis à jour")
+      await load()
+    } catch (e) {
+      setError(String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const validConds = conds.filter((c) => c.value.trim())
+
   return (
     <>
       <div className="pack-help">
         <strong>Règles d’affectation auto</strong> (inspiré Kaspersky{" "}
-        <em>moving rules</em>) : si le <strong>label</strong> ou le{" "}
-        <strong>hostname</strong> de l’agent matche (ex. commence par{" "}
-        <code>FIN</code>), il est placé dans le groupe cible et hérite de sa
-        policy profil. Appliqué à l’enroll et via « Ré-évaluer ».
+        <em>moving rules</em>) : multi-conditions en <strong>AND</strong> sur
+        label / hostname. Priorité plus petite = évaluée en premier (style
+        firewall). Déplacez ↑↓ ou éditez la prio. Appliqué à l’enroll et via «
+        Ré-évaluer ».
       </div>
       <div className="card">
         <h2>Règles actives</h2>
@@ -3008,30 +3208,76 @@ function MovingRulesView({
             <table className="table">
               <thead>
                 <tr>
+                  <th>Ordre</th>
                   <th>Nom</th>
-                  <th>Condition</th>
+                  <th>Conditions (AND)</th>
                   <th>Groupe</th>
                   <th>Prio</th>
                   <th></th>
                 </tr>
               </thead>
               <tbody>
-                {rules.map((r) => (
+                {rules.map((r, idx) => (
                   <tr key={r.id}>
                     <td>
+                      <div className="row" style={{ gap: 4 }}>
+                        <button
+                          className="btn secondary btn-sm"
+                          type="button"
+                          disabled={busy || idx === 0}
+                          title="Monter (plus prioritaire)"
+                          onClick={() => void swapPriority(idx, -1)}>
+                          ↑
+                        </button>
+                        <button
+                          className="btn secondary btn-sm"
+                          type="button"
+                          disabled={busy || idx === rules.length - 1}
+                          title="Descendre"
+                          onClick={() => void swapPriority(idx, 1)}>
+                          ↓
+                        </button>
+                      </div>
+                    </td>
+                    <td>
                       <strong>{r.name}</strong>
-                      {!r.enabled && (
-                        <span className="muted"> · off</span>
-                      )}
+                      {!r.enabled && <span className="muted"> · off</span>}
                     </td>
                     <td className="mono" style={{ fontSize: 12 }}>
-                      {r.matchField} {r.matchOp} « {r.matchValue} »
+                      {condsOf(r).map((c, i) => (
+                        <div key={i}>
+                          {c.field} {c.op} « {c.value} »
+                        </div>
+                      ))}
                     </td>
                     <td>
                       {groups.find((g) => g.id === r.targetGroupId)?.name ||
                         r.targetGroupId}
                     </td>
-                    <td>{r.priority}</td>
+                    <td>
+                      <input
+                        className="input"
+                        type="number"
+                        style={{ width: 72 }}
+                        defaultValue={r.priority}
+                        key={`${r.id}-${r.priority}`}
+                        disabled={busy}
+                        onBlur={async (e) => {
+                          const p = Number(e.target.value)
+                          if (Number.isNaN(p) || p === r.priority) return
+                          setBusy(true)
+                          try {
+                            await api.patchMovingRule(r.id, { priority: p })
+                            setInfo(`Priorité « ${r.name} » → ${p}`)
+                            await load()
+                          } catch (err) {
+                            setError(String(err))
+                          } finally {
+                            setBusy(false)
+                          }
+                        }}
+                      />
+                    </td>
                     <td>
                       <button
                         className="btn danger btn-sm"
@@ -3080,94 +3326,180 @@ function MovingRulesView({
         </button>
       </div>
       <div className="card">
-        <h2>Nouvelle règle</h2>
-        <div className="form-stack" style={{ maxWidth: 480 }}>
-          <label className="field-label">Nom</label>
-          <input
-            className="input"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-          />
-          <label className="field-label">Champ</label>
-          <select
-            className="input"
-            value={field}
-            onChange={(e) =>
-              setField(e.target.value as "device_label" | "host_name")
-            }>
-            <option value="device_label">Label appareil</option>
-            <option value="host_name">Hostname / DNS PC</option>
-          </select>
-          <label className="field-label">Opérateur</label>
-          <select
-            className="input"
-            value={op}
-            onChange={(e) =>
-              setOp(
-                e.target.value as
-                  | "starts_with"
-                  | "contains"
-                  | "equals"
-                  | "regex"
-              )
-            }>
-            <option value="starts_with">commence par</option>
-            <option value="contains">contient</option>
-            <option value="equals">égal</option>
-            <option value="regex">regex</option>
-          </select>
-          <label className="field-label">Valeur (ex. FIN)</label>
-          <input
-            className="input"
-            value={value}
-            onChange={(e) => setValue(e.target.value)}
-          />
-          <label className="field-label">Groupe cible</label>
-          <select
-            className="input"
-            value={groupId}
-            onChange={(e) => setGroupId(e.target.value)}>
-            <option value="">—</option>
-            {groups.map((g) => (
-              <option key={g.id} value={g.id}>
-                {g.name}
-              </option>
-            ))}
-          </select>
-          <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            <input
-              type="checkbox"
-              checked={onlyUnassigned}
-              onChange={(e) => setOnlyUnassigned(e.target.checked)}
-            />
-            Uniquement si agent pas encore assigné
-          </label>
+        {!formOpen ? (
           <button
             className="btn"
             type="button"
-            disabled={busy || !name.trim() || !value.trim() || !groupId}
-            onClick={async () => {
-              setBusy(true)
-              try {
-                await api.createMovingRule({
-                  name: name.trim(),
-                  match_field: field,
-                  match_op: op,
-                  match_value: value.trim(),
-                  target_group_id: groupId,
-                  only_if_unassigned: onlyUnassigned
-                })
-                setInfo("Règle créée")
-                await load()
-              } catch (e) {
-                setError(String(e))
-              } finally {
-                setBusy(false)
-              }
+            onClick={() => {
+              resetForm()
+              setFormOpen(true)
             }}>
-            Créer la règle
+            + Nouvelle règle
           </button>
-        </div>
+        ) : (
+          <>
+            <div
+              className="row"
+              style={{ justifyContent: "space-between", marginBottom: 8 }}>
+              <h2 style={{ margin: 0 }}>Nouvelle règle</h2>
+              <button
+                className="btn secondary btn-sm"
+                type="button"
+                onClick={() => {
+                  setFormOpen(false)
+                  resetForm()
+                }}>
+                Fermer
+              </button>
+            </div>
+            <div className="form-stack" style={{ maxWidth: 560 }}>
+              <label className="field-label">Nom</label>
+              <input
+                className="input"
+                placeholder="ex. Direction (label DIR*)"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+              />
+              <label className="field-label">
+                Conditions (AND — toutes doivent matcher)
+              </label>
+              {conds.map((c, i) => (
+                <div
+                  key={i}
+                  className="row"
+                  style={{ flexWrap: "wrap", gap: 6, alignItems: "center" }}>
+                  <select
+                    className="input"
+                    value={c.field}
+                    onChange={(e) => {
+                      const next = [...conds]
+                      next[i] = {
+                        ...c,
+                        field: e.target.value as CondDraft["field"]
+                      }
+                      setConds(next)
+                    }}>
+                    <option value="device_label">Label appareil</option>
+                    <option value="host_name">Hostname / DNS PC</option>
+                  </select>
+                  <select
+                    className="input"
+                    value={c.op}
+                    onChange={(e) => {
+                      const next = [...conds]
+                      next[i] = {
+                        ...c,
+                        op: e.target.value as CondDraft["op"]
+                      }
+                      setConds(next)
+                    }}>
+                    <option value="starts_with">commence par</option>
+                    <option value="contains">contient</option>
+                    <option value="equals">égal</option>
+                    <option value="regex">regex</option>
+                  </select>
+                  <input
+                    className="input"
+                    placeholder="valeur"
+                    value={c.value}
+                    onChange={(e) => {
+                      const next = [...conds]
+                      next[i] = { ...c, value: e.target.value }
+                      setConds(next)
+                    }}
+                  />
+                  <button
+                    className="btn secondary btn-sm"
+                    type="button"
+                    disabled={conds.length <= 1}
+                    onClick={() =>
+                      setConds(conds.filter((_, j) => j !== i))
+                    }>
+                    −
+                  </button>
+                </div>
+              ))}
+              <button
+                className="btn secondary btn-sm"
+                type="button"
+                onClick={() => setConds([...conds, emptyCond()])}>
+                + Condition
+              </button>
+              <label className="field-label">Priorité (plus petit = d’abord)</label>
+              <input
+                className="input"
+                type="number"
+                value={priority}
+                onChange={(e) => setPriority(Number(e.target.value) || 0)}
+              />
+              <label className="field-label">Groupe cible</label>
+              <select
+                className="input"
+                value={groupId}
+                onChange={(e) => setGroupId(e.target.value)}>
+                <option value="">—</option>
+                {groups.map((g) => (
+                  <option key={g.id} value={g.id}>
+                    {g.name}
+                  </option>
+                ))}
+              </select>
+              <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <input
+                  type="checkbox"
+                  checked={onlyUnassigned}
+                  onChange={(e) => setOnlyUnassigned(e.target.checked)}
+                />
+                Uniquement si agent pas encore assigné
+              </label>
+              <div className="row">
+                <button
+                  className="btn"
+                  type="button"
+                  disabled={
+                    busy ||
+                    !name.trim() ||
+                    validConds.length === 0 ||
+                    !groupId
+                  }
+                  onClick={async () => {
+                    setBusy(true)
+                    try {
+                      await api.createMovingRule({
+                        name: name.trim(),
+                        conditions: validConds.map((c) => ({
+                          ...c,
+                          value: c.value.trim()
+                        })),
+                        target_group_id: groupId,
+                        priority,
+                        only_if_unassigned: onlyUnassigned
+                      })
+                      setInfo("Règle créée")
+                      resetForm()
+                      setFormOpen(false)
+                      await load()
+                    } catch (e) {
+                      setError(String(e))
+                    } finally {
+                      setBusy(false)
+                    }
+                  }}>
+                  Créer la règle
+                </button>
+                <button
+                  className="btn secondary"
+                  type="button"
+                  onClick={() => {
+                    resetForm()
+                    setFormOpen(false)
+                  }}>
+                  Annuler
+                </button>
+              </div>
+            </div>
+          </>
+        )}
       </div>
     </>
   )

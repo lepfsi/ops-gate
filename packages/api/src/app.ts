@@ -446,7 +446,17 @@ export function createApp() {
     }
     const result = await store.createAdminSession(body.email, body.password)
     if (!result.ok) {
-      return c.json({ error: result.error }, 401)
+      const status = result.error === "session_already_active" ? 409 : 401
+      return c.json(
+        {
+          error: result.error,
+          message:
+            result.error === "session_already_active"
+              ? "Ce compte a déjà une session active. Déconnectez l’autre session (ou attendez l’expiration idle 5 min) avant de vous reconnecter."
+              : undefined
+        },
+        status
+      )
     }
     await store.appendAdminAudit({
       orgId: result.session.orgId,
@@ -1359,6 +1369,11 @@ export function createApp() {
     let body: {
       name?: string
       enabled?: boolean
+      conditions?: Array<{
+        field: "device_label" | "host_name"
+        op: "starts_with" | "contains" | "equals" | "regex"
+        value: string
+      }>
       match_field?: "device_label" | "host_name"
       match_op?: "starts_with" | "contains" | "equals" | "regex"
       match_value?: string
@@ -1371,21 +1386,25 @@ export function createApp() {
     } catch {
       return c.json({ error: "invalid_json" }, 400)
     }
-    if (
-      !body.name?.trim() ||
-      !body.match_field ||
-      !body.match_op ||
-      !body.match_value?.trim() ||
-      !body.target_group_id
-    ) {
+    const conditions =
+      body.conditions && body.conditions.length > 0
+        ? body.conditions
+        : body.match_field && body.match_op && body.match_value?.trim()
+          ? [
+              {
+                field: body.match_field,
+                op: body.match_op,
+                value: body.match_value.trim()
+              }
+            ]
+          : []
+    if (!body.name?.trim() || !body.target_group_id || conditions.length === 0) {
       return c.json({ error: "invalid_moving_rule" }, 400)
     }
     const rule = await store.upsertMovingRule(org.id, {
       name: body.name.trim(),
       enabled: body.enabled,
-      matchField: body.match_field,
-      matchOp: body.match_op,
-      matchValue: body.match_value.trim(),
+      conditions,
       targetGroupId: body.target_group_id,
       priority: body.priority,
       onlyIfUnassigned: body.only_if_unassigned
@@ -1396,7 +1415,7 @@ export function createApp() {
       adminEmail: _gate.admin.email,
       adminLabel: _gate.admin.label,
       action: "moving_rule_upsert",
-      detail: `Création règle « ${rule?.name} »`
+      detail: `Création règle « ${rule?.name} » (prio ${rule?.priority}, ${conditions.length} cond.)`
     })
     return c.json({ ok: true, rule })
   })
@@ -1416,16 +1435,35 @@ export function createApp() {
       (r) => r.id === c.req.param("ruleId")
     )
     if (!existing) return c.json({ error: "not_found" }, 404)
+    const bodyConds = body.conditions as
+      | Array<{
+          field: "device_label" | "host_name"
+          op: "starts_with" | "contains" | "equals" | "regex"
+          value: string
+        }>
+      | undefined
+    const conditions =
+      bodyConds && bodyConds.length > 0
+        ? bodyConds
+        : existing.conditions?.length
+          ? existing.conditions
+          : [
+              {
+                field:
+                  (body.match_field as typeof existing.matchField) ||
+                  existing.matchField,
+                op:
+                  (body.match_op as typeof existing.matchOp) || existing.matchOp,
+                value:
+                  (body.match_value as string) || existing.matchValue
+              }
+            ]
     const rule = await store.upsertMovingRule(org.id, {
       id: existing.id,
       name: (body.name as string) || existing.name,
       enabled:
         body.enabled !== undefined ? !!body.enabled : existing.enabled,
-      matchField:
-        (body.match_field as typeof existing.matchField) || existing.matchField,
-      matchOp: (body.match_op as typeof existing.matchOp) || existing.matchOp,
-      matchValue:
-        (body.match_value as string) || existing.matchValue,
+      conditions,
       targetGroupId:
         (body.target_group_id as string) || existing.targetGroupId,
       priority:
@@ -1443,7 +1481,7 @@ export function createApp() {
       adminEmail: _gate.admin.email,
       adminLabel: _gate.admin.label,
       action: "moving_rule_upsert",
-      detail: `Modif règle « ${rule?.name} »`
+      detail: `Modif règle « ${rule?.name} » (prio ${rule?.priority})`
     })
     return c.json({ ok: true, rule })
   })

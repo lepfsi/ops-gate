@@ -211,6 +211,8 @@ CREATE TABLE IF NOT EXISTS moving_rules (
   match_field TEXT NOT NULL,
   match_op TEXT NOT NULL,
   match_value TEXT NOT NULL,
+  /** JSON array of {field,op,value} — AND logic; legacy match_* = first condition */
+  conditions_json TEXT NOT NULL DEFAULT '[]',
   target_group_id TEXT NOT NULL,
   priority INT NOT NULL DEFAULT 100,
   only_if_unassigned BOOLEAN NOT NULL DEFAULT TRUE,
