@@ -57,6 +57,8 @@
       "https://chat.mistral.ai/*",
       "https://console.groq.com/*",
       "https://grok.x.ai/*",
+      "https://grok.com/*",
+      "https://www.grok.com/*",
       "https://x.com/*",
       "https://huggingface.co/*",
       "https://www.phind.com/*",

@@ -35,6 +35,14 @@ export interface OpsGateSettings {
   enabled: boolean
   enabledHosts: string[]
   scanUploads: boolean
+  /** Scanner configs .conf .json .xml .ps1… (défaut true) */
+  scanConfigs?: boolean
+  /** Scanner .sql / warn .db (défaut true) */
+  scanDatabases?: boolean
+  /** OCR images — stub V1 (défaut false) */
+  scanImages?: boolean
+  /** Warning obligatoire audio/vidéo (défaut true) */
+  warnMedia?: boolean
   mode: AgentMode
   apiBaseUrl: string
   orgId?: string
@@ -104,6 +112,10 @@ export type ExitActorInfo = {
 export const DEFAULT_SETTINGS: OpsGateSettings = {
   enabled: true,
   scanUploads: true,
+  scanConfigs: true,
+  scanDatabases: true,
+  scanImages: false,
+  warnMedia: true,
   mode: "local_only",
   apiBaseUrl: "http://127.0.0.1:8787",
   eventReporting: false,
@@ -123,6 +135,7 @@ export const DEFAULT_SETTINGS: OpsGateSettings = {
     "chat.mistral.ai",
     "console.groq.com",
     "grok.x.ai",
+    "grok.com",
     "huggingface.co",
     "phind.com",
     "meta.ai",

@@ -448,6 +448,14 @@ export function createApp() {
     if (!result.ok) {
       return c.json({ error: result.error }, 401)
     }
+    await store.appendAdminAudit({
+      orgId: result.session.orgId,
+      adminId: result.admin.id,
+      adminEmail: result.admin.email,
+      adminLabel: result.admin.label,
+      action: "login",
+      detail: "Connexion console"
+    })
     return c.json({
       ok: true,
       token: result.session.token,
@@ -463,7 +471,30 @@ export function createApp() {
   v1.post("/auth/logout", async (c) => {
     const header = c.req.header("Authorization") || ""
     const match = header.match(/^Bearer\s+(.+)$/i)
-    if (match) await store.revokeAdminSession(match[1].trim())
+    let reason: "manual" | "idle" = "manual"
+    try {
+      const b = await c.req.json()
+      if (b?.reason === "idle") reason = "idle"
+    } catch {
+      /* no body */
+    }
+    if (match) {
+      const resolved = await store.resolveAdminSession(match[1].trim())
+      if (resolved) {
+        await store.appendAdminAudit({
+          orgId: resolved.session.orgId,
+          adminId: resolved.admin.id,
+          adminEmail: resolved.admin.email,
+          adminLabel: resolved.admin.label,
+          action: reason === "idle" ? "logout_idle" : "logout",
+          detail:
+            reason === "idle"
+              ? "Déconnexion automatique (inactivité)"
+              : "Déconnexion manuelle"
+        })
+      }
+      await store.revokeAdminSession(match[1].trim())
+    }
     return c.json({ ok: true })
   })
 
@@ -1040,6 +1071,14 @@ export function createApp() {
     if (!org) return c.json({ error: "no_org" }, 404)
     const result = await store.forceConfigSync(org.id)
     if (!result.ok) return c.json({ error: result.error }, 500)
+    await store.appendAdminAudit({
+      orgId: org.id,
+      adminId: _gate.admin.id,
+      adminEmail: _gate.admin.email,
+      adminLabel: _gate.admin.label,
+      action: "force_sync",
+      detail: `epoch=${result.configEpoch}`
+    })
     return c.json({
       ok: true,
       config_epoch: result.configEpoch,
@@ -1268,6 +1307,14 @@ export function createApp() {
     if (!ok) return c.json({ error: "agent_not_found" }, 404)
     // Bump epoch pour les autres agents ; le révoqué verra invalid_token → local_only
     await store.forceConfigSync(org.id)
+    await store.appendAdminAudit({
+      orgId: org.id,
+      adminId: _gate.admin.id,
+      adminEmail: _gate.admin.email,
+      adminLabel: _gate.admin.label,
+      action: "agent_revoke",
+      detail: `Révocation agent ${c.req.param("agentId")}`
+    })
     return c.json({
       ok: true,
       agent_id: c.req.param("agentId"),
@@ -1275,6 +1322,19 @@ export function createApp() {
       message:
         "Agent révoqué. L’extension repasse en local_only au prochain sync (≤ 2 min) sans mot de passe local."
     })
+  })
+
+  v1.get("/org/audit", async (c) => {
+    const _gate = await requireConsoleAuth(c, "console_access")
+    if (!_gate.ok) return c.json({ error: _gate.error }, _gate.status)
+    const org = await store.getOrg(_gate.orgId)
+    if (!org) return c.json({ error: "no_org" }, 404)
+    const action = c.req.query("action") || undefined
+    const events = await store.listAdminAudit(org.id, {
+      limit: 150,
+      action
+    })
+    return c.json({ org_id: org.id, events })
   })
 
   v1.get("/org/events", async (c) => {
@@ -1344,6 +1404,15 @@ export function createApp() {
     }
 
     const policy = await store.updatePolicy(org.id, patch)
+    await store.appendAdminAudit({
+      orgId: org.id,
+      adminId: _gate.admin.id,
+      adminEmail: _gate.admin.email,
+      adminLabel: _gate.admin.label,
+      action: "policy_update",
+      detail: "Mise à jour policy org",
+      meta: patch as Record<string, unknown>
+    })
     return c.json({
       ok: true,
       policy: policy
@@ -1430,6 +1499,15 @@ export function createApp() {
     if (!result.ok) {
       return c.json({ error: "publish_failed", details: result.errors }, 400)
     }
+
+    await store.appendAdminAudit({
+      orgId: org.id,
+      adminId: _gate.admin.id,
+      adminEmail: _gate.admin.email,
+      adminLabel: _gate.admin.label,
+      action: "pack_publish",
+      detail: `Pack ${result.pack.version}`
+    })
 
     return c.json({
       ok: true,

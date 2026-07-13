@@ -64,6 +64,7 @@ export class MemoryStore implements OpsGateStore {
   private packs = new Map<string, StoredRulePack[]>()
   private otpChallenges = new Map<string, PasswordResetChallenge>()
   private sessions = new Map<string, AdminSession>()
+  private adminAudit: import("./types").AdminAuditEvent[] = []
 
   constructor() {
     this.seed()
@@ -112,6 +113,7 @@ export class MemoryStore implements OpsGateStore {
       "chat.mistral.ai",
       "console.groq.com",
       "grok.x.ai",
+      "grok.com",
       "huggingface.co",
       "phind.com",
       "meta.ai",
@@ -1443,5 +1445,41 @@ export class MemoryStore implements OpsGateStore {
       groups_count: (this.groups.get(orgId) || []).length,
       users_count: (this.users.get(orgId) || []).length
     }
+  }
+
+  async appendAdminAudit(input: {
+    orgId: string
+    adminId?: string
+    adminEmail?: string
+    adminLabel?: string
+    action: import("./types").AdminAuditAction
+    detail?: string
+    meta?: Record<string, unknown>
+  }) {
+    this.adminAudit.push({
+      id: newId("aud"),
+      orgId: input.orgId,
+      adminId: input.adminId,
+      adminEmail: input.adminEmail,
+      adminLabel: input.adminLabel,
+      action: input.action,
+      detail: input.detail,
+      meta: input.meta,
+      createdAt: new Date().toISOString()
+    })
+    if (this.adminAudit.length > 2000) {
+      this.adminAudit = this.adminAudit.slice(-1500)
+    }
+  }
+
+  async listAdminAudit(
+    orgId: string,
+    opts?: { limit?: number; action?: string }
+  ) {
+    let list = this.adminAudit.filter((e) => e.orgId === orgId)
+    if (opts?.action) {
+      list = list.filter((e) => e.action === opts.action)
+    }
+    return list.slice(-(opts?.limit || 100)).reverse()
   }
 }

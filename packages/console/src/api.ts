@@ -220,8 +220,26 @@ export const api = {
       body: JSON.stringify({ email, password })
     }),
 
-  logout: () =>
-    request<{ ok: boolean }>("/v1/auth/logout", { method: "POST" }),
+  logout: (reason?: "manual" | "idle") =>
+    request<{ ok: boolean }>("/v1/auth/logout", {
+      method: "POST",
+      body: JSON.stringify({ reason: reason || "manual" })
+    }),
+
+  audit: (action?: string) =>
+    request<{
+      org_id: string
+      events: Array<{
+        id: string
+        adminEmail?: string
+        adminLabel?: string
+        action: string
+        detail?: string
+        createdAt: string
+      }>
+    }>(
+      `/v1/org/audit${action ? `?action=${encodeURIComponent(action)}` : ""}`
+    ),
 
   me: () =>
     request<{

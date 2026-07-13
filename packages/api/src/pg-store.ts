@@ -68,6 +68,7 @@ const DEFAULT_HOSTS = [
   "chat.mistral.ai",
   "console.groq.com",
   "grok.x.ai",
+  "grok.com",
   "huggingface.co",
   "phind.com",
   "meta.ai",
@@ -1959,6 +1960,58 @@ export class PgStore implements OpsGateStore {
       [orgId, limit]
     )
     return rows.map(rowEvent)
+  }
+
+  async appendAdminAudit(input: {
+    orgId: string
+    adminId?: string
+    adminEmail?: string
+    adminLabel?: string
+    action: import("./types").AdminAuditAction
+    detail?: string
+    meta?: Record<string, unknown>
+  }) {
+    await this.pool.query(
+      `INSERT INTO admin_audit_events (id, org_id, admin_id, admin_email, admin_label, action, detail, meta, created_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,NOW())`,
+      [
+        newId("aud"),
+        input.orgId,
+        input.adminId ?? null,
+        input.adminEmail ?? null,
+        input.adminLabel ?? null,
+        input.action,
+        input.detail ?? null,
+        JSON.stringify(input.meta || {})
+      ]
+    )
+  }
+
+  async listAdminAudit(
+    orgId: string,
+    opts?: { limit?: number; action?: string }
+  ) {
+    const limit = opts?.limit || 100
+    const params: unknown[] = [orgId]
+    let sql = `SELECT * FROM admin_audit_events WHERE org_id = $1`
+    if (opts?.action) {
+      params.push(opts.action)
+      sql += ` AND action = $2`
+    }
+    sql += ` ORDER BY created_at DESC LIMIT $${params.length + 1}`
+    params.push(limit)
+    const { rows } = await this.pool.query(sql, params)
+    return rows.map((r) => ({
+      id: r.id,
+      orgId: r.org_id,
+      adminId: r.admin_id ?? undefined,
+      adminEmail: r.admin_email ?? undefined,
+      adminLabel: r.admin_label ?? undefined,
+      action: r.action,
+      detail: r.detail ?? undefined,
+      meta: r.meta || {},
+      createdAt: new Date(r.created_at).toISOString()
+    }))
   }
 
   async summary(orgId: string): Promise<OrgSummary> {

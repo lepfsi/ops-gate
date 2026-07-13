@@ -43,6 +43,8 @@ export const config: PlasmoCSConfig = {
     "https://chat.mistral.ai/*",
     "https://console.groq.com/*",
     "https://grok.x.ai/*",
+    "https://grok.com/*",
+    "https://www.grok.com/*",
     "https://huggingface.co/chat/*",
     "https://www.phind.com/*",
     "https://phind.com/*",
@@ -523,23 +525,40 @@ async function processQuarantinedFiles(
   try {
     const { rules: activeRules } = detectTextSync("") // warm rules ref
     const rules: DetectionRule[] | null = activeRules
-    const scans = await scanFiles(frozen, rules)
+    const scanOpts = {
+      scanConfigs: settings.scanConfigs !== false,
+      scanDatabases: settings.scanDatabases !== false,
+      scanImages: settings.scanImages === true,
+      warnMedia: settings.warnMedia !== false
+    }
+    const scans = await scanFiles(frozen, rules, scanOpts)
     const detections = mergeDetections(scans)
     const fileNames = frozen.map((f) => f.name)
-    const unsupported = scans.filter((s) => s.status === "unsupported")
+    const warnOnly = scans.filter((s) =>
+      ["unsupported", "media_warn", "office_warn", "image_skipped", "warn_confirm"].includes(
+        s.status
+      )
+    )
     const partial = scans.filter((s) => s.status === "too_large_partial")
+    const needsConfirm =
+      detections.length > 0 ||
+      warnOnly.some((s) =>
+        ["media_warn", "office_warn", "image_skipped", "warn_confirm"].includes(
+          s.status
+        )
+      )
 
-    // Rien de sensible → livrer le fichier une seule fois à la page
-    if (detections.length === 0) {
+    // Rien de sensible et pas de warning media/office → livrer
+    if (!needsConfirm) {
       const ok = replaceAttachments(frozen, input)
       if (!ok) {
         showToast(
           "Impossible de joindre le fichier automatiquement après scan.",
           { tone: "warning", title: "Jointure échouée", durationMs: 5000 }
         )
-      } else if (unsupported.length > 0) {
+      } else if (warnOnly.length > 0) {
         showToast(
-          `${unsupported.length} fichier(s) non analysable(s) (PDF/image…). Vérifiez-les manuellement.`,
+          `${warnOnly.length} fichier(s) non analysable(s) en profondeur.`,
           { tone: "warning", title: "Scan partiel", durationMs: 5000 }
         )
       }
@@ -547,27 +566,44 @@ async function processQuarantinedFiles(
       return
     }
 
-    // Sensible : rester en quarantaine (déjà vidé) + bandeau
+    // Sensible ou warning type (media/office) → bandeau
     const notes: string[] = []
     if (partial.length) {
       notes.push("Certains gros fichiers n’ont été scannés qu’en partie.")
     }
-    if (unsupported.length) {
-      notes.push(
-        `${unsupported.length} fichier(s) binaire(s) non analysé(s) en MVP.`
-      )
+    for (const w of warnOnly) {
+      if (w.userHint) notes.push(`${w.fileName}: ${w.userHint}`)
     }
 
+    // Si uniquement des warnings sans détection : bandeau synthétique
+    const bannerDetections =
+      detections.length > 0
+        ? detections
+        : ([
+            {
+              type: "Fichier à confirmer",
+              ruleId: "file-confirm",
+              severity: "medium" as const,
+              match: warnOnly.map((w) => w.fileName).join(", "),
+              index: 0
+            }
+          ] as Detection[])
+
     showAlertBanner(
-      detections,
+      bannerDetections,
       (decision) => {
         filePending = false
         const sensitiveScans = scans.filter((s) => s.detections.length > 0)
+        // Enrichir types pour le journal (extension + catégorie)
+        const typeTags = [
+          ...detections.map((d) => d.type),
+          ...scans.map((s) => `file:${s.category}:${s.fileName}`)
+        ]
 
         try {
           if (decision === "cancel") {
             clearAllFileInputs(input)
-            logDecision("cancel", detections, false, "file", fileNames)
+            logDecision("cancel", bannerDetections, false, "file", fileNames)
             showToast("Aucune pièce jointe n’a été transmise à l’IA.", {
               tone: "success",
               title: "Fichier non joint",
@@ -576,7 +612,7 @@ async function processQuarantinedFiles(
             return
           }
 
-          if (decision === "mask_send") {
+          if (decision === "mask_send" && detections.length > 0) {
             const dt = buildMaskedFileList(
               frozen,
               scans as FileScanResult[],
@@ -619,15 +655,24 @@ async function processQuarantinedFiles(
             return
           }
 
-          // Joindre l'original (choix conscient)
+          // Joindre l'original (choix conscient) — y compris confirm media/office
           const ok = replaceAttachments(frozen, input)
-          logDecision("send_anyway", detections, false, "file", fileNames)
+          logDecision(
+            "send_anyway",
+            detections.length ? detections : bannerDetections,
+            false,
+            "file",
+            fileNames
+          )
+          void typeTags
           if (ok) {
             showToast(
-              "Le fichier ORIGINAL non masqué est joint. Des secrets peuvent être lus par l’IA.",
+              detections.length
+                ? "Le fichier ORIGINAL non masqué est joint. Des secrets peuvent être lus par l’IA."
+                : "Fichier joint après confirmation (type non scanné en profondeur).",
               {
                 tone: "danger",
-                title: "Joint sans masquage",
+                title: detections.length ? "Joint sans masquage" : "Joint confirmé",
                 durationMs: 7000
               }
             )

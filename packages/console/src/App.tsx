@@ -19,7 +19,16 @@ import {
   type UserRow
 } from "./api"
 
-type Tab = "summary" | "policy" | "people" | "packs" | "agents" | "events"
+type Tab =
+  | "summary"
+  | "policy"
+  | "people"
+  | "packs"
+  | "agents"
+  | "events"
+  | "audit"
+
+const IDLE_MS = 5 * 60 * 1000
 
 const AI_HOST_PRESETS = [
   "chatgpt.com",
@@ -36,6 +45,7 @@ const AI_HOST_PRESETS = [
   "chat.mistral.ai",
   "console.groq.com",
   "grok.x.ai",
+  "grok.com",
   "huggingface.co",
   "phind.com",
   "meta.ai",
@@ -157,6 +167,8 @@ export default function App() {
         const e = await api.events()
         const raw = (e.events || []) as unknown as Record<string, unknown>[]
         setEvents(raw.map((r) => normalizeEvent(r)))
+      } else if (t === "audit") {
+        /* loaded in AuditView */
       }
     } catch (e) {
       const msg = String(e)
@@ -177,6 +189,34 @@ export default function App() {
     const id = setInterval(() => void refreshHealth(), 15000)
     return () => clearInterval(id)
   }, [tab, loadTab, refreshHealth, sessionAdmin])
+
+  // Déconnexion auto après 5 min d’inactivité
+  useEffect(() => {
+    if (!sessionAdmin) return
+    let timer: ReturnType<typeof setTimeout>
+    const arm = () => {
+      clearTimeout(timer)
+      timer = setTimeout(() => {
+        void (async () => {
+          try {
+            await api.logout("idle")
+          } catch {
+            /* ignore */
+          }
+          setToken(null)
+          setSessionAdmin(null)
+          setInfo("Session expirée (5 min d’inactivité)")
+        })()
+      }, IDLE_MS)
+    }
+    const evs = ["mousemove", "keydown", "click", "scroll", "touchstart"] as const
+    for (const e of evs) window.addEventListener(e, arm, { passive: true })
+    arm()
+    return () => {
+      clearTimeout(timer)
+      for (const e of evs) window.removeEventListener(e, arm)
+    }
+  }, [sessionAdmin])
 
   const saveApi = () => {
     setApiBase(apiBase)
@@ -310,7 +350,7 @@ export default function App() {
             type="button"
             onClick={async () => {
               try {
-                await api.logout()
+                await api.logout("manual")
               } catch {
                 /* ignore */
               }
@@ -350,7 +390,8 @@ export default function App() {
             ["people", "Admins & groupes"],
             ["packs", "Packs de règles"],
             ["agents", "Agents"],
-            ["events", "Événements"]
+            ["events", "Événements"],
+            ["audit", "Audit admin"]
           ] as const
         ).map(([id, label]) => (
           <button
@@ -493,6 +534,7 @@ export default function App() {
         />
       )}
       {tab === "events" && <EventsView events={events} />}
+      {tab === "audit" && <AuditView />}
 
       <footer className="console-footer">
         OpsGate Console <strong>1.2.0</strong> · early customer · privacy by
@@ -1063,6 +1105,7 @@ function PolicyView({
   const [profName, setProfName] = useState("")
   const [profDept, setProfDept] = useState("")
   const [profHosts, setProfHosts] = useState(AI_HOST_PRESETS.join("\n"))
+  // HostPicker edits via setProfHosts(hosts.join("\n"))
   const [profScan, setProfScan] = useState(true)
   const [profEvents, setProfEvents] = useState(true)
   const [profProtect, setProfProtect] = useState(false)
@@ -1336,13 +1379,13 @@ function PolicyView({
             onChange={(e) => setProfDept(e.target.value)}
           />
         </div>
-        <textarea
-          className="input"
-          rows={3}
-          value={profHosts}
-          onChange={(e) => setProfHosts(e.target.value)}
-          style={{ width: "100%", fontFamily: "ui-monospace, monospace" }}
-          placeholder="hosts"
+        <div className="field-label">Sites IA couverts</div>
+        <HostPicker
+          value={profHosts
+            .split("\n")
+            .map((l) => l.trim())
+            .filter(Boolean)}
+          onChange={(hosts) => setProfHosts(hosts.join("\n"))}
         />
         <div className="row" style={{ marginTop: 8, gap: 16, flexWrap: "wrap" }}>
           <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
@@ -2550,6 +2593,166 @@ function EventsView({ events }: { events: EventRow[] }) {
           </tbody>
         </table></div>
       )}
+    </div>
+  )
+}
+
+function AuditView() {
+  const [rows, setRows] = useState<
+    Array<{
+      id: string
+      adminEmail?: string
+      adminLabel?: string
+      action: string
+      detail?: string
+      createdAt: string
+    }>
+  >([])
+  const [filter, setFilter] = useState("")
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+
+  const load = useCallback(async () => {
+    setBusy(true)
+    setErr(null)
+    try {
+      const r = await api.audit(filter || undefined)
+      setRows(r.events || [])
+    } catch (e) {
+      setErr(String(e))
+    } finally {
+      setBusy(false)
+    }
+  }, [filter])
+
+  useEffect(() => {
+    void load()
+  }, [load])
+
+  return (
+    <div className="card">
+      <h2>Audit administration</h2>
+      <p className="muted">
+        Connexions, déconnexions (manuel / auto), policy, packs, révocation
+        agents… Session console : déconnexion auto après{" "}
+        <strong>5 minutes</strong> d’inactivité.
+      </p>
+      <div className="row" style={{ marginBottom: 12 }}>
+        <select
+          className="input"
+          value={filter}
+          onChange={(e) => setFilter(e.target.value)}>
+          <option value="">Toutes les actions</option>
+          <option value="login">login</option>
+          <option value="logout">logout</option>
+          <option value="logout_idle">logout_idle</option>
+          <option value="policy_update">policy_update</option>
+          <option value="pack_publish">pack_publish</option>
+          <option value="agent_revoke">agent_revoke</option>
+          <option value="force_sync">force_sync</option>
+          <option value="admin_create">admin_create</option>
+        </select>
+        <button className="btn secondary" type="button" disabled={busy} onClick={() => void load()}>
+          {busy ? "…" : "Actualiser"}
+        </button>
+      </div>
+      {err && <p className="err">{err}</p>}
+      {rows.length === 0 ? (
+        <div className="empty">Aucun événement d’audit</div>
+      ) : (
+        <div className="table-wrap">
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Quand</th>
+                <th>Admin</th>
+                <th>Action</th>
+                <th>Détail</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.id}>
+                  <td className="muted">
+                    {r.createdAt
+                      ? new Date(r.createdAt).toLocaleString("fr-FR")
+                      : "—"}
+                  </td>
+                  <td>
+                    {r.adminLabel || "—"}
+                    {r.adminEmail ? (
+                      <div className="muted" style={{ fontSize: 11 }}>
+                        {r.adminEmail}
+                      </div>
+                    ) : null}
+                  </td>
+                  <td>
+                    <code>{r.action}</code>
+                  </td>
+                  <td className="muted">{r.detail || "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** Sélecteur d’hôtes IA : presets cliquables + champ « + add AI » */
+export function HostPicker({
+  value,
+  onChange
+}: {
+  value: string[]
+  onChange: (hosts: string[]) => void
+}) {
+  const [custom, setCustom] = useState("")
+  const set = new Set(value)
+  const toggle = (h: string) => {
+    if (set.has(h)) onChange(value.filter((x) => x !== h))
+    else onChange([...value, h])
+  }
+  return (
+    <div>
+      <div
+        style={{
+          display: "flex",
+          flexWrap: "wrap",
+          gap: 6,
+          marginBottom: 8
+        }}>
+        {AI_HOST_PRESETS.map((h) => (
+          <button
+            key={h}
+            type="button"
+            className={`btn btn-sm ${set.has(h) ? "accent" : "secondary"}`}
+            onClick={() => toggle(h)}>
+            {set.has(h) ? "✓ " : "+ "}
+            {h}
+          </button>
+        ))}
+      </div>
+      <div className="row">
+        <input
+          className="input"
+          placeholder="autre-domaine.ai"
+          value={custom}
+          onChange={(e) => setCustom(e.target.value)}
+        />
+        <button
+          type="button"
+          className="btn secondary btn-sm"
+          onClick={() => {
+            const h = custom.trim().toLowerCase().replace(/^https?:\/\//, "").split("/")[0]
+            if (!h) return
+            if (!set.has(h)) onChange([...value, h])
+            setCustom("")
+          }}>
+          + Add AI
+        </button>
+      </div>
     </div>
   )
 }
