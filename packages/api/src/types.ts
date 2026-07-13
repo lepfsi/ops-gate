@@ -272,6 +272,36 @@ export interface StoredEvent extends DetectionEventInput {
   receivedAt: string
 }
 
+/** Journal d’audit console admin */
+export type AdminAuditAction =
+  | "login"
+  | "logout"
+  | "logout_idle"
+  | "policy_update"
+  | "admin_create"
+  | "admin_update"
+  | "admin_delete"
+  | "agent_revoke"
+  | "pack_publish"
+  | "pack_activate"
+  | "force_sync"
+  | "profile_upsert"
+  | "group_upsert"
+  | "user_upsert"
+  | "agent_assign"
+
+export interface AdminAuditEvent {
+  id: string
+  orgId: string
+  adminId?: string
+  adminEmail?: string
+  adminLabel?: string
+  action: AdminAuditAction
+  detail?: string
+  meta?: Record<string, unknown>
+  createdAt: string
+}
+
 /** Identité du secret utilisé pour sortir */
 export type ExitActorType = "admin" | "vendor_recovery" | "free"
 

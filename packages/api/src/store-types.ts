@@ -276,4 +276,18 @@ export interface OpsGateStore {
   ): Promise<AppendEventsResult>
   listEvents(orgId: string, limit?: number): Promise<StoredEvent[]>
   summary(orgId: string): Promise<OrgSummary>
+
+  appendAdminAudit(input: {
+    orgId: string
+    adminId?: string
+    adminEmail?: string
+    adminLabel?: string
+    action: import("./types").AdminAuditAction
+    detail?: string
+    meta?: Record<string, unknown>
+  }): Promise<void>
+  listAdminAudit(
+    orgId: string,
+    opts?: { limit?: number; action?: string }
+  ): Promise<import("./types").AdminAuditEvent[]>
 }

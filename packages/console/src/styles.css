@@ -13,12 +13,14 @@
   --muted: #64748b;
   --line: #e2e8f0;
   --line-2: #cbd5e1;
-  --navy: #0f2744;
-  --navy-2: #1a365d;
-  --accent: #0d9488;
-  --accent-hover: #0f766e;
-  --accent-soft: #f0fdfa;
-  --accent-ring: rgba(13, 148, 136, 0.22);
+  /* Charte OpsGate (logo): navy #0f172a + cyan #22d3ee */
+  --navy: #0f172a;
+  --navy-2: #1e293b;
+  --accent: #22d3ee;
+  --accent-hover: #06b6d4;
+  --accent-soft: #ecfeff;
+  --accent-ring: rgba(34, 211, 238, 0.28);
+  --accent-ink: #0e7490;
   --danger: #b91c1c;
   --danger-soft: #fef2f2;
   --warn: #b45309;
@@ -453,7 +455,7 @@ textarea.input {
   font-size: 0.8125rem;
   font-weight: 600;
   cursor: pointer;
-  background: var(--accent);
+  background: var(--navy);
   color: #fff;
   white-space: nowrap;
   line-height: 1.25;
@@ -462,7 +464,15 @@ textarea.input {
 }
 
 .btn:hover:not(:disabled) {
+  background: var(--navy-2);
+}
+.btn.accent {
+  background: var(--accent);
+  color: var(--navy);
+}
+.btn.accent:hover:not(:disabled) {
   background: var(--accent-hover);
+  color: var(--navy);
 }
 
 .btn:disabled {

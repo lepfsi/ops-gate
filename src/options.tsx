@@ -744,9 +744,48 @@ function OptionsPage() {
           />
           <div>
             <div style={{ fontWeight: 650 }}>Scanner les uploads</div>
-            <div style={{ fontSize: 13, color: "#64748b" }}>Policy org</div>
+            <div style={{ fontSize: 13, color: "#64748b" }}>Master on/off</div>
           </div>
         </label>
+        {(
+          [
+            ["scanConfigs", "Fichiers de configuration", "conf, json, xml, ps1, log…"],
+            ["scanDatabases", "Fichiers base de données", "sql scanné ; .db = confirm"],
+            ["scanImages", "Images (OCR)", "stub — log + confirm en V1"],
+            ["warnMedia", "Audio / vidéo", "toujours warning + log"]
+          ] as const
+        ).map(([key, title, sub]) => (
+          <label
+            key={key}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 12,
+              marginTop: 12
+            }}>
+            <input
+              type="checkbox"
+              checked={
+                key === "scanImages"
+                  ? settings.scanImages === true
+                  : key === "warnMedia"
+                    ? settings.warnMedia !== false
+                    : (settings as Record<string, unknown>)[key] !== false
+              }
+              disabled={locked || settings.scanUploads === false}
+              onChange={(e) =>
+                void persistLocal({
+                  ...settings,
+                  [key]: e.target.checked
+                })
+              }
+            />
+            <div>
+              <div style={{ fontWeight: 650 }}>{title}</div>
+              <div style={{ fontSize: 13, color: "#64748b" }}>{sub}</div>
+            </div>
+          </label>
+        ))}
       </section>
 
       <section

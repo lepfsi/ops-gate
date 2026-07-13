@@ -184,3 +184,19 @@ CREATE TABLE IF NOT EXISTS password_reset_challenges (
   expires_at TIMESTAMPTZ NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- ── Admin audit (console) ──────────────────────────────────────
+CREATE TABLE IF NOT EXISTS admin_audit_events (
+  id TEXT PRIMARY KEY,
+  org_id TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  admin_id TEXT,
+  admin_email TEXT,
+  admin_label TEXT,
+  action TEXT NOT NULL,
+  detail TEXT,
+  meta JSONB NOT NULL DEFAULT '{}',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS admin_audit_org_ts_idx
+  ON admin_audit_events(org_id, created_at DESC);
