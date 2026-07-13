@@ -813,11 +813,11 @@ function OptionsPage() {
           onBlur={() => {
             if (!locked) void persistLocal(settings)
           }}
-          rows={5}
+          rows={12}
           style={{
             ...inputStyle,
             fontFamily: "ui-monospace, Menlo, monospace",
-            minHeight: 100,
+            minHeight: 180,
             background: locked ? "#f8fafc" : "#fff"
           }}
         />

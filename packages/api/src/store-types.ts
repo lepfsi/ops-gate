@@ -299,9 +299,10 @@ export interface OpsGateStore {
       id?: string
       name: string
       enabled?: boolean
-      matchField: import("./types").MovingMatchField
-      matchOp: import("./types").MovingMatchOp
-      matchValue: string
+      conditions?: import("./types").MovingCondition[]
+      matchField?: import("./types").MovingMatchField
+      matchOp?: import("./types").MovingMatchOp
+      matchValue?: string
       targetGroupId: string
       priority?: number
       onlyIfUnassigned?: boolean

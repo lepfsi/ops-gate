@@ -66,6 +66,7 @@ const DEFAULT_HOSTS = [
   "poe.com",
   "you.com",
   "chat.mistral.ai",
+  "lechat.mistral.ai",
   "console.groq.com",
   "grok.x.ai",
   "grok.com",
@@ -74,7 +75,27 @@ const DEFAULT_HOSTS = [
   "meta.ai",
   "pi.ai",
   "character.ai",
-  "notebooklm.google.com"
+  "notebooklm.google.com",
+  "openrouter.ai",
+  "together.ai",
+  "fireworks.ai",
+  "blackbox.ai",
+  "chat.lmsys.org",
+  "lmarena.ai",
+  "typingmind.com",
+  "chat.qwen.ai",
+  "writesonic.com",
+  "jasper.ai",
+  "copy.ai",
+  "notion.so",
+  "platform.openai.com",
+  "labs.google",
+  "deepai.org",
+  "sider.ai",
+  "monica.im",
+  "chatpdf.com",
+  "consensus.app",
+  "elicit.com"
 ]
 
 function rowOrg(r: pg.QueryResultRow): Organization {
@@ -282,7 +303,8 @@ export class PgStore implements OpsGateStore {
       `ALTER TABLE detection_events ADD COLUMN IF NOT EXISTS device_label TEXT`,
       `ALTER TABLE detection_events ADD COLUMN IF NOT EXISTS exit_actor TEXT`,
       `ALTER TABLE detection_events ADD COLUMN IF NOT EXISTS exit_admin_id TEXT`,
-      `ALTER TABLE detection_events ADD COLUMN IF NOT EXISTS exit_admin_label TEXT`
+      `ALTER TABLE detection_events ADD COLUMN IF NOT EXISTS exit_admin_label TEXT`,
+      `ALTER TABLE moving_rules ADD COLUMN IF NOT EXISTS conditions_json TEXT NOT NULL DEFAULT '[]'`
     ]
     for (const q of alters) {
       await this.pool.query(q)
@@ -889,6 +911,19 @@ export class PgStore implements OpsGateStore {
     const admin = rowAdmin(rows[0])
     if (!admin.isPrincipal && !admin.permissions.includes("console_access")) {
       return { ok: false as const, error: "no_console_access" }
+    }
+    // Nettoyer sessions expirées + un seul login actif par compte
+    await this.pool.query(
+      `DELETE FROM admin_sessions WHERE expires_at < NOW()`
+    )
+    const { rows: active } = await this.pool.query(
+      `SELECT 1 FROM admin_sessions
+       WHERE admin_id = $1 AND expires_at > NOW()
+       LIMIT 1`,
+      [admin.id]
+    )
+    if (active[0]) {
+      return { ok: false as const, error: "session_already_active" }
     }
     const token = `ogs_${newToken().replace(/^ogt_/, "")}`
     const tokenHash = hashToken(token)
@@ -1966,25 +2001,100 @@ export class PgStore implements OpsGateStore {
     return rows.map(rowEvent)
   }
 
+  private parseMovingConditions(
+    r: pg.QueryResultRow
+  ): import("./types").MovingCondition[] {
+    let parsed: import("./types").MovingCondition[] = []
+    try {
+      const raw = r.conditions_json
+      if (raw) {
+        const j = typeof raw === "string" ? JSON.parse(raw) : raw
+        if (Array.isArray(j) && j.length > 0) {
+          parsed = j
+            .filter((c: { value?: string }) => c?.value?.trim())
+            .map(
+              (c: {
+                field: import("./types").MovingMatchField
+                op: import("./types").MovingMatchOp
+                value: string
+              }) => ({
+                field: c.field,
+                op: c.op,
+                value: String(c.value).trim()
+              })
+            )
+        }
+      }
+    } catch {
+      /* legacy */
+    }
+    if (parsed.length === 0 && r.match_field && r.match_op && r.match_value) {
+      parsed = [
+        {
+          field: r.match_field,
+          op: r.match_op,
+          value: r.match_value
+        }
+      ]
+    }
+    return parsed
+  }
+
+  private normalizeMovingConditions(input: {
+    conditions?: import("./types").MovingCondition[]
+    matchField?: import("./types").MovingMatchField
+    matchOp?: import("./types").MovingMatchOp
+    matchValue?: string
+  }): import("./types").MovingCondition[] {
+    if (input.conditions && input.conditions.length > 0) {
+      return input.conditions
+        .filter((c) => c.value?.trim())
+        .map((c) => ({
+          field: c.field,
+          op: c.op,
+          value: c.value.trim()
+        }))
+    }
+    if (input.matchField && input.matchOp && input.matchValue?.trim()) {
+      return [
+        {
+          field: input.matchField,
+          op: input.matchOp,
+          value: input.matchValue.trim()
+        }
+      ]
+    }
+    return []
+  }
+
   async listMovingRules(orgId: string) {
     const { rows } = await this.pool.query(
       `SELECT * FROM moving_rules WHERE org_id = $1 ORDER BY priority ASC, created_at ASC`,
       [orgId]
     )
-    return rows.map((r) => ({
-      id: r.id,
-      orgId: r.org_id,
-      name: r.name,
-      enabled: r.enabled !== false,
-      matchField: r.match_field,
-      matchOp: r.match_op,
-      matchValue: r.match_value,
-      targetGroupId: r.target_group_id,
-      priority: r.priority ?? 100,
-      onlyIfUnassigned: r.only_if_unassigned !== false,
-      createdAt: new Date(r.created_at).toISOString(),
-      updatedAt: new Date(r.updated_at).toISOString()
-    }))
+    return rows.map((r) => {
+      const conditions = this.parseMovingConditions(r)
+      const first = conditions[0] || {
+        field: r.match_field,
+        op: r.match_op,
+        value: r.match_value
+      }
+      return {
+        id: r.id,
+        orgId: r.org_id,
+        name: r.name,
+        enabled: r.enabled !== false,
+        conditions,
+        matchField: first.field,
+        matchOp: first.op,
+        matchValue: first.value,
+        targetGroupId: r.target_group_id,
+        priority: r.priority ?? 100,
+        onlyIfUnassigned: r.only_if_unassigned !== false,
+        createdAt: new Date(r.created_at).toISOString(),
+        updatedAt: new Date(r.updated_at).toISOString()
+      }
+    })
   }
 
   async upsertMovingRule(
@@ -1993,9 +2103,10 @@ export class PgStore implements OpsGateStore {
       id?: string
       name: string
       enabled?: boolean
-      matchField: import("./types").MovingMatchField
-      matchOp: import("./types").MovingMatchOp
-      matchValue: string
+      conditions?: import("./types").MovingCondition[]
+      matchField?: import("./types").MovingMatchField
+      matchOp?: import("./types").MovingMatchOp
+      matchValue?: string
       targetGroupId: string
       priority?: number
       onlyIfUnassigned?: boolean
@@ -2003,21 +2114,27 @@ export class PgStore implements OpsGateStore {
   ) {
     const org = await this.getOrg(orgId)
     if (!org) return undefined
+    const conditions = this.normalizeMovingConditions(input)
+    if (conditions.length === 0) return undefined
+    const first = conditions[0]
+    const condJson = JSON.stringify(conditions)
     const now = new Date().toISOString()
     if (input.id) {
       const { rows } = await this.pool.query(
         `UPDATE moving_rules SET
           name=$3, enabled=$4, match_field=$5, match_op=$6, match_value=$7,
-          target_group_id=$8, priority=$9, only_if_unassigned=$10, updated_at=$11
+          conditions_json=$8, target_group_id=$9, priority=$10,
+          only_if_unassigned=$11, updated_at=$12
          WHERE org_id=$1 AND id=$2 RETURNING *`,
         [
           orgId,
           input.id,
           input.name,
           input.enabled !== false,
-          input.matchField,
-          input.matchOp,
-          input.matchValue,
+          first.field,
+          first.op,
+          first.value,
+          condJson,
           input.targetGroupId,
           input.priority ?? 100,
           input.onlyIfUnassigned !== false,
@@ -2029,16 +2146,17 @@ export class PgStore implements OpsGateStore {
     }
     const id = newId("mvr")
     await this.pool.query(
-      `INSERT INTO moving_rules (id, org_id, name, enabled, match_field, match_op, match_value, target_group_id, priority, only_if_unassigned, created_at, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$11)`,
+      `INSERT INTO moving_rules (id, org_id, name, enabled, match_field, match_op, match_value, conditions_json, target_group_id, priority, only_if_unassigned, created_at, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$12)`,
       [
         id,
         orgId,
         input.name,
         input.enabled !== false,
-        input.matchField,
-        input.matchOp,
-        input.matchValue,
+        first.field,
+        first.op,
+        first.value,
+        condJson,
         input.targetGroupId,
         input.priority ?? 100,
         input.onlyIfUnassigned !== false,
@@ -2081,6 +2199,27 @@ export class PgStore implements OpsGateStore {
     }
   }
 
+  private ruleMatchesAgent(
+    rule: import("./types").MovingRule,
+    agent: { deviceLabel?: string; hostName?: string }
+  ): boolean {
+    const conds =
+      rule.conditions?.length > 0
+        ? rule.conditions
+        : [
+            {
+              field: rule.matchField,
+              op: rule.matchOp,
+              value: rule.matchValue
+            }
+          ]
+    return conds.every((c) => {
+      const fieldVal =
+        c.field === "host_name" ? agent.hostName || "" : agent.deviceLabel || ""
+      return this.matchMovingRule(fieldVal, c.op, c.value)
+    })
+  }
+
   async applyMovingRules(orgId: string, agentId: string) {
     const agents = await this.listAgents(orgId)
     const agent = agents.find((a) => a.id === agentId)
@@ -2090,13 +2229,7 @@ export class PgStore implements OpsGateStore {
       if (rule.onlyIfUnassigned && (agent.policyProfileId || agent.groupId)) {
         continue
       }
-      const fieldVal =
-        rule.matchField === "host_name"
-          ? agent.hostName || ""
-          : agent.deviceLabel || ""
-      if (!this.matchMovingRule(fieldVal, rule.matchOp, rule.matchValue)) {
-        continue
-      }
+      if (!this.ruleMatchesAgent(rule, agent)) continue
       const groups = await this.listGroups(orgId)
       const group = groups.find((g) => g.id === rule.targetGroupId)
       if (!group) continue

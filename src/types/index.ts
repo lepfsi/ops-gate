@@ -133,6 +133,7 @@ export const DEFAULT_SETTINGS: OpsGateSettings = {
     "poe.com",
     "you.com",
     "chat.mistral.ai",
+    "lechat.mistral.ai",
     "console.groq.com",
     "grok.x.ai",
     "grok.com",
@@ -141,7 +142,27 @@ export const DEFAULT_SETTINGS: OpsGateSettings = {
     "meta.ai",
     "pi.ai",
     "character.ai",
-    "notebooklm.google.com"
+    "notebooklm.google.com",
+    "openrouter.ai",
+    "together.ai",
+    "fireworks.ai",
+    "blackbox.ai",
+    "chat.lmsys.org",
+    "lmarena.ai",
+    "typingmind.com",
+    "chat.qwen.ai",
+    "writesonic.com",
+    "jasper.ai",
+    "copy.ai",
+    "notion.so",
+    "platform.openai.com",
+    "labs.google",
+    "deepai.org",
+    "sider.ai",
+    "monica.im",
+    "chatpdf.com",
+    "consensus.app",
+    "elicit.com"
   ]
 }
 

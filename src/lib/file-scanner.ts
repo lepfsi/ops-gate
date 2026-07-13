@@ -197,7 +197,11 @@ export function isScannableFile(file: File, opts: FileScanOptions = {}): boolean
   const cat = categorizeFile(file)
   if (cat === "media") return false // warn only
   if (cat === "image") return !!opts.scanImages
-  if (cat === "office") return false // deep parse V1.x — warn + log
+  if (cat === "office") {
+    // PDF + DOCX extraits en lib ; autres Office → warn only
+    const ext = extensionOf(file.name)
+    return ext === "pdf" || ext === "docx"
+  }
   if (cat === "database") {
     if (opts.scanDatabases === false) return false
     const ext = extensionOf(file.name)
@@ -269,11 +273,47 @@ export async function scanFile(
   }
 
   if (category === "office") {
+    const ext = extensionOf(file.name)
+    // PDF / DOCX : parse réel via pdfjs + mammoth
+    if (ext === "pdf" || ext === "docx") {
+      try {
+        const { extractOfficeText } = await import("./office-extract")
+        const extracted = await extractOfficeText(file, MAX_FILE_BYTES)
+        if (extracted?.text?.trim()) {
+          const detections = detectSensitiveData(extracted.text, rules)
+          return {
+            ...base,
+            status: extracted.truncated ? "too_large_partial" : "scanned",
+            text: extracted.text,
+            detections,
+            truncated: extracted.truncated,
+            userHint: extracted.truncated
+              ? `Document ${ext.toUpperCase()} partiellement scanné (taille / pages).`
+              : undefined
+          }
+        }
+        // extract fail / empty → warn confirm
+        return {
+          ...base,
+          status: "office_warn",
+          userHint: extracted
+            ? `Document ${ext.toUpperCase()} sans texte extractible (scanne / image). Confirmez l’envoi — log enregistré.`
+            : `Extraction ${ext.toUpperCase()} impossible. Confirmez l’envoi — log enregistré.`
+        }
+      } catch {
+        return {
+          ...base,
+          status: "office_warn",
+          userHint: `Extraction ${ext.toUpperCase()} en échec. Confirmez l’envoi — log enregistré.`
+        }
+      }
+    }
+    // Autres Office (doc, xlsx, pptx…) — pas encore de parser embarqué
     return {
       ...base,
       status: "office_warn",
       userHint:
-        "Document bureautique (PDF/Office) : extraction complète en cours de développement. Confirmez l’envoi — un log avec type et nom de fichier sera enregistré."
+        "Document bureautique (legacy Office / tableur / présentation) : extraction non supportée dans cette version. Confirmez l’envoi — un log avec type et nom de fichier sera enregistré."
     }
   }
 

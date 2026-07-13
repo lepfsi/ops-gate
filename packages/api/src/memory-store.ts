@@ -112,6 +112,7 @@ export class MemoryStore implements OpsGateStore {
       "poe.com",
       "you.com",
       "chat.mistral.ai",
+      "lechat.mistral.ai",
       "console.groq.com",
       "grok.x.ai",
       "grok.com",
@@ -120,7 +121,27 @@ export class MemoryStore implements OpsGateStore {
       "meta.ai",
       "pi.ai",
       "character.ai",
-      "notebooklm.google.com"
+      "notebooklm.google.com",
+      "openrouter.ai",
+      "together.ai",
+      "fireworks.ai",
+      "blackbox.ai",
+      "chat.lmsys.org",
+      "lmarena.ai",
+      "typingmind.com",
+      "chat.qwen.ai",
+      "writesonic.com",
+      "jasper.ai",
+      "copy.ai",
+      "notion.so",
+      "platform.openai.com",
+      "labs.google",
+      "deepai.org",
+      "sider.ai",
+      "monica.im",
+      "chatpdf.com",
+      "consensus.app",
+      "elicit.com"
     ]
 
     const policy: Policy = {
@@ -294,8 +315,21 @@ export class MemoryStore implements OpsGateStore {
         "poe.com",
         "you.com",
         "chat.mistral.ai",
+        "lechat.mistral.ai",
+        "console.groq.com",
+        "grok.x.ai",
+        "grok.com",
+        "huggingface.co",
+        "phind.com",
         "meta.ai",
-        "notebooklm.google.com"
+        "pi.ai",
+        "character.ai",
+        "notebooklm.google.com",
+        "openrouter.ai",
+        "together.ai",
+        "blackbox.ai",
+        "notion.so",
+        "labs.google"
       ],
       scanUploads: true,
       eventReporting: false,
@@ -509,13 +543,23 @@ export class MemoryStore implements OpsGateStore {
     candidates.sort((a, b) => Number(a.personal) - Number(b.personal))
     const hit = candidates[0]
     if (!hit) return { ok: false as const, error: "invalid_credentials" }
+    // Un seul login actif par compte admin — le 2e doit attendre la déconnexion
+    const now = Date.now()
+    for (const [tok, sess] of this.sessions) {
+      if (sess.adminId !== hit.admin.id) continue
+      if (now > sess.expiresAt) {
+        this.sessions.delete(tok)
+        continue
+      }
+      return { ok: false as const, error: "session_already_active" }
+    }
     const token = `ogs_${newToken().replace(/^ogt_/, "")}`
     const session: AdminSession = {
       token,
       orgId: hit.orgId,
       adminId: hit.admin.id,
-      expiresAt: Date.now() + 12 * 60 * 60 * 1000,
-      createdAt: Date.now()
+      expiresAt: now + 12 * 60 * 60 * 1000,
+      createdAt: now
     }
     this.sessions.set(token, session)
     return { ok: true as const, session, admin: hit.admin }
@@ -1486,9 +1530,38 @@ export class MemoryStore implements OpsGateStore {
     return list.slice(-(opts?.limit || 100)).reverse()
   }
 
+  private normalizeMovingConditions(
+    input: {
+      conditions?: import("./types").MovingCondition[]
+      matchField?: import("./types").MovingMatchField
+      matchOp?: import("./types").MovingMatchOp
+      matchValue?: string
+    }
+  ): import("./types").MovingCondition[] {
+    if (input.conditions && input.conditions.length > 0) {
+      return input.conditions
+        .filter((c) => c.value?.trim())
+        .map((c) => ({
+          field: c.field,
+          op: c.op,
+          value: c.value.trim()
+        }))
+    }
+    if (input.matchField && input.matchOp && input.matchValue?.trim()) {
+      return [
+        {
+          field: input.matchField,
+          op: input.matchOp,
+          value: input.matchValue.trim()
+        }
+      ]
+    }
+    return []
+  }
+
   async listMovingRules(orgId: string) {
     return [...(this.movingRules.get(orgId) || [])].sort(
-      (a, b) => a.priority - b.priority
+      (a, b) => a.priority - b.priority || a.createdAt.localeCompare(b.createdAt)
     )
   }
 
@@ -1498,15 +1571,19 @@ export class MemoryStore implements OpsGateStore {
       id?: string
       name: string
       enabled?: boolean
-      matchField: import("./types").MovingMatchField
-      matchOp: import("./types").MovingMatchOp
-      matchValue: string
+      conditions?: import("./types").MovingCondition[]
+      matchField?: import("./types").MovingMatchField
+      matchOp?: import("./types").MovingMatchOp
+      matchValue?: string
       targetGroupId: string
       priority?: number
       onlyIfUnassigned?: boolean
     }
   ) {
     if (!this.orgs.has(orgId)) return undefined
+    const conditions = this.normalizeMovingConditions(input)
+    if (conditions.length === 0) return undefined
+    const first = conditions[0]
     const list = this.movingRules.get(orgId) || []
     const now = new Date().toISOString()
     if (input.id) {
@@ -1516,9 +1593,10 @@ export class MemoryStore implements OpsGateStore {
         ...list[idx],
         name: input.name,
         enabled: input.enabled !== false,
-        matchField: input.matchField,
-        matchOp: input.matchOp,
-        matchValue: input.matchValue,
+        conditions,
+        matchField: first.field,
+        matchOp: first.op,
+        matchValue: first.value,
         targetGroupId: input.targetGroupId,
         priority: input.priority ?? list[idx].priority,
         onlyIfUnassigned:
@@ -1535,9 +1613,10 @@ export class MemoryStore implements OpsGateStore {
       orgId,
       name: input.name,
       enabled: input.enabled !== false,
-      matchField: input.matchField,
-      matchOp: input.matchOp,
-      matchValue: input.matchValue,
+      conditions,
+      matchField: first.field,
+      matchOp: first.op,
+      matchValue: first.value,
       targetGroupId: input.targetGroupId,
       priority: input.priority ?? 100,
       onlyIfUnassigned: input.onlyIfUnassigned !== false,
@@ -1578,6 +1657,27 @@ export class MemoryStore implements OpsGateStore {
     }
   }
 
+  private ruleMatchesAgent(
+    rule: import("./types").MovingRule,
+    agent: { deviceLabel?: string; hostName?: string }
+  ): boolean {
+    const conds =
+      rule.conditions?.length > 0
+        ? rule.conditions
+        : [
+            {
+              field: rule.matchField,
+              op: rule.matchOp,
+              value: rule.matchValue
+            }
+          ]
+    return conds.every((c) => {
+      const fieldVal =
+        c.field === "host_name" ? agent.hostName || "" : agent.deviceLabel || ""
+      return this.matchMovingRule(fieldVal, c.op, c.value)
+    })
+  }
+
   async applyMovingRules(orgId: string, agentId: string) {
     const agent = this.agents.get(agentId)
     if (!agent || agent.orgId !== orgId) return { applied: false as const }
@@ -1586,13 +1686,7 @@ export class MemoryStore implements OpsGateStore {
       if (rule.onlyIfUnassigned && (agent.policyProfileId || agent.groupId)) {
         continue
       }
-      const fieldVal =
-        rule.matchField === "host_name"
-          ? agent.hostName || ""
-          : agent.deviceLabel || ""
-      if (!this.matchMovingRule(fieldVal, rule.matchOp, rule.matchValue)) {
-        continue
-      }
+      if (!this.ruleMatchesAgent(rule, agent)) continue
       const group = (this.groups.get(orgId) || []).find(
         (g) => g.id === rule.targetGroupId
       )
