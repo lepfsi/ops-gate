@@ -435,7 +435,7 @@ export function createApp() {
 
   /** Login console */
   v1.post("/auth/login", async (c) => {
-    let body: { email?: string; password?: string }
+    let body: { email?: string; password?: string; force?: boolean }
     try {
       body = await c.req.json()
     } catch {
@@ -444,15 +444,18 @@ export function createApp() {
     if (!body.email || !body.password) {
       return c.json({ error: "email_password_required" }, 400)
     }
-    const result = await store.createAdminSession(body.email, body.password)
+    const result = await store.createAdminSession(body.email, body.password, {
+      force: !!body.force
+    })
     if (!result.ok) {
       const status = result.error === "session_already_active" ? 409 : 401
       return c.json(
         {
           error: result.error,
+          can_force: result.error === "session_already_active",
           message:
             result.error === "session_already_active"
-              ? "Ce compte a déjà une session active. Déconnectez l’autre session (ou attendez l’expiration idle 5 min) avant de vous reconnecter."
+              ? "Ce compte a déjà une session active (autre navigateur / onglet). Utilisez « Forcer la déconnexion » pour prendre la main, ou attendez l’idle serveur (~10 min sans activité API)."
               : undefined
         },
         status
@@ -464,17 +467,22 @@ export function createApp() {
       adminEmail: result.admin.email,
       adminLabel: result.admin.label,
       action: "login",
-      detail: "Connexion console"
+      detail: result.forced
+        ? "Connexion console (prise de contrôle — session précédente révoquée)"
+        : "Connexion console"
     })
     return c.json({
       ok: true,
       token: result.session.token,
       expires_at: result.session.expiresAt,
       admin: publicAdminView(result.admin),
+      forced: !!result.forced,
       hint:
         result.admin.mustChangePassword
           ? "Changez le mot de passe par défaut (0000) dès que possible."
-          : undefined
+          : result.forced
+            ? "L’autre session a été déconnectée."
+            : undefined
     })
   })
 

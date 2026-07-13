@@ -74,7 +74,9 @@ CREATE TABLE IF NOT EXISTS admin_sessions (
   org_id TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
   admin_id TEXT NOT NULL REFERENCES org_admins(id) ON DELETE CASCADE,
   expires_at TIMESTAMPTZ NOT NULL,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  /** Heartbeat — idle serveur (ex. 10 min sans requête console) */
+  last_activity_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS admin_sessions_admin_idx ON admin_sessions(admin_id);
@@ -120,7 +122,8 @@ CREATE TABLE IF NOT EXISTS agents (
   mode_override TEXT,
   policy_profile_id TEXT,
   user_id TEXT,
-  license_assigned BOOLEAN NOT NULL DEFAULT TRUE,
+  /** false par défaut : licence seulement si groupe (ou assignation admin manuelle) */
+  license_assigned BOOLEAN NOT NULL DEFAULT FALSE,
   unlicensed_since TIMESTAMPTZ,
   personal_account BOOLEAN NOT NULL DEFAULT FALSE,
   last_config_epoch INT,

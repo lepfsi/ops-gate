@@ -880,6 +880,8 @@ function LoginScreen({
   const [err, setErr] = useState<string | null>(null)
   const [info, setInfo] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  /** Session concurrente détectée → proposer force login */
+  const [canForce, setCanForce] = useState(false)
   /** null | email | otp */
   const [resetStep, setResetStep] = useState<null | "email" | "otp">(null)
   const [resetEmail, setResetEmail] = useState("")
@@ -948,19 +950,18 @@ function LoginScreen({
           onClick={async () => {
             setBusy(true)
             setErr(null)
+            setCanForce(false)
             try {
               setApiBase(apiBase)
-              const r = await api.login(email, password)
+              const r = await api.login(email, password, false)
               setToken(r.token)
               onLoggedIn(r.admin)
             } catch (e) {
               const msg = String(e)
-              if (
-                msg.includes("session_already_active") ||
-                msg.includes("409")
-              ) {
+              if (msg.includes("session_already_active")) {
+                setCanForce(true)
                 setErr(
-                  "Ce compte a déjà une session active. L’autre technicien doit se déconnecter (ou attendre le logout idle 5 min) avant de se reconnecter avec le même compte."
+                  "Session déjà active sur ce compte (autre onglet / navigateur, ou session fantôme). Cliquez « Forcer la déconnexion » pour prendre la main, ou attendez ~10 min d’inactivité serveur."
                 )
               } else {
                 setErr(msg)
@@ -971,6 +972,31 @@ function LoginScreen({
           }}>
           Se connecter
         </button>
+        {canForce && (
+          <button
+            className="btn secondary"
+            type="button"
+            style={{ marginTop: 8, width: "100%" }}
+            disabled={busy}
+            onClick={async () => {
+              setBusy(true)
+              setErr(null)
+              try {
+                setApiBase(apiBase)
+                const r = await api.login(email, password, true)
+                setToken(r.token)
+                setCanForce(false)
+                setInfo(r.hint || "Session précédente révoquée.")
+                onLoggedIn(r.admin)
+              } catch (e) {
+                setErr(String(e))
+              } finally {
+                setBusy(false)
+              }
+            }}>
+            Forcer la déconnexion de l’autre session
+          </button>
+        )}
         <p style={{ marginTop: 14, fontSize: 13 }}>
           <button
             type="button"
@@ -3132,11 +3158,13 @@ function MovingRulesView({
 }) {
   const [rules, setRules] = useState<import("./api").MovingRuleRow[]>([])
   const [formOpen, setFormOpen] = useState(false)
+  const [editId, setEditId] = useState<string | null>(null)
   const [name, setName] = useState("")
   const [conds, setConds] = useState<CondDraft[]>([emptyCond()])
   const [groupId, setGroupId] = useState("")
   const [priority, setPriority] = useState(100)
   const [onlyUnassigned, setOnlyUnassigned] = useState(true)
+  const [enabled, setEnabled] = useState(true)
 
   const load = useCallback(async () => {
     try {
@@ -3152,11 +3180,28 @@ function MovingRulesView({
   }, [load])
 
   const resetForm = () => {
+    setEditId(null)
     setName("")
     setConds([emptyCond()])
     setGroupId("")
     setPriority(100)
     setOnlyUnassigned(true)
+    setEnabled(true)
+  }
+
+  const openEdit = (r: import("./api").MovingRuleRow) => {
+    setEditId(r.id)
+    setName(r.name)
+    setConds(
+      r.conditions && r.conditions.length > 0
+        ? r.conditions.map((c) => ({ ...c }))
+        : [{ field: r.matchField, op: r.matchOp, value: r.matchValue }]
+    )
+    setGroupId(r.targetGroupId)
+    setPriority(r.priority)
+    setOnlyUnassigned(r.onlyIfUnassigned)
+    setEnabled(r.enabled !== false)
+    setFormOpen(true)
   }
 
   const condsOf = (r: import("./api").MovingRuleRow): CondDraft[] =>
@@ -3279,24 +3324,33 @@ function MovingRulesView({
                       />
                     </td>
                     <td>
-                      <button
-                        className="btn danger btn-sm"
-                        type="button"
-                        disabled={busy}
-                        onClick={async () => {
-                          setBusy(true)
-                          try {
-                            await api.deleteMovingRule(r.id)
-                            setInfo("Règle supprimée")
-                            await load()
-                          } catch (e) {
-                            setError(String(e))
-                          } finally {
-                            setBusy(false)
-                          }
-                        }}>
-                        Suppr.
-                      </button>
+                      <div className="row" style={{ gap: 4 }}>
+                        <button
+                          className="btn secondary btn-sm"
+                          type="button"
+                          disabled={busy}
+                          onClick={() => openEdit(r)}>
+                          Modifier
+                        </button>
+                        <button
+                          className="btn danger btn-sm"
+                          type="button"
+                          disabled={busy}
+                          onClick={async () => {
+                            setBusy(true)
+                            try {
+                              await api.deleteMovingRule(r.id)
+                              setInfo("Règle supprimée")
+                              await load()
+                            } catch (e) {
+                              setError(String(e))
+                            } finally {
+                              setBusy(false)
+                            }
+                          }}>
+                          Suppr.
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -3341,7 +3395,9 @@ function MovingRulesView({
             <div
               className="row"
               style={{ justifyContent: "space-between", marginBottom: 8 }}>
-              <h2 style={{ margin: 0 }}>Nouvelle règle</h2>
+              <h2 style={{ margin: 0 }}>
+                {editId ? "Modifier la règle" : "Nouvelle règle"}
+              </h2>
               <button
                 className="btn secondary btn-sm"
                 type="button"
@@ -3452,6 +3508,14 @@ function MovingRulesView({
                 />
                 Uniquement si agent pas encore assigné
               </label>
+              <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <input
+                  type="checkbox"
+                  checked={enabled}
+                  onChange={(e) => setEnabled(e.target.checked)}
+                />
+                Règle active
+              </label>
               <div className="row">
                 <button
                   className="btn"
@@ -3465,7 +3529,7 @@ function MovingRulesView({
                   onClick={async () => {
                     setBusy(true)
                     try {
-                      await api.createMovingRule({
+                      const body = {
                         name: name.trim(),
                         conditions: validConds.map((c) => ({
                           ...c,
@@ -3473,9 +3537,16 @@ function MovingRulesView({
                         })),
                         target_group_id: groupId,
                         priority,
-                        only_if_unassigned: onlyUnassigned
-                      })
-                      setInfo("Règle créée")
+                        only_if_unassigned: onlyUnassigned,
+                        enabled
+                      }
+                      if (editId) {
+                        await api.patchMovingRule(editId, body)
+                        setInfo("Règle mise à jour")
+                      } else {
+                        await api.createMovingRule(body)
+                        setInfo("Règle créée")
+                      }
                       resetForm()
                       setFormOpen(false)
                       await load()
@@ -3485,7 +3556,7 @@ function MovingRulesView({
                       setBusy(false)
                     }
                   }}>
-                  Créer la règle
+                  {editId ? "Enregistrer" : "Créer la règle"}
                 </button>
                 <button
                   className="btn secondary"

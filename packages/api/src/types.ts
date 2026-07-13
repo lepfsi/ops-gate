@@ -68,6 +68,8 @@ export interface AdminSession {
   adminId: string
   expiresAt: number
   createdAt: number
+  /** Dernière activité API (heartbeat) — idle serveur */
+  lastActivityAt: number
 }
 
 /** Utilisateur logique (pré-LDAP) — lié à des groupes */

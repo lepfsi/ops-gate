@@ -14,6 +14,7 @@ Mis à jour : 13 juillet 2026
 | **SSO + MFA** | PLATFORM-v2 |
 | **Proxy local** | PLATFORM-v2 |
 | **Chrome Web Store** | PLATFORM-v2 |
+| **Multi-navigateur (Firefox / Safari)** | Chromium (Chrome/Edge/Brave/Opera) = Plasmo MV3 aujourd’hui. Firefox = manifest V2/V3 adapté + build `plasmo --target=firefox-mv3`. Safari = port Xcode / App Store (lourd). Voir `docs/CAHIER-CONCEPTEUR.md` § multi-browser |
 | **Portal personnel cloud** | Billing / multi-device |
 | **Bulk CSV import agents** | Au-delà du multi-select UI |
 | **Moving rules OR / permanent** | V1.x : AND multi-cond + priorité ; modes permanent / one-shot Kaspersky en V2 |
