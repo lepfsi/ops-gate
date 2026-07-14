@@ -1,11 +1,79 @@
-import type { Agent } from "./types"
+import type {
+  Agent,
+  OrgMonitoringSettings,
+  WorkSchedule
+} from "./types"
+import {
+  DEFAULT_MONITORING_SETTINGS,
+  mergeMonitoringSettings
+} from "./types"
 import type { SummaryAgentBrief } from "./store-types"
 
-/** < 15 min = online (poll agent ~2 min) */
-export const ONLINE_MS = 15 * 60 * 1000
-/** > 2 h sans last_seen = hors ligne long (Kaspersky-style) */
-export const OFFLINE_LONG_MS = 2 * 60 * 60 * 1000
 export const LICENSE_GRACE_MS = 5 * 60 * 1000
+
+/** Parse "HH:MM" → minutes from midnight */
+function hmToMin(hm: string): number {
+  const [h, m] = (hm || "0:0").split(":").map((x) => parseInt(x, 10) || 0)
+  return h * 60 + m
+}
+
+/**
+ * True si l’instant est dans les heures de travail (jours + plage − pauses).
+ * Si schedule désactivé → toujours true (alertes 24/7).
+ */
+export function isWithinWorkSchedule(
+  now: Date,
+  schedule?: WorkSchedule | null
+): boolean {
+  if (!schedule?.enabled) return true
+  const tz = schedule.timezone || "Europe/Paris"
+  let weekday: number
+  let minutes: number
+  try {
+    const parts = new Intl.DateTimeFormat("en-GB", {
+      timeZone: tz,
+      weekday: "short",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false
+    }).formatToParts(now)
+    const wd = parts.find((p) => p.type === "weekday")?.value || "Mon"
+    const hour = parseInt(
+      parts.find((p) => p.type === "hour")?.value || "0",
+      10
+    )
+    const minute = parseInt(
+      parts.find((p) => p.type === "minute")?.value || "0",
+      10
+    )
+    const map: Record<string, number> = {
+      Mon: 1,
+      Tue: 2,
+      Wed: 3,
+      Thu: 4,
+      Fri: 5,
+      Sat: 6,
+      Sun: 7
+    }
+    weekday = map[wd] || 1
+    minutes = hour * 60 + minute
+  } catch {
+    return true
+  }
+  const days = schedule.workDays?.length
+    ? schedule.workDays
+    : DEFAULT_MONITORING_SETTINGS.schedule.workDays
+  if (!days.includes(weekday)) return false
+  const start = hmToMin(schedule.workStart || "08:00")
+  const end = hmToMin(schedule.workEnd || "17:00")
+  if (minutes < start || minutes >= end) return false
+  for (const b of schedule.breaks || []) {
+    const bs = hmToMin(b.start)
+    const be = hmToMin(b.end)
+    if (minutes >= bs && minutes < be) return false
+  }
+  return true
+}
 
 export function licenseStatusOf(
   licensed: boolean,
@@ -36,23 +104,38 @@ export function briefAgent(
   }
 }
 
-export function connectivityBuckets(agents: Agent[]) {
+export function connectivityBuckets(
+  agents: Agent[],
+  monitoring?: Partial<OrgMonitoringSettings> | null
+) {
+  const mon = mergeMonitoringSettings(monitoring)
+  const onlineMs = mon.onlineMs
+  const offlineLongMs = mon.offlineLongMs
+  const now = new Date()
+  const inSchedule = isWithinWorkSchedule(now, mon.schedule)
   let online = 0
   let stale = 0
   let offline_long = 0
-  const now = Date.now()
+  let offline_long_alertable = 0
   for (const a of agents) {
-    const age = now - new Date(a.lastSeenAt).getTime()
-    if (age <= ONLINE_MS) online++
-    else if (age <= OFFLINE_LONG_MS) stale++
-    else offline_long++
+    const age = Date.now() - new Date(a.lastSeenAt).getTime()
+    if (age <= onlineMs) online++
+    else if (age <= offlineLongMs) stale++
+    else {
+      offline_long++
+      if (inSchedule) offline_long_alertable++
+    }
   }
   return {
     online,
     stale,
     offline_long,
-    offline_long_ms: OFFLINE_LONG_MS,
-    online_ms: ONLINE_MS
+    offline_long_alertable,
+    offline_long_ms: offlineLongMs,
+    online_ms: onlineMs,
+    schedule_active: !!mon.schedule.enabled,
+    within_work_hours: inSchedule,
+    monitoring: mon
   }
 }
 

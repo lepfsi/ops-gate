@@ -28,6 +28,7 @@ type Tab =
   | "events"
   | "audit"
   | "moving"
+  | "settings"
 
 const IDLE_MS = 5 * 60 * 1000
 
@@ -411,29 +412,67 @@ export default function App() {
       {error && <p className="err flash err">{error}</p>}
       {info && <p className="ok flash ok">{info}</p>}
 
-      <nav className="tabs">
-        {(
-          [
-            ["summary", "Tableau de bord"],
-            ["policy", "Policy"],
-            ["people", "Admins & groupes"],
-            ["packs", "Packs de règles"],
-            ["agents", "Agents"],
-            ["events", "Événements"],
-            ["moving", "Règles auto"],
-            ["audit", "Audit admin"]
-          ] as const
-        ).map(([id, label]) => (
+      <div className="shell-body">
+      <nav className="shell-nav" aria-label="Navigation principale">
+        <button
+          type="button"
+          className={`shell-nav-item ${tab === "summary" ? "active" : ""}`}
+          onClick={() => setTab("summary")}>
+          Tableau de bord
+        </button>
+        <button
+          type="button"
+          className={`shell-nav-item ${tab === "policy" ? "active" : ""}`}
+          onClick={() => setTab("policy")}>
+          Policy
+        </button>
+        <button
+          type="button"
+          className={`shell-nav-item ${tab === "people" ? "active" : ""}`}
+          onClick={() => setTab("people")}>
+          Admins &amp; groupes
+        </button>
+        <button
+          type="button"
+          className={`shell-nav-item ${tab === "packs" ? "active" : ""}`}
+          onClick={() => setTab("packs")}>
+          Packs de règles
+        </button>
+        <button
+          type="button"
+          className={`shell-nav-item ${tab === "agents" || tab === "moving" ? "active" : ""}`}
+          onClick={() => setTab("agents")}>
+          Agents
+        </button>
+        {(tab === "agents" || tab === "moving") && (
           <button
-            key={id}
             type="button"
-            className={`tab ${tab === id ? "active" : ""}`}
-            onClick={() => setTab(id)}>
-            {label}
+            className={`shell-nav-sub ${tab === "moving" ? "active" : ""}`}
+            onClick={() => setTab("moving")}>
+            ↳ Règles auto
           </button>
-        ))}
+        )}
+        <button
+          type="button"
+          className={`shell-nav-item ${tab === "events" ? "active" : ""}`}
+          onClick={() => setTab("events")}>
+          Événements
+        </button>
+        <button
+          type="button"
+          className={`shell-nav-item ${tab === "audit" ? "active" : ""}`}
+          onClick={() => setTab("audit")}>
+          Audit admin
+        </button>
+        <button
+          type="button"
+          className={`shell-nav-item ${tab === "settings" ? "active" : ""}`}
+          onClick={() => setTab("settings")}>
+          Monitoring &amp; horaires
+        </button>
       </nav>
 
+      <main className="shell-main">
       {busy && tab !== "packs" && tab !== "policy" && (
         <p className="muted">Chargement…</p>
       )}
@@ -458,6 +497,10 @@ export default function App() {
               setBusy(false)
             }
           }}
+          onMerged={() => void loadTab("summary")}
+          setError={setError}
+          setInfo={setInfo}
+          setBusy={setBusy}
         />
       )}
 
@@ -577,11 +620,21 @@ export default function App() {
       {tab === "audit" && sessionAdmin && (
         <AuditView isPrincipal={!!sessionAdmin.is_principal} />
       )}
+      {tab === "settings" && (
+        <MonitoringSettingsView
+          busy={busy}
+          setBusy={setBusy}
+          setError={setError}
+          setInfo={setInfo}
+        />
+      )}
 
       <footer className="console-footer">
         OpsGate Console <strong>1.2.0</strong> · early customer · privacy by
         design (events metadata-only)
       </footer>
+      </main>
+      </div>
     </div>
   )
 }
@@ -654,12 +707,20 @@ function SummaryView({
   summary,
   busy,
   onRefresh,
-  onForceSync
+  onForceSync,
+  onMerged,
+  setError,
+  setInfo,
+  setBusy
 }: {
   summary: Summary | null
   busy?: boolean
   onRefresh: () => void
   onForceSync: () => void
+  onMerged?: () => void
+  setError?: (e: string | null) => void
+  setInfo?: (i: string | null) => void
+  setBusy?: (b: boolean) => void
 }) {
   const [drill, setDrill] = useState<string | null>(null)
   const [drillEvents, setDrillEvents] = useState<EventRow[]>([])
@@ -696,13 +757,17 @@ function SummaryView({
     online: 0,
     stale: 0,
     offline_long: 0,
+    offline_long_alertable: 0,
     offline_long_ms: 2 * 60 * 60 * 1000,
-    online_ms: 15 * 60 * 1000
+    online_ms: 15 * 60 * 1000,
+    schedule_active: false,
+    within_work_hours: true
   }
 
   const openDecision = async (k: string) => {
     setDrill(k)
     setPanel("decision")
+    setDashSection("activity")
     setDrillBusy(true)
     try {
       const r = await api.eventsByDecision(k)
@@ -715,6 +780,41 @@ function SummaryView({
       setDrillEvents([])
     } finally {
       setDrillBusy(false)
+    }
+  }
+
+  const mergeDupGroup = async (
+    fingerprint: string,
+    agents: import("./api").SummaryAgentBrief[]
+  ) => {
+    if (agents.length < 2) return
+    // Conserver le plus récent (last_seen)
+    const sorted = [...agents].sort(
+      (a, b) =>
+        new Date(b.last_seen_at).getTime() - new Date(a.last_seen_at).getTime()
+    )
+    const keep = sorted[0]
+    const merge = sorted.slice(1).map((a) => a.id)
+    if (
+      !confirm(
+        `Fusionner ${agents.length} agents (fingerprint ${fingerprint.slice(0, 12)}…) ?\nConservé : ${keep.device_label || keep.id}\nSupprimés : ${merge.length}`
+      )
+    ) {
+      return
+    }
+    setBusy?.(true)
+    setError?.(null)
+    try {
+      const r = await api.mergeAgents(keep.id, merge)
+      setInfo?.(
+        `Fusion OK — conservé ${r.kept.slice(0, 12)}… · ${r.removed} supprimé(s)`
+      )
+      onMerged?.()
+      setPanel(null)
+    } catch (e) {
+      setError?.(String(e))
+    } finally {
+      setBusy?.(false)
     }
   }
 
@@ -940,12 +1040,28 @@ function SummaryView({
                 className="dash-link-row crit-text"
                 onClick={() => setPanel("offline")}>
                 <span className="dash-dot crit" /> Not connected long time{" "}
-                <strong>{conn.offline_long}</strong>
+                <strong>
+                  {conn.schedule_active && !conn.within_work_hours
+                    ? conn.offline_long_alertable ?? 0
+                    : conn.offline_long}
+                </strong>
+                {conn.schedule_active && !conn.within_work_hours ? (
+                  <span className="muted" style={{ fontSize: 11 }}>
+                    {" "}
+                    (hors horaires — alertes silencieuses)
+                  </span>
+                ) : null}
               </button>
             </li>
           </ul>
           <p className="muted" style={{ fontSize: 11, marginBottom: 0 }}>
-            Basé sur <code>last_seen</code> (poll config ~2 min). Clic pour lister.
+            Seuil &gt; {Math.round(conn.offline_long_ms / 60000)} min ·{" "}
+            {conn.schedule_active
+              ? conn.within_work_hours
+                ? "heures de travail actives"
+                : "hors plage horaire (pas d’alerte)"
+              : "schedule off · 24/7"}
+            . Clic pour lister.
           </p>
         </div>
 
@@ -1104,6 +1220,20 @@ function SummaryView({
       )}
 
       {/* Panneaux contextuels cliquables */}
+      {panel === "licensed" && (
+        <div className="card dash-context-panel">
+          <h3 style={{ marginTop: 0 }}>
+            Agents Licensed{" "}
+            <button
+              type="button"
+              className="btn secondary btn-sm"
+              onClick={() => setPanel(null)}>
+              Fermer
+            </button>
+          </h3>
+          {renderAgentList(summary.agents_licensed, "Aucun agent licensed")}
+        </div>
+      )}
       {panel === "unlicensed" && (
         <div className="card dash-context-panel">
           <h3 style={{ marginTop: 0 }}>
@@ -1142,7 +1272,7 @@ function SummaryView({
         <div className="card dash-context-panel">
           <h3 style={{ marginTop: 0 }}>
             Not connected for long time (&gt;{" "}
-            {Math.round(conn.offline_long_ms / 3600000)} h){" "}
+            {Math.round(conn.offline_long_ms / 60000)} min){" "}
             <button
               type="button"
               className="btn secondary btn-sm"
@@ -1151,8 +1281,8 @@ function SummaryView({
             </button>
           </h3>
           <p className="muted">
-            Dernier sync trop ancien — PC éteint, extension désinstallée, ou API
-            non joignable. Révoquez si obsolète.
+            Dernier sync trop ancien. Révoquez si obsolète. Les alertes
+            « actives » respectent le planning (hors 17h–8h si schedule ON).
           </p>
           {renderAgentList(
             summary.agents_offline_long,
@@ -1173,26 +1303,98 @@ function SummaryView({
           </h3>
           {dups.map((d) => (
             <div key={d.fingerprint} style={{ marginBottom: 16 }}>
-              <code className="mono" style={{ fontSize: 11 }}>
-                {d.fingerprint.slice(0, 24)}…
-              </code>
+              <div className="row" style={{ marginBottom: 8 }}>
+                <code className="mono" style={{ fontSize: 11 }}>
+                  {d.fingerprint.slice(0, 28)}…
+                </code>
+                <button
+                  type="button"
+                  className="btn btn-sm"
+                  disabled={busy}
+                  onClick={() => void mergeDupGroup(d.fingerprint, d.agents)}>
+                  Fusionner (garder le + récent)
+                </button>
+              </div>
               {renderAgentList(d.agents, "")}
             </div>
           ))}
         </div>
       )}
+      {panel === "decision" && drill && (
+        <div className="card dash-context-panel">
+          <h3 style={{ fontSize: 14, marginTop: 0 }}>
+            Logs « {decisionLabelFr(drill)} »{" "}
+            <span className="mono muted" style={{ fontSize: 11 }}>
+              {drill}
+            </span>{" "}
+            <button
+              type="button"
+              className="btn secondary btn-sm"
+              onClick={() => {
+                setPanel(null)
+                setDrill(null)
+              }}>
+              Fermer
+            </button>
+          </h3>
+          {drillBusy ? (
+            <p className="muted">Chargement…</p>
+          ) : drillEvents.length === 0 ? (
+            <div className="empty">Aucun event pour cette décision</div>
+          ) : (
+            <div className="table-wrap">
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>Quand</th>
+                    <th>Label appareil</th>
+                    <th>Site</th>
+                    <th>Sévérité</th>
+                    <th>Détail</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {drillEvents.slice(0, 80).map((e) => (
+                    <tr key={e.id}>
+                      <td className="muted">
+                        {e.ts
+                          ? new Date(e.ts).toLocaleString("fr-FR")
+                          : "—"}
+                      </td>
+                      <td>
+                        <strong>{e.device_label || "—"}</strong>
+                      </td>
+                      <td className="muted" style={{ fontSize: 12 }}>
+                        {e.hostname || "—"}
+                      </td>
+                      <td>
+                        <span className={`badge ${e.highest_severity}`}>
+                          {e.highest_severity}
+                        </span>
+                      </td>
+                      <td className="muted" style={{ fontSize: 11 }}>
+                        {(e.types || []).join(", ")}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="card">
-        <h2>Décisions utilisateur (panneau contextuel)</h2>
+        <h2>Décisions utilisateur</h2>
         <p className="muted">
-          Cliquez une décision pour ouvrir le détail agents / sites — sans quitter
-          le tableau de bord.
+          Cliquez <strong>Risqué</strong> (ou une autre décision) pour afficher
+          les logs concernés juste au-dessus.
         </p>
         <div className="decision-grid">
           {(
             [
               ["mask_send", "Masquer & envoyer"],
-              ["send_anyway", "Envoyer quand même"],
+              ["send_anyway", "Envoyer quand même (Risqué)"],
               ["cancel", "Annuler"],
               ["enroll", "Enrôlement"],
               ["unenroll", "Désinscription"]
@@ -1209,68 +1411,214 @@ function SummaryView({
             </button>
           ))}
         </div>
-        {drill && (
-          <div className="dash-context-panel">
-            <h3 style={{ fontSize: 14, marginTop: 0 }}>
-              Détail « {decisionLabelFr(drill)} »{" "}
-              <span className="mono muted" style={{ fontSize: 11 }}>
-                {drill}
-              </span>{" "}
-              <button
-                type="button"
-                className="btn secondary btn-sm"
-                onClick={() => setDrill(null)}>
-                Fermer
-              </button>
-            </h3>
-            {drillBusy ? (
-              <p className="muted">Chargement…</p>
-            ) : drillEvents.length === 0 ? (
-              <div className="empty">Aucun event pour cette décision</div>
-            ) : (
-              <div className="table-wrap">
-                <table className="table">
-                  <thead>
-                    <tr>
-                      <th>Quand</th>
-                      <th>Label appareil</th>
-                      <th>Sévérité</th>
-                      <th>Acteur</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {drillEvents.slice(0, 50).map((e) => (
-                      <tr key={e.id}>
-                        <td className="muted">
-                          {e.ts
-                            ? new Date(e.ts).toLocaleString("fr-FR")
-                            : "—"}
-                        </td>
-                        <td>
-                          <strong>{e.device_label || "—"}</strong>
-                          {e.hostname && e.hostname !== "opsgate-agent" ? (
-                            <div className="muted" style={{ fontSize: 11 }}>
-                              site · {e.hostname}
-                            </div>
-                          ) : null}
-                        </td>
-                        <td>
-                          <span className={`badge ${e.highest_severity}`}>
-                            {e.highest_severity}
-                          </span>
-                        </td>
-                        <td className="muted" style={{ fontSize: 12 }}>
-                          {e.exit_actor || "—"}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-        )}
       </div>
+      </div>
+    </div>
+  )
+}
+
+function MonitoringSettingsView({
+  busy,
+  setBusy,
+  setError,
+  setInfo
+}: {
+  busy: boolean
+  setBusy: (b: boolean) => void
+  setError: (e: string | null) => void
+  setInfo: (i: string | null) => void
+}) {
+  const [onlineMin, setOnlineMin] = useState(15)
+  const [offlineMin, setOfflineMin] = useState(120)
+  const [schedOn, setSchedOn] = useState(false)
+  const [tz, setTz] = useState("Europe/Paris")
+  const [workStart, setWorkStart] = useState("08:00")
+  const [workEnd, setWorkEnd] = useState("17:00")
+  const [breakStart, setBreakStart] = useState("12:00")
+  const [breakEnd, setBreakEnd] = useState("13:00")
+  const [days, setDays] = useState<number[]>([1, 2, 3, 4, 5])
+  const [loaded, setLoaded] = useState(false)
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const r = await api.monitoring()
+        const m = r.monitoring
+        setOnlineMin(Math.round((m.onlineMs || 900000) / 60000))
+        setOfflineMin(Math.round((m.offlineLongMs || 7200000) / 60000))
+        setSchedOn(!!m.schedule?.enabled)
+        setTz(m.schedule?.timezone || "Europe/Paris")
+        setWorkStart(m.schedule?.workStart || "08:00")
+        setWorkEnd(m.schedule?.workEnd || "17:00")
+        setDays(m.schedule?.workDays || [1, 2, 3, 4, 5])
+        const br = m.schedule?.breaks?.[0]
+        if (br) {
+          setBreakStart(br.start)
+          setBreakEnd(br.end)
+        }
+        setLoaded(true)
+      } catch (e) {
+        setError(String(e))
+      }
+    })()
+  }, [setError])
+
+  const dayLabels: [number, string][] = [
+    [1, "Lun"],
+    [2, "Mar"],
+    [3, "Mer"],
+    [4, "Jeu"],
+    [5, "Ven"],
+    [6, "Sam"],
+    [7, "Dim"]
+  ]
+
+  if (!loaded) {
+    return <div className="card empty">Chargement des paramètres…</div>
+  }
+
+  return (
+    <div className="card">
+      <h2>Monitoring &amp; horaires de travail</h2>
+      <p className="muted">
+        Définissez après combien de temps sans sync un agent est « not connected
+        for long time », et le planning pour ne pas alerter la nuit / week-end
+        (PC éteints).
+      </p>
+      <div className="form-stack" style={{ maxWidth: 520 }}>
+        <label className="field-label">Online si last_seen &lt; (minutes)</label>
+        <input
+          className="input"
+          type="number"
+          min={2}
+          value={onlineMin}
+          onChange={(e) => setOnlineMin(Number(e.target.value) || 15)}
+        />
+        <label className="field-label">
+          Not connected long time si last_seen &gt; (minutes)
+        </label>
+        <input
+          className="input"
+          type="number"
+          min={5}
+          value={offlineMin}
+          onChange={(e) => setOfflineMin(Number(e.target.value) || 120)}
+        />
+        <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <input
+            type="checkbox"
+            checked={schedOn}
+            onChange={(e) => setSchedOn(e.target.checked)}
+          />
+          Activer le planning (alertes hors-ligne uniquement aux heures de
+          travail)
+        </label>
+        {schedOn && (
+          <>
+            <label className="field-label">Fuseau</label>
+            <input
+              className="input"
+              value={tz}
+              onChange={(e) => setTz(e.target.value)}
+              placeholder="Europe/Paris"
+            />
+            <label className="field-label">Jours travaillés</label>
+            <div className="row" style={{ flexWrap: "wrap", gap: 8 }}>
+              {dayLabels.map(([d, lab]) => (
+                <label
+                  key={d}
+                  style={{ display: "flex", gap: 4, alignItems: "center" }}>
+                  <input
+                    type="checkbox"
+                    checked={days.includes(d)}
+                    onChange={() =>
+                      setDays((prev) =>
+                        prev.includes(d)
+                          ? prev.filter((x) => x !== d)
+                          : [...prev, d].sort()
+                      )
+                    }
+                  />
+                  {lab}
+                </label>
+              ))}
+            </div>
+            <div className="row">
+              <div>
+                <label className="field-label">Début</label>
+                <input
+                  className="input"
+                  type="time"
+                  value={workStart}
+                  onChange={(e) => setWorkStart(e.target.value)}
+                />
+              </div>
+              <div>
+                <label className="field-label">Fin</label>
+                <input
+                  className="input"
+                  type="time"
+                  value={workEnd}
+                  onChange={(e) => setWorkEnd(e.target.value)}
+                />
+              </div>
+            </div>
+            <div className="row">
+              <div>
+                <label className="field-label">Pause début</label>
+                <input
+                  className="input"
+                  type="time"
+                  value={breakStart}
+                  onChange={(e) => setBreakStart(e.target.value)}
+                />
+              </div>
+              <div>
+                <label className="field-label">Pause fin</label>
+                <input
+                  className="input"
+                  type="time"
+                  value={breakEnd}
+                  onChange={(e) => setBreakEnd(e.target.value)}
+                />
+              </div>
+            </div>
+          </>
+        )}
+        <button
+          className="btn"
+          type="button"
+          disabled={busy}
+          onClick={async () => {
+            setBusy(true)
+            setError(null)
+            try {
+              await api.updateMonitoring({
+                onlineMs: onlineMin * 60 * 1000,
+                offlineLongMs: offlineMin * 60 * 1000,
+                schedule: {
+                  enabled: schedOn,
+                  timezone: tz,
+                  workDays: days,
+                  workStart,
+                  workEnd,
+                  breaks:
+                    breakStart && breakEnd
+                      ? [{ start: breakStart, end: breakEnd }]
+                      : []
+                }
+              })
+              setInfo(
+                "Paramètres monitoring enregistrés — le dashboard applique les seuils immédiatement."
+              )
+            } catch (e) {
+              setError(String(e))
+            } finally {
+              setBusy(false)
+            }
+          }}>
+          Enregistrer
+        </button>
       </div>
     </div>
   )
