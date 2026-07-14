@@ -344,6 +344,41 @@ export interface OpsGateStore {
     events: DetectionEventInput[]
   ): Promise<AppendEventsResult>
   listEvents(orgId: string, limit?: number): Promise<StoredEvent[]>
+  /** Purge events plus vieux que retentionDays (défini par l’entreprise) */
+  purgeOldEvents(
+    orgId: string,
+    retentionDays: number
+  ): Promise<{ deleted: number }>
+  /** Archives téléchargeables (semaine auto / manuel) */
+  listLogExports(orgId: string): Promise<import("./types").LogExportRecord[]>
+  getLogExport(
+    orgId: string,
+    exportId: string
+  ): Promise<import("./types").LogExportRecord | undefined>
+  saveLogExport(
+    orgId: string,
+    input: Omit<import("./types").LogExportRecord, "id" | "orgId" | "createdAt">
+  ): Promise<import("./types").LogExportRecord>
+
+  /** Recovery one-time codes (hashes only) */
+  listRecoveryCodes(
+    orgId: string
+  ): Promise<import("./types").RecoveryCode[]>
+  generateRecoveryCodes(
+    orgId: string,
+    count: number,
+    label?: string
+  ): Promise<{ codes: { id: string; code: string }[]; created: number }>
+  getActiveRecoveryCodeHashes(
+    orgId: string
+  ): Promise<Array<{ id: string; hash: string }>>
+  consumeRecoveryCode(
+    orgId: string,
+    codeId: string,
+    agentId: string
+  ): Promise<boolean>
+  revokeRecoveryPool(orgId: string): Promise<{ revoked: number }>
+
   summary(orgId: string): Promise<OrgSummary>
 
   appendAdminAudit(input: {

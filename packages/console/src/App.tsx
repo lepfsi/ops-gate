@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from "react"
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState
+} from "react"
 
 import {
   api,
@@ -18,6 +24,7 @@ import {
   type Summary,
   type UserRow
 } from "./api"
+import { AI_HOST_PRESETS, HostPicker } from "./HostPicker"
 
 type Tab =
   | "summary"
@@ -31,51 +38,6 @@ type Tab =
   | "settings"
 
 const IDLE_MS = 5 * 60 * 1000
-
-const AI_HOST_PRESETS = [
-  "chatgpt.com",
-  "chat.openai.com",
-  "claude.ai",
-  "gemini.google.com",
-  "bard.google.com",
-  "copilot.microsoft.com",
-  "perplexity.ai",
-  "chat.deepseek.com",
-  "aistudio.google.com",
-  "poe.com",
-  "you.com",
-  "chat.mistral.ai",
-  "lechat.mistral.ai",
-  "console.groq.com",
-  "grok.x.ai",
-  "grok.com",
-  "huggingface.co",
-  "phind.com",
-  "meta.ai",
-  "pi.ai",
-  "character.ai",
-  "notebooklm.google.com",
-  "openrouter.ai",
-  "together.ai",
-  "fireworks.ai",
-  "blackbox.ai",
-  "chat.lmsys.org",
-  "lmarena.ai",
-  "typingmind.com",
-  "chat.qwen.ai",
-  "writesonic.com",
-  "jasper.ai",
-  "copy.ai",
-  "notion.so",
-  "platform.openai.com",
-  "labs.google",
-  "deepai.org",
-  "sider.ai",
-  "monica.im",
-  "chatpdf.com",
-  "consensus.app",
-  "elicit.com"
-]
 
 const ALL_PERMS: AdminPermission[] = [
   "console_access",
@@ -93,11 +55,43 @@ export default function App() {
   const [dashSection, setDashSection] = useState<
     "overview" | "licenses" | "connectivity" | "activity" | "rules"
   >("overview")
+  /** Sous-liens dashboard dépliés / repliés */
+  const [dashNavOpen, setDashNavOpen] = useState(true)
   const [apiBase, setApiBaseState] = useState(getApiBase())
   const [health, setHealth] = useState<string>("…")
-  const [error, setError] = useState<string | null>(null)
-  const [info, setInfo] = useState<string | null>(null)
+  const [error, setErrorRaw] = useState<string | null>(null)
+  const [info, setInfoRaw] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const clearToast = useCallback(() => {
+    setErrorRaw(null)
+    setInfoRaw(null)
+    if (toastTimer.current) {
+      clearTimeout(toastTimer.current)
+      toastTimer.current = null
+    }
+  }, [])
+
+  const setError = useCallback(
+    (e: string | null) => {
+      setInfoRaw(null)
+      setErrorRaw(e)
+      if (toastTimer.current) clearTimeout(toastTimer.current)
+      if (e) {
+        toastTimer.current = setTimeout(() => setErrorRaw(null), 6000)
+      }
+    },
+    []
+  )
+  const setInfo = useCallback((i: string | null) => {
+    setErrorRaw(null)
+    setInfoRaw(i)
+    if (toastTimer.current) clearTimeout(toastTimer.current)
+    if (i) {
+      toastTimer.current = setTimeout(() => setInfoRaw(null), 4500)
+    }
+  }, [])
 
   const [summary, setSummary] = useState<Summary | null>(null)
   const [packs, setPacks] = useState<PackListItem[]>([])
@@ -127,6 +121,11 @@ export default function App() {
   }, [])
 
   useEffect(() => {
+    const t = localStorage.getItem("opsgate_theme")
+    if (t === "dark") document.documentElement.setAttribute("data-theme", "dark")
+  }, [])
+
+  useEffect(() => {
     void (async () => {
       if (!getToken()) {
         setAuthChecking(false)
@@ -148,6 +147,31 @@ export default function App() {
       }
     })()
   }, [])
+
+  /** Même hauteur de vue pour tous les modules (contenu haut ; header rarement utile) */
+  const scrollConsoleTop = useCallback(() => {
+    requestAnimationFrame(() => {
+      const el = document.querySelector(".shell-body") as HTMLElement | null
+      if (el) {
+        const y = el.getBoundingClientRect().top + window.scrollY - 6
+        window.scrollTo({ top: Math.max(0, y), behavior: "smooth" })
+      } else {
+        window.scrollTo({ top: 0, behavior: "smooth" })
+      }
+    })
+  }, [])
+
+  const goTab = useCallback(
+    (t: Tab) => {
+      setTab(t)
+      if (t === "summary") {
+        setDashNavOpen(true)
+        setDashSection("overview")
+      }
+      scrollConsoleTop()
+    },
+    [scrollConsoleTop]
+  )
 
   const loadTab = useCallback(async (t: Tab) => {
     if (!getToken()) return
@@ -196,6 +220,13 @@ export default function App() {
         const e = await api.events()
         const raw = (e.events || []) as unknown as Record<string, unknown>[]
         setEvents(raw.map((r) => normalizeEvent(r)))
+        // retention meta stockée pour EventsView via sessionStorage léger
+        if (e.retention) {
+          sessionStorage.setItem(
+            "opsgate_events_retention",
+            JSON.stringify(e.retention)
+          )
+        }
       } else if (t === "audit" || t === "moving") {
         const g = await api.groups()
         setGroups(g.groups || [])
@@ -350,7 +381,7 @@ export default function App() {
       <header className="topbar">
         <div className="brand">
           <div className="brand-mark" aria-hidden>
-            <img src="/brand/icon-48.png" alt="" />
+            <img src="/brand/icon-48.png" alt="" width={40} height={40} />
           </div>
           <div className="brand-text">
             <h1>OpsGate</h1>
@@ -410,28 +441,64 @@ export default function App() {
         ) : null}
         {primaryEmail ? <span>Install · {primaryEmail}</span> : null}
         <span className="badge-v1">V1 · 1.2</span>
-        <span>Control plane</span>
+        <button
+          type="button"
+          className="btn secondary btn-sm"
+          title="Basculer le thème"
+          onClick={() => {
+            const root = document.documentElement
+            const next =
+              root.getAttribute("data-theme") === "dark" ? "light" : "dark"
+            if (next === "dark") root.setAttribute("data-theme", "dark")
+            else root.removeAttribute("data-theme")
+            localStorage.setItem("opsgate_theme", next)
+          }}>
+          Thème
+        </button>
       </div>
 
-      {error && <p className="err flash err">{error}</p>}
-      {info && <p className="ok flash ok">{info}</p>}
+      {(error || info) && (
+        <div
+          className={`toast-stack ${error ? "toast-err" : "toast-ok"}`}
+          role="status">
+          <span>{error || info}</span>
+          <button
+            type="button"
+            className="toast-dismiss"
+            aria-label="Fermer"
+            onClick={clearToast}>
+            ×
+          </button>
+        </div>
+      )}
 
       <div className="shell-body">
       <nav className="shell-nav" aria-label="Navigation principale">
         <div className="shell-nav-brand">
-          <strong>OpsGate</strong>
-          <span>Console</span>
+          <img src="/brand/icon-48.png" alt="" width={32} height={32} />
+          <div className="shell-nav-brand-text">
+            <strong>OpsGate</strong>
+            <span>Console</span>
+          </div>
         </div>
         <button
           type="button"
-          className={`shell-nav-item ${tab === "summary" && dashSection === "overview" ? "active" : tab === "summary" ? "open" : ""}`}
+          className={`shell-nav-item ${tab === "summary" ? "active" : ""} ${
+            tab === "summary" && dashNavOpen ? "open" : ""
+          }`}
           onClick={() => {
-            setTab("summary")
-            setDashSection("overview")
+            if (tab === "summary") {
+              // Toggle sous-liens + même hauteur haute (contenu dashboard)
+              setDashNavOpen((o) => !o)
+              setDashSection("overview")
+              scrollConsoleTop()
+              return
+            }
+            goTab("summary")
           }}>
-          Tableau de bord
+          Tableau de bord {tab === "summary" ? (dashNavOpen ? "▾" : "▸") : ""}
         </button>
-        {tab === "summary" && (
+        {tab === "summary" && dashNavOpen && (
           <>
             {(
               [
@@ -449,23 +516,22 @@ export default function App() {
                 onClick={() => {
                   setTab("summary")
                   setDashSection(id)
-                  const elId =
-                    id === "overview"
-                      ? null
-                      : id === "connectivity" || id === "licenses"
-                        ? "dash-licenses"
-                        : id === "activity"
-                          ? "dash-activity"
-                          : "dash-rules"
-                  if (elId) {
-                    setTimeout(() => {
-                      document
-                        .getElementById(elId)
-                        ?.scrollIntoView({ behavior: "smooth", block: "start" })
-                    }, 50)
-                  } else {
-                    window.scrollTo({ top: 0, behavior: "smooth" })
+                  // Overview / licences / stale → haut du contenu (pas le bas de page)
+                  if (
+                    id === "overview" ||
+                    id === "licenses" ||
+                    id === "connectivity"
+                  ) {
+                    scrollConsoleTop()
+                    return
                   }
+                  const elId =
+                    id === "activity" ? "dash-activity" : "dash-rules"
+                  setTimeout(() => {
+                    document
+                      .getElementById(elId)
+                      ?.scrollIntoView({ behavior: "smooth", block: "start" })
+                  }, 30)
                 }}>
                 {label}
               </button>
@@ -475,51 +541,51 @@ export default function App() {
         <button
           type="button"
           className={`shell-nav-item ${tab === "policy" ? "active" : ""}`}
-          onClick={() => setTab("policy")}>
+          onClick={() => goTab("policy")}>
           Policy
         </button>
         <button
           type="button"
           className={`shell-nav-item ${tab === "people" ? "active" : ""}`}
-          onClick={() => setTab("people")}>
+          onClick={() => goTab("people")}>
           Admins &amp; groupes
         </button>
         <button
           type="button"
           className={`shell-nav-item ${tab === "packs" ? "active" : ""}`}
-          onClick={() => setTab("packs")}>
+          onClick={() => goTab("packs")}>
           Packs de règles
         </button>
         <button
           type="button"
           className={`shell-nav-item ${tab === "agents" || tab === "moving" ? "active" : ""}`}
-          onClick={() => setTab("agents")}>
+          onClick={() => goTab("agents")}>
           Agents
         </button>
         {(tab === "agents" || tab === "moving") && (
           <button
             type="button"
             className={`shell-nav-sub ${tab === "moving" ? "active" : ""}`}
-            onClick={() => setTab("moving")}>
+            onClick={() => goTab("moving")}>
             Règles auto
           </button>
         )}
         <button
           type="button"
           className={`shell-nav-item ${tab === "events" ? "active" : ""}`}
-          onClick={() => setTab("events")}>
+          onClick={() => goTab("events")}>
           Événements
         </button>
         <button
           type="button"
           className={`shell-nav-item ${tab === "audit" ? "active" : ""}`}
-          onClick={() => setTab("audit")}>
+          onClick={() => goTab("audit")}>
           Audit admin
         </button>
         <button
           type="button"
           className={`shell-nav-item ${tab === "settings" ? "active" : ""}`}
-          onClick={() => setTab("settings")}>
+          onClick={() => goTab("settings")}>
           Monitoring &amp; horaires
         </button>
       </nav>
@@ -545,6 +611,44 @@ export default function App() {
               setInfo(
                 `Force-sync epoch=${r.config_epoch} · ${r.agents} agent(s) · appliqué sous ~2 min`
               )
+            } catch (e) {
+              setError(String(e))
+            } finally {
+              setBusy(false)
+            }
+          }}
+          onForceSyncAgent={async (agentId, offlineMs) => {
+            setError(null)
+            setInfo(null)
+            // Offline = échec : l’agent ne poll pas, forcer l’epoch ne sert à rien maintenant
+            if (offlineMs > 15 * 60 * 1000) {
+              setError(
+                `Force sync échoué — agent hors-ligne depuis ${Math.round(offlineMs / 60000)} min. ` +
+                  `Il doit être online (dernier sync < 15 min) pour recevoir la config (poll ≤2 min).`
+              )
+              return
+            }
+            setBusy(true)
+            try {
+              const r = await api.forceSync()
+              setInfo(
+                `Force-sync OK · epoch=${r.config_epoch} · agent ${agentId.slice(0, 10)}… (prise d’effet ≤2 min)`
+              )
+            } catch (e) {
+              setError(String(e))
+            } finally {
+              setBusy(false)
+            }
+          }}
+          onRevokeAgent={async (id) => {
+            if (!confirm(`Révoquer l’agent ${id.slice(0, 12)}… ?`)) return
+            setBusy(true)
+            setError(null)
+            try {
+              await api.revokeAgent(id)
+              setInfo("Agent révoqué")
+              await loadTab("summary")
+              await loadTab("agents")
             } catch (e) {
               setError(String(e))
             } finally {
@@ -661,7 +765,13 @@ export default function App() {
           }}
         />
       )}
-      {tab === "events" && <EventsView events={events} />}
+      {tab === "events" && (
+        <EventsView
+          events={events}
+          setError={setError}
+          setInfo={setInfo}
+        />
+      )}
       {tab === "moving" && (
         <MovingRulesView
           groups={groups}
@@ -703,10 +813,6 @@ function ForcePasswordModal({ onDone }: { onDone: () => void }) {
     <div className="modal-overlay">
       <div className="card modal-card">
         <h2 style={{ marginTop: 0 }}>Changer le mot de passe</h2>
-        <p className="muted">
-          Première connexion ou après reset admin : définissez un nouveau mdp
-          (saisi deux fois pour confirmation).
-        </p>
         <label className="field-label">Mot de passe actuel</label>
         <input
           className="input"
@@ -765,6 +871,8 @@ function SummaryView({
   onRefresh,
   onForceSync,
   onMerged,
+  onForceSyncAgent,
+  onRevokeAgent,
   setError,
   setInfo,
   setBusy
@@ -777,6 +885,8 @@ function SummaryView({
   ) => void
   onRefresh: () => void
   onForceSync: () => void
+  onForceSyncAgent?: (agentId: string, offlineMs: number) => void
+  onRevokeAgent?: (agentId: string) => void
   onMerged?: () => void
   setError?: (e: string | null) => void
   setInfo?: (i: string | null) => void
@@ -821,20 +931,48 @@ function SummaryView({
     within_work_hours: true
   }
 
+  const scrollPanelTop = () => {
+    // Panneaux listes (stale, unlicensed, décisions…) collés en haut du contenu
+    setTimeout(() => {
+      const el = document.querySelector(".shell-body") as HTMLElement | null
+      if (el) {
+        const y = el.getBoundingClientRect().top + window.scrollY - 6
+        window.scrollTo({ top: Math.max(0, y), behavior: "smooth" })
+      } else {
+        window.scrollTo({ top: 0, behavior: "smooth" })
+      }
+      document
+        .getElementById("dash-panel")
+        ?.scrollIntoView({ behavior: "smooth", block: "start" })
+    }, 40)
+  }
+
+  const openPanel = (p: string) => {
+    setPanel(p)
+    scrollPanelTop()
+  }
+
   const openDecision = async (k: string) => {
     setDrill(k)
     setPanel("decision")
     setDashSection("overview")
+    scrollPanelTop()
     setDrillBusy(true)
+    setDrillEvents([])
     try {
       const r = await api.eventsByDecision(k)
-      setDrillEvents(
-        (r.events || []).map((e) =>
-          normalizeEvent(e as unknown as Record<string, unknown>)
-        )
+      const list = (r.events || []).map((e) =>
+        normalizeEvent(e as unknown as Record<string, unknown>)
       )
-    } catch {
+      setDrillEvents(list)
+      if (list.length === 0 && (summary.by_decision?.[k] || 0) > 0) {
+        setInfo?.(
+          `Compteur « ${k} » = ${summary.by_decision?.[k]} mais liste vide — recharger l’API ou vérifier org DEMO-OPSGATE.`
+        )
+      }
+    } catch (e) {
       setDrillEvents([])
+      setError?.(String(e))
     } finally {
       setDrillBusy(false)
     }
@@ -912,40 +1050,70 @@ function SummaryView({
               <th>Dernier sync</th>
               <th>Hors ligne</th>
               <th>Licence</th>
+              <th>Actions</th>
             </tr>
           </thead>
           <tbody>
-            {list.map((a) => (
-              <tr key={a.id}>
-                <td>
-                  <strong>{a.device_label || "—"}</strong>
-                  <div className="mono muted" style={{ fontSize: 10 }}>
-                    {a.id.slice(0, 16)}…
-                  </div>
-                </td>
-                <td className="muted">{a.host_name || "—"}</td>
-                <td className="muted" style={{ fontSize: 12 }}>
-                  {a.last_seen_at
-                    ? new Date(a.last_seen_at).toLocaleString("fr-FR")
-                    : "—"}
-                </td>
-                <td>{formatOffline(a.offline_for_ms)}</td>
-                <td>
-                  <span
-                    className={`badge ${
-                      a.license_status === "unlicensed"
-                        ? "high"
-                        : a.license_status === "grace"
-                          ? "medium"
-                          : "active"
-                    }`}>
-                    {a.license_status === "unlicensed"
-                      ? "UNLICENSED"
-                      : a.license_status}
-                  </span>
-                </td>
-              </tr>
-            ))}
+            {list.map((a) => {
+              const offline = a.offline_for_ms > 15 * 60 * 1000
+              return (
+                <tr key={a.id}>
+                  <td>
+                    <strong>{a.device_label || "—"}</strong>
+                    <div className="mono muted" style={{ fontSize: 10 }}>
+                      {a.id.slice(0, 16)}…
+                    </div>
+                  </td>
+                  <td className="muted">{a.host_name || "—"}</td>
+                  <td className="muted" style={{ fontSize: 12 }}>
+                    {a.last_seen_at
+                      ? new Date(a.last_seen_at).toLocaleString("fr-FR")
+                      : "—"}
+                  </td>
+                  <td>{formatOffline(a.offline_for_ms)}</td>
+                  <td>
+                    <span
+                      className={`badge ${
+                        a.license_status === "unlicensed"
+                          ? "high"
+                          : a.license_status === "grace"
+                            ? "medium"
+                            : "active"
+                      }`}>
+                      {a.license_status === "unlicensed"
+                        ? "UNLICENSED"
+                        : a.license_status}
+                    </span>
+                  </td>
+                  <td>
+                    <div className="btn-group agent-actions">
+                      <button
+                        type="button"
+                        className="btn secondary btn-sm"
+                        disabled={busy || offline}
+                        title={
+                          offline
+                            ? "Indisponible : agent hors-ligne — force sync échouera jusqu’au retour online"
+                            : "Forcer resync policy/pack maintenant"
+                        }
+                        onClick={() =>
+                          onForceSyncAgent?.(a.id, a.offline_for_ms)
+                        }>
+                        Force sync
+                      </button>
+                      <button
+                        type="button"
+                        className="btn danger btn-sm"
+                        disabled={busy}
+                        title="Révoquer l’enrollment de cet agent"
+                        onClick={() => onRevokeAgent?.(a.id)}>
+                        Révoquer
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              )
+            })}
           </tbody>
         </table>
       </div>
@@ -956,12 +1124,8 @@ function SummaryView({
     <>
       <div className="hero-card card">
         <div className="hero-copy">
-          <p className="hero-kicker">Monitoring &amp; rapports · Tableau de bord</p>
-          <h2>Statut de protection OpsGate</h2>
-          <p className="muted">
-            Widgets SOC (licences, hors-ligne, timeline) — charte DailyOps. Clic
-            sur un statut pour lister les appareils.
-          </p>
+          <p className="hero-kicker">Tableau de bord</p>
+          <h2>Statut de protection</h2>
         </div>
         <div className="row" style={{ gap: 8 }}>
           <button
@@ -981,7 +1145,179 @@ function SummaryView({
         </div>
       </div>
 
-      {/* Tout visible au clic dashboard ; sous-liens = scroll uniquement */}
+      {/* Panneaux contextuels EN HAUT (pas besoin de scroller en bas) */}
+      <div id="dash-panel">
+      {panel === "online" && (
+        <div className="card dash-context-panel">
+          <h3 style={{ marginTop: 0 }}>
+            Agents Online{" "}
+            <button type="button" className="btn secondary btn-sm" onClick={() => setPanel(null)}>
+              Fermer
+            </button>
+          </h3>
+          {renderAgentList(summary.agents_online, "Aucun agent online")}
+        </div>
+      )}
+      {panel === "stale" && (
+        <div className="card dash-context-panel">
+          <h3 style={{ marginTop: 0 }}>
+            Agents Stale{" "}
+            <button type="button" className="btn secondary btn-sm" onClick={() => setPanel(null)}>
+              Fermer
+            </button>
+          </h3>
+          {renderAgentList(summary.agents_stale, "Aucun agent stale")}
+        </div>
+      )}
+      {panel === "licensed" && (
+        <div className="card dash-context-panel">
+          <h3 style={{ marginTop: 0 }}>
+            Agents Licensed{" "}
+            <button type="button" className="btn secondary btn-sm" onClick={() => setPanel(null)}>
+              Fermer
+            </button>
+          </h3>
+          {renderAgentList(summary.agents_licensed, "Aucun agent licensed")}
+        </div>
+      )}
+      {panel === "unlicensed" && (
+        <div className="card dash-context-panel">
+          <h3 style={{ marginTop: 0 }}>
+            Agents UNLICENSED{" "}
+            <button type="button" className="btn secondary btn-sm" onClick={() => setPanel(null)}>
+              Fermer
+            </button>
+          </h3>
+          {renderAgentList(summary.agents_unlicensed, "Aucun agent unlicensed")}
+        </div>
+      )}
+      {panel === "grace" && (
+        <div className="card dash-context-panel">
+          <h3 style={{ marginTop: 0 }}>
+            Agents en grace{" "}
+            <button type="button" className="btn secondary btn-sm" onClick={() => setPanel(null)}>
+              Fermer
+            </button>
+          </h3>
+          {renderAgentList(summary.agents_grace, "Aucun agent en grace")}
+        </div>
+      )}
+      {panel === "offline" && (
+        <div className="card dash-context-panel">
+          <h3 style={{ marginTop: 0 }}>
+            Not connected long time{" "}
+            <button type="button" className="btn secondary btn-sm" onClick={() => setPanel(null)}>
+              Fermer
+            </button>
+          </h3>
+          {renderAgentList(
+            summary.agents_offline_long,
+            "Tous les agents ont synchronisé récemment"
+          )}
+        </div>
+      )}
+      {panel === "decision" && drill && (
+        <div className="card dash-context-panel">
+          <h3 style={{ fontSize: 14, marginTop: 0 }}>
+            Logs « {decisionLabelFr(drill)} »{" "}
+            <button
+              type="button"
+              className="btn secondary btn-sm"
+              onClick={() => {
+                setPanel(null)
+                setDrill(null)
+              }}>
+              Fermer
+            </button>
+          </h3>
+          {drillBusy ? (
+            <p className="muted">Chargement…</p>
+          ) : drillEvents.length === 0 ? (
+            <div className="empty">
+              Aucun event « {decisionLabelFr(drill)} »
+            </div>
+          ) : (
+            <div className="table-wrap">
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>Quand</th>
+                    <th>Label</th>
+                    <th>Décision</th>
+                    <th>Site</th>
+                    <th>Sévérité</th>
+                    <th>Détail</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {drillEvents.slice(0, 80).map((e) => (
+                    <tr key={e.id || `${e.ts}-${e.decision}-${e.hostname}`}>
+                      <td className="muted">
+                        {e.ts ? new Date(e.ts).toLocaleString("fr-FR") : "—"}
+                      </td>
+                      <td>
+                        <strong>{e.device_label || "—"}</strong>
+                      </td>
+                      <td>
+                        <strong>{decisionLabelFr(e.decision)}</strong>
+                        <div className="mono muted" style={{ fontSize: 10 }}>
+                          {e.decision}
+                          {e.source ? ` · ${e.source}` : ""}
+                        </div>
+                      </td>
+                      <td className="muted" style={{ fontSize: 12 }}>
+                        {e.hostname || "—"}
+                      </td>
+                      <td>
+                        <span className={`badge ${e.highest_severity || "low"}`}>
+                          {e.highest_severity || "low"}
+                        </span>
+                      </td>
+                      <td className="muted" style={{ fontSize: 11 }}>
+                        {(e.types || []).join(", ") || "—"}
+                        {e.file_names?.length
+                          ? ` · fichiers: ${e.file_names.slice(0, 2).join(", ")}`
+                          : ""}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+      {panel === "duplicates" && (
+        <div className="card dash-context-panel">
+          <h3 style={{ marginTop: 0 }}>
+            Doublons{" "}
+            <button type="button" className="btn secondary btn-sm" onClick={() => setPanel(null)}>
+              Fermer
+            </button>
+          </h3>
+          {dups.map((d) => (
+            <div key={d.fingerprint} style={{ marginBottom: 16 }}>
+              <div className="row" style={{ marginBottom: 8 }}>
+                <code className="mono" style={{ fontSize: 11 }}>
+                  {d.fingerprint.slice(0, 28)}…
+                </code>
+                <button
+                  type="button"
+                  className="btn btn-sm"
+                  disabled={busy}
+                  onClick={() => void mergeDupGroup(d.fingerprint, d.agents)}>
+                  Fusionner (garder le + récent)
+                </button>
+              </div>
+              {renderAgentList(d.agents, "")}
+            </div>
+          ))}
+        </div>
+      )}
+      </div>
+
+      {/* Charts licences / activité */}
+      <div id="dash-charts" />
       <div id="dash-licenses" className="dash-grid">
         <div className="card dash-widget">
           <div className="dash-widget-head">
@@ -1012,7 +1348,7 @@ function SummaryView({
                 <button
                   type="button"
                   className="dash-link-row"
-                  onClick={() => setPanel("licensed")}>
+                  onClick={() => openPanel("licensed")}>
                   <span className="dash-dot ok" /> Licensed{" "}
                   <strong>{lic.licensed}</strong>
                 </button>
@@ -1021,7 +1357,7 @@ function SummaryView({
                 <button
                   type="button"
                   className="dash-link-row"
-                  onClick={() => setPanel("grace")}>
+                  onClick={() => openPanel("grace")}>
                   <span className="dash-dot warn" /> Grace{" "}
                   <strong>{lic.grace}</strong>
                 </button>
@@ -1030,7 +1366,7 @@ function SummaryView({
                 <button
                   type="button"
                   className="dash-link-row crit-text"
-                  onClick={() => setPanel("unlicensed")}>
+                  onClick={() => openPanel("unlicensed")}>
                   <span className="dash-dot crit" />{" "}
                   <strong>UNLICENSED {lic.unlicensed}</strong>
                 </button>
@@ -1051,7 +1387,7 @@ function SummaryView({
               <button
                 type="button"
                 className="dash-link-row"
-                onClick={() => setPanel("online")}>
+                onClick={() => openPanel("online")}>
                 <span className="dash-dot ok" /> Online (&lt;{" "}
                 {Math.round(conn.online_ms / 60000)} min){" "}
                 <strong>{conn.online}</strong>
@@ -1061,7 +1397,7 @@ function SummaryView({
               <button
                 type="button"
                 className="dash-link-row"
-                onClick={() => setPanel("stale")}>
+                onClick={() => openPanel("stale")}>
                 <span className="dash-dot warn" /> Stale{" "}
                 <strong>{conn.stale}</strong>
               </button>
@@ -1070,7 +1406,7 @@ function SummaryView({
               <button
                 type="button"
                 className="dash-link-row crit-text"
-                onClick={() => setPanel("offline")}>
+                onClick={() => openPanel("offline")}>
                 <span className="dash-dot crit" /> Not connected long time{" "}
                 <strong>
                   {conn.schedule_active && !conn.within_work_hours
@@ -1222,9 +1558,7 @@ function SummaryView({
               ))}
             </ol>
           ) : (
-            <div className="empty" style={{ padding: 16 }}>
-              Aucun event encore — enrôlez un agent et testez un prompt.
-            </div>
+            <div className="empty">Aucun event</div>
           )}
         </div>
         {dups.length > 0 && (
@@ -1234,7 +1568,7 @@ function SummaryView({
               <button
                 type="button"
                 className="btn secondary btn-sm"
-                onClick={() => setPanel("duplicates")}>
+                onClick={() => openPanel("duplicates")}>
                 Voir
               </button>
             </div>
@@ -1246,208 +1580,8 @@ function SummaryView({
         )}
       </div>
 
-      {/* Panneaux contextuels cliquables */}
-      {panel === "online" && (
-        <div className="card dash-context-panel">
-          <h3 style={{ marginTop: 0 }}>
-            Agents Online{" "}
-            <button
-              type="button"
-              className="btn secondary btn-sm"
-              onClick={() => setPanel(null)}>
-              Fermer
-            </button>
-          </h3>
-          {renderAgentList(summary.agents_online, "Aucun agent online")}
-        </div>
-      )}
-      {panel === "stale" && (
-        <div className="card dash-context-panel">
-          <h3 style={{ marginTop: 0 }}>
-            Agents Stale{" "}
-            <button
-              type="button"
-              className="btn secondary btn-sm"
-              onClick={() => setPanel(null)}>
-              Fermer
-            </button>
-          </h3>
-          <p className="muted">
-            Dernier sync entre « online » et « not connected long time ».
-          </p>
-          {renderAgentList(summary.agents_stale, "Aucun agent stale")}
-        </div>
-      )}
-      {panel === "licensed" && (
-        <div className="card dash-context-panel">
-          <h3 style={{ marginTop: 0 }}>
-            Agents Licensed{" "}
-            <button
-              type="button"
-              className="btn secondary btn-sm"
-              onClick={() => setPanel(null)}>
-              Fermer
-            </button>
-          </h3>
-          {renderAgentList(summary.agents_licensed, "Aucun agent licensed")}
-        </div>
-      )}
-      {panel === "unlicensed" && (
-        <div className="card dash-context-panel">
-          <h3 style={{ marginTop: 0 }}>
-            Agents UNLICENSED{" "}
-            <button
-              type="button"
-              className="btn secondary btn-sm"
-              onClick={() => setPanel(null)}>
-              Fermer
-            </button>
-          </h3>
-          <p className="muted">
-            Pas de siège / pas de groupe — protection inactive après grace.
-          </p>
-          {renderAgentList(
-            summary.agents_unlicensed,
-            "Aucun agent unlicensed"
-          )}
-        </div>
-      )}
-      {panel === "grace" && (
-        <div className="card dash-context-panel">
-          <h3 style={{ marginTop: 0 }}>
-            Agents en grace (5 min){" "}
-            <button
-              type="button"
-              className="btn secondary btn-sm"
-              onClick={() => setPanel(null)}>
-              Fermer
-            </button>
-          </h3>
-          {renderAgentList(summary.agents_grace, "Aucun agent en grace")}
-        </div>
-      )}
-      {panel === "offline" && (
-        <div className="card dash-context-panel">
-          <h3 style={{ marginTop: 0 }}>
-            Not connected for long time (&gt;{" "}
-            {Math.round(conn.offline_long_ms / 60000)} min){" "}
-            <button
-              type="button"
-              className="btn secondary btn-sm"
-              onClick={() => setPanel(null)}>
-              Fermer
-            </button>
-          </h3>
-          <p className="muted">
-            Dernier sync trop ancien. Révoquez si obsolète. Les alertes
-            « actives » respectent le planning (hors 17h–8h si schedule ON).
-          </p>
-          {renderAgentList(
-            summary.agents_offline_long,
-            "Tous les agents ont synchronisé récemment"
-          )}
-        </div>
-      )}
-      {panel === "duplicates" && (
-        <div className="card dash-context-panel">
-          <h3 style={{ marginTop: 0 }}>
-            Doublons (même fingerprint){" "}
-            <button
-              type="button"
-              className="btn secondary btn-sm"
-              onClick={() => setPanel(null)}>
-              Fermer
-            </button>
-          </h3>
-          {dups.map((d) => (
-            <div key={d.fingerprint} style={{ marginBottom: 16 }}>
-              <div className="row" style={{ marginBottom: 8 }}>
-                <code className="mono" style={{ fontSize: 11 }}>
-                  {d.fingerprint.slice(0, 28)}…
-                </code>
-                <button
-                  type="button"
-                  className="btn btn-sm"
-                  disabled={busy}
-                  onClick={() => void mergeDupGroup(d.fingerprint, d.agents)}>
-                  Fusionner (garder le + récent)
-                </button>
-              </div>
-              {renderAgentList(d.agents, "")}
-            </div>
-          ))}
-        </div>
-      )}
-      {panel === "decision" && drill && (
-        <div className="card dash-context-panel">
-          <h3 style={{ fontSize: 14, marginTop: 0 }}>
-            Logs « {decisionLabelFr(drill)} »{" "}
-            <span className="mono muted" style={{ fontSize: 11 }}>
-              {drill}
-            </span>{" "}
-            <button
-              type="button"
-              className="btn secondary btn-sm"
-              onClick={() => {
-                setPanel(null)
-                setDrill(null)
-              }}>
-              Fermer
-            </button>
-          </h3>
-          {drillBusy ? (
-            <p className="muted">Chargement…</p>
-          ) : drillEvents.length === 0 ? (
-            <div className="empty">Aucun event pour cette décision</div>
-          ) : (
-            <div className="table-wrap">
-              <table className="table">
-                <thead>
-                  <tr>
-                    <th>Quand</th>
-                    <th>Label appareil</th>
-                    <th>Site</th>
-                    <th>Sévérité</th>
-                    <th>Détail</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {drillEvents.slice(0, 80).map((e) => (
-                    <tr key={e.id}>
-                      <td className="muted">
-                        {e.ts
-                          ? new Date(e.ts).toLocaleString("fr-FR")
-                          : "—"}
-                      </td>
-                      <td>
-                        <strong>{e.device_label || "—"}</strong>
-                      </td>
-                      <td className="muted" style={{ fontSize: 12 }}>
-                        {e.hostname || "—"}
-                      </td>
-                      <td>
-                        <span className={`badge ${e.highest_severity}`}>
-                          {e.highest_severity}
-                        </span>
-                      </td>
-                      <td className="muted" style={{ fontSize: 11 }}>
-                        {(e.types || []).join(", ")}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-      )}
-
       <div className="card">
         <h2>Décisions utilisateur</h2>
-        <p className="muted">
-          Cliquez <strong>Risqué</strong> (ou une autre décision) pour afficher
-          les logs concernés juste au-dessus.
-        </p>
         <div className="decision-grid">
           {(
             [
@@ -1494,6 +1628,8 @@ function MonitoringSettingsView({
   const [breakStart, setBreakStart] = useState("12:00")
   const [breakEnd, setBreakEnd] = useState("13:00")
   const [days, setDays] = useState<number[]>([1, 2, 3, 4, 5])
+  const [retentionDays, setRetentionDays] = useState(90)
+  const [weeklyExport, setWeeklyExport] = useState(true)
   const [loaded, setLoaded] = useState(false)
 
   useEffect(() => {
@@ -1508,6 +1644,8 @@ function MonitoringSettingsView({
         setWorkStart(m.schedule?.workStart || "08:00")
         setWorkEnd(m.schedule?.workEnd || "17:00")
         setDays(m.schedule?.workDays || [1, 2, 3, 4, 5])
+        setRetentionDays(m.logRetentionDays ?? 90)
+        setWeeklyExport(m.weeklyExportEnabled !== false)
         const br = m.schedule?.breaks?.[0]
         if (br) {
           setBreakStart(br.start)
@@ -1536,14 +1674,9 @@ function MonitoringSettingsView({
 
   return (
     <div className="card">
-      <h2>Monitoring &amp; horaires de travail</h2>
-      <p className="muted">
-        Définissez après combien de temps sans sync un agent est « not connected
-        for long time », et le planning pour ne pas alerter la nuit / week-end
-        (PC éteints).
-      </p>
+      <h2>Monitoring &amp; horaires</h2>
       <div className="form-stack" style={{ maxWidth: 520 }}>
-        <label className="field-label">Online si last_seen &lt; (minutes)</label>
+        <label className="field-label">Online (minutes)</label>
         <input
           className="input"
           type="number"
@@ -1551,9 +1684,7 @@ function MonitoringSettingsView({
           value={onlineMin}
           onChange={(e) => setOnlineMin(Number(e.target.value) || 15)}
         />
-        <label className="field-label">
-          Not connected long time si last_seen &gt; (minutes)
-        </label>
+        <label className="field-label">Not connected long time (minutes)</label>
         <input
           className="input"
           type="number"
@@ -1561,14 +1692,30 @@ function MonitoringSettingsView({
           value={offlineMin}
           onChange={(e) => setOfflineMin(Number(e.target.value) || 120)}
         />
+        <label className="field-label">Rétention logs (jours)</label>
+        <input
+          className="input"
+          type="number"
+          min={7}
+          max={3650}
+          value={retentionDays}
+          onChange={(e) => setRetentionDays(Number(e.target.value) || 90)}
+        />
+        <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <input
+            type="checkbox"
+            checked={weeklyExport}
+            onChange={(e) => setWeeklyExport(e.target.checked)}
+          />
+          Archive auto fin de semaine
+        </label>
         <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
           <input
             type="checkbox"
             checked={schedOn}
             onChange={(e) => setSchedOn(e.target.checked)}
           />
-          Activer le planning (alertes hors-ligne uniquement aux heures de
-          travail)
+          Planning heures de travail
         </label>
         {schedOn && (
           <>
@@ -1579,26 +1726,34 @@ function MonitoringSettingsView({
               onChange={(e) => setTz(e.target.value)}>
               {(
                 [
-                  ["Europe/Paris", "Europe/Paris (France)"],
-                  ["Europe/Brussels", "Europe/Brussels (Belgique)"],
-                  ["Europe/Zurich", "Europe/Zurich (Suisse)"],
-                  ["Europe/London", "Europe/London (UK)"],
-                  ["Europe/Berlin", "Europe/Berlin (Allemagne)"],
-                  ["Europe/Madrid", "Europe/Madrid (Espagne)"],
-                  ["Africa/Casablanca", "Africa/Casablanca (Maroc)"],
-                  ["Africa/Abidjan", "Africa/Abidjan (UTC)"],
-                  ["Africa/Lagos", "Africa/Lagos (Nigeria)"],
-                  ["America/New_York", "America/New_York (US Est)"],
-                  ["America/Chicago", "America/Chicago (US Centre)"],
-                  ["America/Los_Angeles", "America/Los_Angeles (US Ouest)"],
-                  ["America/Toronto", "America/Toronto (Canada)"],
-                  ["America/Montreal", "America/Toronto (alias)"],
-                  ["Asia/Dubai", "Asia/Dubai"],
-                  ["Asia/Tokyo", "Asia/Tokyo"],
-                  ["UTC", "UTC"]
+                  ["Europe/Paris", "GMT+1/+2 · Europe/Paris (France)"],
+                  ["Europe/Brussels", "GMT+1/+2 · Europe/Brussels (Belgique)"],
+                  ["Europe/Zurich", "GMT+1/+2 · Europe/Zurich (Suisse)"],
+                  ["Europe/Berlin", "GMT+1/+2 · Europe/Berlin (Allemagne)"],
+                  ["Europe/Madrid", "GMT+1/+2 · Europe/Madrid (Espagne)"],
+                  ["Europe/London", "GMT+0/+1 · Europe/London (UK)"],
+                  ["Africa/Douala", "GMT+1 · Africa/Douala (Cameroun)"],
+                  ["Africa/Lagos", "GMT+1 · Africa/Lagos (Nigeria / WAT)"],
+                  ["Africa/Casablanca", "GMT+0/+1 · Africa/Casablanca (Maroc)"],
+                  ["Africa/Abidjan", "GMT+0 · Africa/Abidjan (UTC fixe)"],
+                  ["Africa/Nairobi", "GMT+3 · Africa/Nairobi (Kenya / EAT)"],
+                  [
+                    "Africa/Antananarivo",
+                    "GMT+3 · Africa/Antananarivo (Madagascar)"
+                  ],
+                  ["America/New_York", "GMT−5/−4 · America/New_York (US Est)"],
+                  ["America/Chicago", "GMT−6/−5 · America/Chicago (US Centre)"],
+                  [
+                    "America/Los_Angeles",
+                    "GMT−8/−7 · America/Los_Angeles (US Ouest)"
+                  ],
+                  ["America/Toronto", "GMT−5/−4 · America/Toronto (Canada)"],
+                  ["Asia/Dubai", "GMT+4 · Asia/Dubai"],
+                  ["Asia/Tokyo", "GMT+9 · Asia/Tokyo"],
+                  ["UTC", "GMT+0 · UTC"]
                 ] as const
               ).map(([v, lab]) => (
-                <option key={v} value={v === "America/Montreal" ? "America/Toronto" : v}>
+                <option key={v} value={v}>
                   {lab}
                 </option>
               ))}
@@ -1682,6 +1837,8 @@ function MonitoringSettingsView({
                     await api.updateMonitoring({
                       onlineMs: onlineMin * 60 * 1000,
                       offlineLongMs: offlineMin * 60 * 1000,
+                      logRetentionDays: retentionDays,
+                      weeklyExportEnabled: weeklyExport,
                       schedule: {
                         enabled: schedOn,
                         timezone: tz,
@@ -1695,7 +1852,7 @@ function MonitoringSettingsView({
                       }
                     })
                     setInfo(
-                      "Paramètres monitoring enregistrés — seuils & planning appliqués."
+                      "Paramètres monitoring enregistrés — seuils, rétention logs & planning."
                     )
                   } catch (e) {
                     setError(String(e))
@@ -1720,6 +1877,8 @@ function MonitoringSettingsView({
                 await api.updateMonitoring({
                   onlineMs: onlineMin * 60 * 1000,
                   offlineLongMs: offlineMin * 60 * 1000,
+                  logRetentionDays: retentionDays,
+                  weeklyExportEnabled: weeklyExport,
                   schedule: {
                     enabled: false,
                     timezone: tz,
@@ -1729,7 +1888,9 @@ function MonitoringSettingsView({
                     breaks: []
                   }
                 })
-                setInfo("Seuils enregistrés (planning désactivé).")
+                setInfo(
+                  "Seuils + rétention logs enregistrés (planning désactivé)."
+                )
               } catch (e) {
                 setError(String(e))
               } finally {
@@ -1770,43 +1931,49 @@ function LoginScreen({
   const [otp, setOtp] = useState("")
   const [otpNew, setOtpNew] = useState("")
   const [devOtp, setDevOtp] = useState<string | null>(null)
+  const [advanced, setAdvanced] = useState(false)
 
   return (
     <div className="login-shell">
       <div className="card login-card">
         <div className="login-brand">
           <div className="brand-mark" aria-hidden>
-            <img src="/brand/icon-48.png" alt="" />
+            <img
+              src="/brand/icon-128.png"
+              alt="OpsGate"
+              width={64}
+              height={64}
+            />
           </div>
           <div>
             <h1>OpsGate</h1>
-            <p>Console admin · V1</p>
+            <p>Console</p>
           </div>
         </div>
-        <p className="muted" style={{ marginTop: 0 }}>
-          Démo locale : <code>admin@demo.local</code> / <code>0000</code>
-          <br />
-          <span className="muted" style={{ fontSize: 12 }}>
-            Changez le mot de passe à la première connexion (pilote externe).
-          </span>
-        </p>
-        <label className="field-label">API</label>
-        <div className="row">
-          <input
-            className="input"
-            value={apiBase}
-            onChange={(e) => setApiBaseState(e.target.value)}
-          />
-          <button className="btn secondary" type="button" onClick={onSaveApi}>
-            OK
-          </button>
-        </div>
-        <p className="muted">
+        <p className="login-health muted">
           <span
             className={`status-dot ${health.startsWith("API OK") ? "" : "off"}`}
           />
-          {health}
+          {health.startsWith("API OK") ? "API connectée" : health}
         </p>
+        {advanced && (
+          <>
+            <label className="field-label">URL API</label>
+            <div className="row">
+              <input
+                className="input"
+                value={apiBase}
+                onChange={(e) => setApiBaseState(e.target.value)}
+              />
+              <button
+                className="btn secondary"
+                type="button"
+                onClick={onSaveApi}>
+                OK
+              </button>
+            </div>
+          </>
+        )}
         <label className="field-label">Email</label>
         <input
           className="input"
@@ -1843,7 +2010,7 @@ function LoginScreen({
               if (msg.includes("session_already_active")) {
                 setCanForce(true)
                 setErr(
-                  "Session déjà active sur ce compte (autre onglet / navigateur, ou session fantôme). Cliquez « Forcer la déconnexion » pour prendre la main, ou attendez ~10 min d’inactivité serveur."
+                  "Session déjà active. Utilisez « Forcer la déconnexion »."
                 )
               } else {
                 setErr(msg)
@@ -1854,6 +2021,13 @@ function LoginScreen({
           }}>
           Se connecter
         </button>
+        <button
+          type="button"
+          className="login-advanced-toggle"
+          onClick={() => setAdvanced((v) => !v)}>
+          {advanced ? "Masquer les options avancées" : "Options avancées"}
+        </button>
+        <p className="login-footer-meta">OpsGate · V1</p>
         {canForce && (
           <button
             className="btn secondary"
@@ -1897,7 +2071,7 @@ function LoginScreen({
               setErr(null)
               setInfo(null)
             }}>
-            Mot de passe oublié ? Réinitialiser mdp
+            Mot de passe oublié ?
           </button>
         </p>
         {err && <p className="err">{err}</p>}
@@ -1918,7 +2092,7 @@ function LoginScreen({
           <div className="card" style={{ maxWidth: 400, width: "100%" }}>
             <h2 style={{ marginTop: 0 }}>
               {resetStep === "email"
-                ? "Réinitialiser le mdp"
+                ? "Récupération du mot de passe"
                 : "Saisir l’OTP"}
             </h2>
             {resetStep === "email" ? (
@@ -2060,10 +2234,6 @@ function PolicyView({
   const [msgForceTitle, setMsgForceTitle] = useState("")
   const [msgForceBody, setMsgForceBody] = useState("")
   const [showMsgEditor, setShowMsgEditor] = useState(false)
-  const [otp, setOtp] = useState("")
-  const [otpNewPwd, setOtpNewPwd] = useState("")
-  const [devOtp, setDevOtp] = useState<string | null>(null)
-  const [recoveryHint, setRecoveryHint] = useState<string | null>(null)
 
   // New profile form
   const [profName, setProfName] = useState("")
@@ -2157,43 +2327,130 @@ function PolicyView({
 
   return (
     <>
+      {/* 1. Profils département d’abord */}
+      <div className="card">
+        <h2>Policies par département</h2>
+        {profiles.length === 0 ? (
+          <div className="empty">Aucun profil</div>
+        ) : (
+          <div className="table-wrap">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Nom</th>
+                  <th>Dépt</th>
+                  <th>Action</th>
+                  <th>Hosts</th>
+                  <th>Upload</th>
+                  <th>Exit mdp</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {profiles.map((p) => (
+                  <tr key={p.id}>
+                    <td>
+                      <strong>{p.name}</strong>
+                    </td>
+                    <td>{p.department || "—"}</td>
+                    <td className="mono" style={{ fontSize: 11 }}>
+                      {p.defaultAction}
+                    </td>
+                    <td>
+                      <span className="host-count-pill">
+                        {(p.enabledHosts || []).length} sites
+                      </span>
+                    </td>
+                    <td>{p.scanUploads ? "oui" : "non"}</td>
+                    <td>{p.protectUnenroll ? "🔒" : "libre"}</td>
+                    <td>
+                      <button
+                        className="btn secondary btn-sm"
+                        type="button"
+                        disabled={busy}
+                        onClick={() => {
+                          setEditId(p.id)
+                          setProfName(p.name)
+                          setProfDept(p.department || "")
+                          setProfHosts((p.enabledHosts || []).join("\n"))
+                          setProfScan(!!p.scanUploads)
+                          setProfEvents(!!p.eventReporting)
+                          setProfProtect(!!p.protectUnenroll)
+                          setProfAction(p.defaultAction || "mask_recommend")
+                          setProfGroups([...(p.assignedGroupIds || [])])
+                          setProfMsgNotice(p.userMessages?.adminNotice || "")
+                          setProfMsgAlertTitle(p.userMessages?.alertTitle || "")
+                          setProfMsgAlertBody(p.userMessages?.alertBody || "")
+                          setProfMsgBlockTitle(p.userMessages?.blockTitle || "")
+                          setProfMsgBlockBody(p.userMessages?.blockBody || "")
+                          setProfMsgForceTitle(
+                            p.userMessages?.maskForceTitle || ""
+                          )
+                          setProfMsgForceBody(
+                            p.userMessages?.maskForceBody || ""
+                          )
+                          setProfMsgAlertTitleFile(
+                            p.userMessages?.alertTitleFile || ""
+                          )
+                          setProfMsgAlertBodyFile(
+                            p.userMessages?.alertBodyFile || ""
+                          )
+                          setShowProfMsgs(true)
+                          setTimeout(() => {
+                            document
+                              .getElementById("policy-profile-form")
+                              ?.scrollIntoView({
+                                behavior: "smooth",
+                                block: "start"
+                              })
+                          }, 50)
+                        }}>
+                        Modifier
+                      </button>{" "}
+                      <button
+                        className="btn danger btn-sm"
+                        type="button"
+                        disabled={busy}
+                        onClick={async () => {
+                          if (!confirm(`Supprimer le profil ${p.name} ?`)) return
+                          setBusy(true)
+                          try {
+                            await api.deleteProfile(p.id)
+                            setInfo(`Profil ${p.name} supprimé`)
+                            onReload()
+                          } catch (e) {
+                            setError(String(e))
+                          } finally {
+                            setBusy(false)
+                          }
+                        }}>
+                        Suppr.
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* 2. Policy org par défaut */}
       <div className="card">
         <h2>Policy org par défaut</h2>
-        <p className="muted">
-          Version {policy.version} · epoch {policy.configEpoch ?? "—"} · pack{" "}
-          {policy.rulesPackVersion}. Appliquée aux agents <strong>sans</strong>{" "}
-          profil département.
+        <p className="muted" style={{ fontSize: 12 }}>
+          v{policy.version} · epoch {policy.configEpoch ?? "—"} · pack{" "}
+          {policy.rulesPackVersion}
         </p>
 
-        <label className="field-label">Sites IA filtrés (1 host / ligne)</label>
-        <textarea
-          className="input"
-          rows={5}
-          value={hosts}
-          onChange={(e) => setHosts(e.target.value)}
-          style={{ width: "100%", fontFamily: "ui-monospace, monospace" }}
+        <label className="field-label">Sites IA</label>
+        <HostPicker
+          value={hosts
+            .split("\n")
+            .map((l) => l.trim())
+            .filter(Boolean)}
+          onChange={(list) => setHosts(list.join("\n"))}
         />
-        <div className="row" style={{ marginTop: 8, flexWrap: "wrap" }}>
-          {AI_HOST_PRESETS.map((h) => (
-            <button
-              key={h}
-              type="button"
-              className="btn secondary"
-              style={{ fontSize: 12, padding: "4px 8px" }}
-              onClick={() => {
-                const set = new Set(
-                  hosts
-                    .split("\n")
-                    .map((x) => x.trim())
-                    .filter(Boolean)
-                )
-                set.add(h)
-                setHosts([...set].join("\n"))
-              }}>
-              + {h}
-            </button>
-          ))}
-        </div>
 
         <div className="row" style={{ marginTop: 14, gap: 20, flexWrap: "wrap" }}>
           <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
@@ -2221,42 +2478,25 @@ function PolicyView({
             Protéger désenrôlement par mdp admin
           </label>
         </div>
-        <p className="muted" style={{ marginTop: 8 }}>
-          La protection mdp n’est effective que si au moins un admin est créé
-          (onglet Admins &amp; Groups). Sinon sortie libre.
-        </p>
-
         <label className="field-label" style={{ marginTop: 12 }}>
-          Action par défaut (mode de blocage)
+          Action par défaut
         </label>
         <select
           className="input"
           value={defaultAction}
           onChange={(e) => setDefaultAction(e.target.value)}>
-          <option value="warn">warn — alerte, choix libre</option>
-          <option value="mask_recommend">
-            mask_recommend — recommande le masquage (défaut)
-          </option>
-          <option value="mask_force">
-            mask_force — masquage obligatoire (pas d’envoi tel quel)
-          </option>
-          <option value="block">
-            block — envoi interdit (message admin explicite)
-          </option>
+          <option value="warn">warn</option>
+          <option value="mask_recommend">mask_recommend</option>
+          <option value="mask_force">mask_force</option>
+          <option value="block">block</option>
         </select>
-        <p className="muted" style={{ fontSize: 12, marginTop: 6 }}>
-          Les messages doivent expliquer que c’est une <strong>décision admin</strong>,
-          pas une erreur. Personnalisez-les ci-dessous ou laissez les défauts OpsGate.
-        </p>
 
         <button
           type="button"
           className="btn secondary btn-sm"
           style={{ marginTop: 10 }}
           onClick={() => setShowMsgEditor((v) => !v)}>
-          {showMsgEditor
-            ? "Masquer les messages utilisateur"
-            : "Personnaliser les messages utilisateur (banner)"}
+          {showMsgEditor ? "Masquer messages" : "Messages utilisateur"}
         </button>
         {showMsgEditor && (
           <div
@@ -2269,11 +2509,7 @@ function PolicyView({
               borderRadius: 10,
               border: "1px solid var(--line)"
             }}>
-            <p className="muted" style={{ marginTop: 0, fontSize: 12 }}>
-              Champs vides = message par défaut OpsGate. Sync aux agents au prochain
-              force-sync / poll.
-            </p>
-            <label className="field-label">Mention « pas une erreur » (toujours visible)</label>
+            <label className="field-label">Notice admin</label>
             <textarea
               className="input"
               rows={2}
@@ -2356,110 +2592,13 @@ function PolicyView({
         </div>
       </div>
 
-      <div className="card">
-        <h2>Profils département (policy1, policy2…)</h2>
-        <p className="muted">
-          Ex. Finance : pas d’upload, hosts restreints. Assigner ensuite dans
-          l’onglet Agents.
-        </p>
-        {profiles.length === 0 ? (
-          <div className="empty">Aucun profil</div>
-        ) : (
-          <div className="table-wrap"><table className="table">
-            <thead>
-              <tr>
-                <th>Nom</th>
-                <th>Dépt</th>
-                <th>Hosts</th>
-                <th>Upload</th>
-                <th>Mdp exit</th>
-                <th>Groupes / users</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {profiles.map((p) => (
-                <tr key={p.id}>
-                  <td>
-                    <strong>{p.name}</strong>
-                    <div className="mono muted" style={{ fontSize: 11 }}>
-                      {p.id}
-                    </div>
-                  </td>
-                  <td>{p.department || "—"}</td>
-                  <td className="muted" style={{ fontSize: 12 }}>
-                    {(p.enabledHosts || []).join(", ")}
-                  </td>
-                  <td>{p.scanUploads ? "oui" : "non"}</td>
-                  <td>{p.protectUnenroll ? "🔒 oui" : "libre"}</td>
-                  <td className="muted" style={{ fontSize: 11 }}>
-                    Groupes: {(p.assignedGroupIds || []).length}
-                  </td>
-                  <td>
-                    <button
-                      className="btn secondary"
-                      type="button"
-                      disabled={busy}
-                      onClick={() => {
-                        setEditId(p.id)
-                        setProfName(p.name)
-                        setProfDept(p.department || "")
-                        setProfHosts((p.enabledHosts || []).join("\n"))
-                        setProfScan(!!p.scanUploads)
-                        setProfEvents(!!p.eventReporting)
-                        setProfProtect(!!p.protectUnenroll)
-                        setProfAction(p.defaultAction || "mask_recommend")
-                        setProfGroups([...(p.assignedGroupIds || [])])
-                        setProfMsgNotice(p.userMessages?.adminNotice || "")
-                        setProfMsgAlertTitle(p.userMessages?.alertTitle || "")
-                        setProfMsgAlertBody(p.userMessages?.alertBody || "")
-                        setProfMsgBlockTitle(p.userMessages?.blockTitle || "")
-                        setProfMsgBlockBody(p.userMessages?.blockBody || "")
-                        setProfMsgForceTitle(p.userMessages?.maskForceTitle || "")
-                        setProfMsgForceBody(p.userMessages?.maskForceBody || "")
-                        setProfMsgAlertTitleFile(
-                          p.userMessages?.alertTitleFile || ""
-                        )
-                        setProfMsgAlertBodyFile(
-                          p.userMessages?.alertBodyFile || ""
-                        )
-                        setShowProfMsgs(true)
-                      }}>
-                      Modifier
-                    </button>{" "}
-                    <button
-                      className="btn danger"
-                      type="button"
-                      disabled={busy}
-                      onClick={async () => {
-                        if (!confirm(`Supprimer le profil ${p.name} ?`)) return
-                        setBusy(true)
-                        try {
-                          await api.deleteProfile(p.id)
-                          setInfo(`Profil ${p.name} supprimé`)
-                          onReload()
-                        } catch (e) {
-                          setError(String(e))
-                        } finally {
-                          setBusy(false)
-                        }
-                      }}>
-                      Suppr.
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table></div>
-        )}
-
-        <h3 style={{ fontSize: 14, marginTop: 20 }}>
-          {editId ? "Modifier le profil" : "Nouveau profil"}
-        </h3>
+      {/* 3. Créer / modifier profil */}
+      <div className="card" id="policy-profile-form">
+        <h2>{editId ? "Modifier le profil" : "Nouveau profil"}</h2>
         <div className="row" style={{ marginBottom: 8 }}>
           <input
             className="input"
-            placeholder="Nom (ex: Finance)"
+            placeholder="Nom"
             value={profName}
             onChange={(e) => setProfName(e.target.value)}
           />
@@ -2470,7 +2609,7 @@ function PolicyView({
             onChange={(e) => setProfDept(e.target.value)}
           />
         </div>
-        <div className="field-label">Sites IA couverts</div>
+        <div className="field-label">Sites IA</div>
         <HostPicker
           value={profHosts
             .split("\n")
@@ -2707,104 +2846,6 @@ function PolicyView({
           )}
         </div>
       </div>
-
-      <div className="card">
-        <h2>OTP Administrator principal</h2>
-        <p className="muted">
-          Le reset OTP se fait aussi sur l&apos;écran de login (email install).
-          Ici : renvoyer un OTP si vous êtes déjà connecté (dev).
-        </p>
-        <button
-          className="btn secondary"
-          type="button"
-          disabled={busy}
-          onClick={async () => {
-            setBusy(true)
-            try {
-              const r = await api.requestPrincipalOtp()
-              setDevOtp(r.dev_otp || null)
-              setInfo(r.message)
-            } catch (e) {
-              setError(String(e))
-            } finally {
-              setBusy(false)
-            }
-          }}>
-          Demander OTP principal
-        </button>
-        {devOtp && (
-          <p className="ok">
-            OTP dev : <code>{devOtp}</code>
-          </p>
-        )}
-        <div className="row" style={{ marginTop: 10 }}>
-          <input
-            className="input"
-            placeholder="OTP"
-            value={otp}
-            onChange={(e) => setOtp(e.target.value)}
-          />
-          <input
-            className="input"
-            type="password"
-            placeholder="Nouveau mdp ≥6"
-            value={otpNewPwd}
-            onChange={(e) => setOtpNewPwd(e.target.value)}
-          />
-          <button
-            className="btn"
-            type="button"
-            disabled={busy || !otp || otpNewPwd.length < 6}
-            onClick={async () => {
-              setBusy(true)
-              try {
-                await api.confirmPrincipalOtp(otp, otpNewPwd)
-                setInfo("Mdp Administrator mis à jour")
-                setOtp("")
-                setOtpNewPwd("")
-                setDevOtp(null)
-              } catch (e) {
-                setError(String(e))
-              } finally {
-                setBusy(false)
-              }
-            }}>
-            Confirmer OTP
-          </button>
-        </div>
-      </div>
-
-      <div className="card">
-        <h2>Recovery concepteur (principal only)</h2>
-        <p className="muted">
-          Uniquement sur agents <strong>offline &gt; 2h</strong> (poll sync ~2
-          min). Les postes en contact reçoivent les nouveaux mdp admin via sync —
-          pas de désinscription massive si le secret fuit.
-        </p>
-        <button
-          className="btn secondary"
-          type="button"
-          disabled={busy}
-          onClick={async () => {
-            setBusy(true)
-            try {
-              const r = await api.recoveryInfo()
-              setRecoveryHint(r.recovery_password_hint)
-              setInfo(r.note)
-            } catch (e) {
-              setError(String(e))
-            } finally {
-              setBusy(false)
-            }
-          }}>
-          Afficher le recovery (principal)
-        </button>
-        {recoveryHint && (
-          <p className="ok" style={{ marginTop: 10 }}>
-            Recovery : <code>{recoveryHint}</code>
-          </p>
-        )}
-      </div>
     </>
   )
 }
@@ -2832,21 +2873,8 @@ function PacksView({
 }) {
   return (
     <>
-      <div className="pack-help">
-        <strong>À quoi sert un pack ?</strong> C’est le jeu de signatures de
-        détection (secrets, configs…) poussé aux agents <em>sans rebuild</em> de
-        l’extension. <strong>Publier</strong> = créer une nouvelle version
-        (souvent l’active moins des règles bruyantes).{" "}
-        <strong>Activer</strong> = choisir quelle version les agents reçoivent
-        au sync. Doc : <code>docs/RULE-PACKS.md</code>
-      </div>
       <div className="card">
         <h2>Publier un pack</h2>
-        <p className="muted">
-          Clone le pack actif, retire éventuellement des IDs de règles (ex. faux
-          positifs), signe et active. Les agents appliquent au prochain sync
-          (≤ 2 min) ou après <strong>Forcer la synchronisation</strong>.
-        </p>
         <div className="row" style={{ marginBottom: 10 }}>
           <input
             className="input"
@@ -2866,10 +2894,8 @@ function PacksView({
             {busy ? "…" : "Publier & activer"}
           </button>
         </div>
-        <p className="muted">
-          Les IDs saisis sont <strong>retirés</strong> du pack actif → journal
-          d’audit <code>rule_disable</code> avec la liste exacte. Pack actif :{" "}
-          <strong>{activeVersion || "—"}</strong>
+        <p className="muted" style={{ fontSize: 12 }}>
+          Pack actif : <strong>{activeVersion || "—"}</strong>
         </p>
       </div>
 
@@ -2963,10 +2989,44 @@ function PeopleView({
   const [grpName, setGrpName] = useState("")
   const [grpDesc, setGrpDesc] = useState("")
   const [grpProfile, setGrpProfile] = useState("")
+  const [otp, setOtp] = useState("")
+  const [otpNewPwd, setOtpNewPwd] = useState("")
+  const [devOtp, setDevOtp] = useState<string | null>(null)
+  const [recoveryHint, setRecoveryHint] = useState<string | null>(null)
+  const [rcActive, setRcActive] = useState(0)
+  const [rcLow, setRcLow] = useState(false)
+  const [rcRows, setRcRows] = useState<
+    Array<{
+      id: string
+      label?: string
+      created_at: string
+      consumed_at?: string | null
+      active: boolean
+    }>
+  >([])
+  const [rcPlain, setRcPlain] = useState<Array<{ id: string; code: string }> | null>(
+    null
+  )
+  const [rcCount, setRcCount] = useState(20)
   const [grpEditId, setGrpEditId] = useState<string | null>(null)
   const [showGrpForm, setShowGrpForm] = useState(false)
 
   const isPrincipal = !!sessionAdmin.is_principal
+
+  const loadRecoveryPool = useCallback(async () => {
+    try {
+      const r = await api.recoveryCodes()
+      setRcActive(r.active_count)
+      setRcLow(!!r.low_stock)
+      setRcRows(r.codes || [])
+    } catch {
+      /* principal only */
+    }
+  }, [])
+
+  useEffect(() => {
+    if (isPrincipal) void loadRecoveryPool()
+  }, [isPrincipal, loadRecoveryPool])
 
   const togglePerm = (p: AdminPermission) =>
     setAdmPerms((prev) =>
@@ -2977,12 +3037,6 @@ function PeopleView({
     <>
       <div className="card">
         <h2>Administrators</h2>
-        <p className="muted">
-          Utilisez <strong>Modifier</strong> sur votre ligne (ancien mdp +
-          confirmation). <strong>Réinitialiser</strong> : réservé à
-          l&apos;Administrator principal (force un nouveau mdp à la prochaine
-          connexion).
-        </p>
         <div className="table-wrap"><table className="table">
           <thead>
             <tr>
@@ -3027,13 +3081,13 @@ function PeopleView({
                         disabled={busy || !isPrincipal}
                         title={
                           isPrincipal
-                            ? "Réinitialiser le mdp (l'admin devra le changer)"
-                            : "Réservé à l'Administrator principal"
+                            ? "Définir un mot de passe temporaire — l’admin devra le changer"
+                            : "Réservé à l’Administrator principal"
                         }
                         onClick={() => {
                           if (!isPrincipal) return
                           const pwd = prompt(
-                            `Nouveau mdp temporaire pour ${a.label} (≥6) :`
+                            `Mot de passe temporaire pour ${a.label} (≥6) :`
                           )
                           if (!pwd || pwd.length < 6) return
                           setBusy(true)
@@ -3041,14 +3095,14 @@ function PeopleView({
                             .resetSecondaryPassword(a.id, pwd)
                             .then(() => {
                               setInfo(
-                                `Mdp de ${a.label} réinitialisé — popup obligatoire à sa prochaine connexion`
+                                `Mot de passe temporaire défini pour ${a.label}`
                               )
                               onReload()
                             })
                             .catch((e) => setError(String(e)))
                             .finally(() => setBusy(false))
                         }}>
-                        Réinitialiser
+                        Nouveau mdp
                       </button>
                     )}
                     {!a.is_principal && isPrincipal && (
@@ -3211,7 +3265,17 @@ function PeopleView({
               setAdmEmail("")
               onReload()
             } catch (e) {
-              setError(String(e))
+              const msg = String(e)
+              if (
+                msg.toLowerCase().includes("déjà inscrit") ||
+                msg.includes("email_already_registered")
+              ) {
+                setError(
+                  "E-mail déjà inscrit — un administrateur utilise déjà cette adresse."
+                )
+              } else {
+                setError(msg)
+              }
             } finally {
               setBusy(false)
             }
@@ -3222,9 +3286,6 @@ function PeopleView({
 
       <div className="card">
         <h2>Groupes d’utilisateurs</h2>
-        <p className="muted">
-          Liez un groupe à une policy profil. Futur : sync LDAP / groupes AD.
-        </p>
         {groups.length === 0 ? (
           <div className="empty">Aucun groupe</div>
         ) : (
@@ -3414,10 +3475,6 @@ function PeopleView({
 
       <div className="card">
         <h2>Utilisateurs</h2>
-        <p className="muted">
-          Membres de groupes. Liez un agent à un user pour appliquer la policy du
-          groupe.
-        </p>
         {users.length === 0 ? (
           <div className="empty">Aucun user</div>
         ) : (
@@ -3526,6 +3583,219 @@ function PeopleView({
           </button>
         </div>
       </div>
+
+      {isPrincipal && (
+        <>
+          <div className="card">
+            <h2>OTP Administrator principal</h2>
+            <button
+              className="btn secondary"
+              type="button"
+              disabled={busy}
+              onClick={async () => {
+                setBusy(true)
+                try {
+                  const r = await api.requestPrincipalOtp()
+                  setDevOtp(r.dev_otp || null)
+                  setInfo(r.message)
+                } catch (e) {
+                  setError(String(e))
+                } finally {
+                  setBusy(false)
+                }
+              }}>
+              Demander OTP
+            </button>
+            {devOtp && (
+              <p className="ok">
+                OTP : <code>{devOtp}</code>
+              </p>
+            )}
+            <div className="row" style={{ marginTop: 10 }}>
+              <input
+                className="input"
+                placeholder="OTP"
+                value={otp}
+                onChange={(e) => setOtp(e.target.value)}
+              />
+              <input
+                className="input"
+                type="password"
+                placeholder="Nouveau mdp ≥6"
+                value={otpNewPwd}
+                onChange={(e) => setOtpNewPwd(e.target.value)}
+              />
+              <button
+                className="btn"
+                type="button"
+                disabled={busy || !otp || otpNewPwd.length < 6}
+                onClick={async () => {
+                  setBusy(true)
+                  try {
+                    await api.confirmPrincipalOtp(otp, otpNewPwd)
+                    setInfo("Mot de passe Administrator mis à jour")
+                    setOtp("")
+                    setOtpNewPwd("")
+                    setDevOtp(null)
+                  } catch (e) {
+                    setError(String(e))
+                  } finally {
+                    setBusy(false)
+                  }
+                }}>
+                Confirmer
+              </button>
+            </div>
+          </div>
+
+          <div className="card">
+            <h2>Recovery concepteur — codes one-time</h2>
+            <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>
+              Actifs : <strong>{rcActive}</strong>
+              {rcLow ? " · stock bas (&lt;5)" : ""} · offline ≥ 2 h
+            </p>
+            <div className="row" style={{ flexWrap: "wrap", gap: 8 }}>
+              <input
+                className="input"
+                type="number"
+                min={1}
+                max={50}
+                value={rcCount}
+                onChange={(e) => setRcCount(Number(e.target.value) || 20)}
+                style={{ width: 90 }}
+              />
+              <button
+                className="btn"
+                type="button"
+                disabled={busy}
+                onClick={async () => {
+                  setBusy(true)
+                  try {
+                    const r = await api.generateRecoveryCodes(rcCount)
+                    setRcPlain(r.codes)
+                    setInfo(r.note)
+                    await loadRecoveryPool()
+                  } catch (e) {
+                    setError(String(e))
+                  } finally {
+                    setBusy(false)
+                  }
+                }}>
+                Générer
+              </button>
+              <button
+                className="btn secondary"
+                type="button"
+                disabled={busy || rcActive === 0}
+                onClick={async () => {
+                  if (!confirm("Invalider tous les codes actifs ?")) return
+                  setBusy(true)
+                  try {
+                    const r = await api.revokeRecoveryPool()
+                    setRcPlain(null)
+                    setInfo(`Pool invalidé · ${r.revoked} code(s)`)
+                    await loadRecoveryPool()
+                  } catch (e) {
+                    setError(String(e))
+                  } finally {
+                    setBusy(false)
+                  }
+                }}>
+                Invalider le pool
+              </button>
+              <button
+                className="btn secondary"
+                type="button"
+                disabled={busy}
+                onClick={async () => {
+                  setBusy(true)
+                  try {
+                    const r = await api.recoveryInfo()
+                    setRecoveryHint(r.recovery_password_hint)
+                  } catch (e) {
+                    setError(String(e))
+                  } finally {
+                    setBusy(false)
+                  }
+                }}>
+                Secret legacy
+              </button>
+            </div>
+            {rcPlain && rcPlain.length > 0 && (
+              <div
+                style={{
+                  marginTop: 12,
+                  padding: 12,
+                  background: "var(--surface-2)",
+                  borderRadius: 10,
+                  border: "1px solid var(--line)"
+                }}>
+                <strong style={{ fontSize: 13 }}>
+                  Codes (copier maintenant — unique)
+                </strong>
+                <pre
+                  style={{
+                    fontSize: 12,
+                    margin: "8px 0 0",
+                    whiteSpace: "pre-wrap",
+                    wordBreak: "break-all"
+                  }}>
+                  {rcPlain.map((c) => c.code).join("\n")}
+                </pre>
+                <button
+                  type="button"
+                  className="btn secondary btn-sm"
+                  style={{ marginTop: 8 }}
+                  onClick={() => {
+                    void navigator.clipboard.writeText(
+                      rcPlain.map((c) => c.code).join("\n")
+                    )
+                    setInfo("Codes copiés")
+                  }}>
+                  Copier
+                </button>
+              </div>
+            )}
+            {recoveryHint && (
+              <p className="muted" style={{ marginTop: 10, fontSize: 12 }}>
+                Legacy : <code>{recoveryHint}</code>
+              </p>
+            )}
+            {rcRows.length > 0 && (
+              <div className="table-wrap" style={{ marginTop: 12 }}>
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th>État</th>
+                      <th>Label</th>
+                      <th>Créé</th>
+                      <th>Consommé</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rcRows.slice(0, 40).map((c) => (
+                      <tr key={c.id}>
+                        <td>{c.active ? "actif" : "utilisé"}</td>
+                        <td className="muted">{c.label || "—"}</td>
+                        <td className="muted" style={{ fontSize: 12 }}>
+                          {c.created_at
+                            ? new Date(c.created_at).toLocaleString("fr-FR")
+                            : "—"}
+                        </td>
+                        <td className="muted" style={{ fontSize: 12 }}>
+                          {c.consumed_at
+                            ? new Date(c.consumed_at).toLocaleString("fr-FR")
+                            : "—"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </>
+      )}
     </>
   )
 }
@@ -3589,11 +3859,6 @@ function AgentsView({
             </span>
           )}
         </h2>
-        <p className="muted">
-          Un siège = un agent protégé. Sans siège : grâce 5 min puis protection
-          désactivée. DEMO-OPSGATE : 25 sièges. PERSONAL : 1 siège (clé
-          personnelle).
-        </p>
         {stats && (
           <div className="grid">
             <div className="stat">
@@ -3643,10 +3908,6 @@ function AgentsView({
 
       <div className="card">
         <h2>Agents enrollés</h2>
-        <p className="muted">
-          Multi-sélection → bulk vers un <strong>groupe</strong> (hérite de sa
-          policy) ou un profil. Code org = tenant commercial.
-        </p>
         {selected.length > 0 && (
           <div
             className="row"
@@ -3717,10 +3978,7 @@ function AgentsView({
           </div>
         )}
         {agents.length === 0 ? (
-          <div className="empty">
-            Aucun agent. Code org <code>DEMO-OPSGATE</code> ou{" "}
-            <code>PERSONAL</code>.
-          </div>
+          <div className="empty">Aucun agent</div>
         ) : (
           <div className="table-wrap"><table className="table">
             <thead>
@@ -3906,11 +4164,99 @@ function decisionLabelFr(d: string): string {
   }
 }
 
-function EventsView({ events }: { events: EventRow[] }) {
+function downloadTextFile(filename: string, content: string, mime: string) {
+  const blob = new Blob([content], { type: mime })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement("a")
+  a.href = url
+  a.download = filename
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+function EventsView({
+  events,
+  setError,
+  setInfo
+}: {
+  events: EventRow[]
+  setError?: (e: string | null) => void
+  setInfo?: (i: string | null) => void
+}) {
   const [decisionF, setDecisionF] = useState("")
   const [severityF, setSeverityF] = useState("")
   const [sourceF, setSourceF] = useState("")
   const [labelF, setLabelF] = useState("")
+  const [exportBusy, setExportBusy] = useState(false)
+  const searchRef = useRef<HTMLInputElement>(null)
+  const [archives, setArchives] = useState<
+    Array<{
+      id: string
+      kind: string
+      filename: string
+      event_count: number
+      remaining_days: number
+      created_at: string
+      expires_at: string
+    }>
+  >([])
+  const [retention, setRetention] = useState<{
+    days: number
+    weekly_export_enabled: boolean
+    oldest_event_ts: string | null
+    days_until_oldest_purge: number | null
+    note?: string
+  } | null>(() => {
+    try {
+      const raw = sessionStorage.getItem("opsgate_events_retention")
+      return raw ? JSON.parse(raw) : null
+    } catch {
+      return null
+    }
+  })
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const r = await api.listEventExports()
+        setArchives(r.exports || [])
+      } catch {
+        /* ignore */
+      }
+      try {
+        const e = await api.events()
+        if (e.retention) {
+          setRetention(e.retention)
+          sessionStorage.setItem(
+            "opsgate_events_retention",
+            JSON.stringify(e.retention)
+          )
+        }
+      } catch {
+        /* ignore */
+      }
+    })()
+  }, [events.length])
+
+  useEffect(() => {
+    const onKey = (ev: KeyboardEvent) => {
+      if (ev.key !== "/" || ev.ctrlKey || ev.metaKey || ev.altKey) return
+      const t = ev.target as HTMLElement | null
+      if (
+        t &&
+        (t.tagName === "INPUT" ||
+          t.tagName === "TEXTAREA" ||
+          t.tagName === "SELECT" ||
+          t.isContentEditable)
+      ) {
+        return
+      }
+      ev.preventDefault()
+      searchRef.current?.focus()
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [])
 
   const decisions = useMemo(
     () =>
@@ -3943,39 +4289,115 @@ function EventsView({ events }: { events: EventRow[] }) {
     })
   }, [events, decisionF, severityF, sourceF, labelF])
 
+  const doExport = async (range: "week" | "all") => {
+    setExportBusy(true)
+    setError?.(null)
+    try {
+      const r = await api.exportEvents(range, "csv")
+      downloadTextFile(r.filename, r.content, "text/csv;charset=utf-8")
+      setInfo?.(
+        `Export ${range} · ${r.count} events · rétention ${r.retention_days} j` +
+          (r.days_until_oldest_purge != null
+            ? ` · purge plus ancien dans ~${r.days_until_oldest_purge} j`
+            : "")
+      )
+      const list = await api.listEventExports()
+      setArchives(list.exports || [])
+    } catch (e) {
+      setError?.(String(e))
+    } finally {
+      setExportBusy(false)
+    }
+  }
+
   return (
     <div className="card">
-      <h2>Events (logs)</h2>
-      <p className="muted">
-        Identifiant appareil = <strong>label</strong> (enrôlement). Le site web
-        (chatgpt.com…) n&apos;est pas l&apos;identifiant inventaire.
-      </p>
-      {events.length === 0 ? (
-        <div className="empty">
-          <p style={{ marginTop: 0 }}>
-            Aucun event pour <strong>cette organisation</strong>.
-          </p>
-          <ul style={{ textAlign: "left", margin: "8px auto", maxWidth: 420 }}>
-            <li>
-              Console = org <code>DEMO-OPSGATE</code> (bandeau « Org · … »)
-            </li>
-            <li>
-              Extension enrôlée org (pas PERSONAL) +{" "}
-              <strong>Events cloud : activés</strong> dans Options
-            </li>
-            <li>
-              Policy → Collecte events ON · puis <strong>Synchroniser</strong>
-            </li>
-            <li>
-              L’enroll / unenroll / détections génèrent des events système ou
-              détection
-            </li>
-            <li>
-              Révoquer un agent <strong>conserve</strong> l’historique (ne
-              l’efface plus)
-            </li>
-          </ul>
+      <div
+        className="row"
+        style={{
+          justifyContent: "space-between",
+          alignItems: "flex-start",
+          flexWrap: "wrap",
+          gap: 10,
+          marginBottom: 12
+        }}>
+        <h2 style={{ margin: 0 }}>Événements</h2>
+        <div className="row" style={{ flexWrap: "wrap", gap: 8 }}>
+          <button
+            type="button"
+            className="btn secondary btn-sm"
+            disabled={exportBusy}
+            onClick={() => void doExport("week")}>
+            {exportBusy ? "…" : "Export semaine"}
+          </button>
+          <button
+            type="button"
+            className="btn secondary btn-sm"
+            disabled={exportBusy}
+            onClick={() => void doExport("all")}>
+            Export tout
+          </button>
         </div>
+      </div>
+      {retention && (
+        <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>
+          Rétention {retention.days} j
+          {retention.days_until_oldest_purge != null
+            ? ` · purge ~${Math.max(0, retention.days_until_oldest_purge)} j`
+            : ""}
+          {retention.weekly_export_enabled ? " · hebdo ON" : ""}
+        </p>
+      )}
+      {archives.length > 0 && (
+        <div style={{ marginBottom: 14 }}>
+          <div className="table-wrap">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Archive</th>
+                  <th>Events</th>
+                  <th>Restant</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {archives.map((a) => (
+                  <tr key={a.id}>
+                    <td className="mono" style={{ fontSize: 12 }}>
+                      {a.filename}
+                    </td>
+                    <td>{a.event_count}</td>
+                    <td>{a.remaining_days} j</td>
+                    <td>
+                      <button
+                        type="button"
+                        className="btn secondary btn-sm"
+                        onClick={async () => {
+                          try {
+                            const r = await api.downloadEventExport(a.id)
+                            downloadTextFile(
+                              r.filename,
+                              r.content,
+                              r.format === "json"
+                                ? "application/json"
+                                : "text/csv;charset=utf-8"
+                            )
+                          } catch (e) {
+                            setError?.(String(e))
+                          }
+                        }}>
+                        Télécharger
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+      {events.length === 0 ? (
+        <div className="empty">Aucun événement</div>
       ) : (
         <>
           <div className="row" style={{ marginBottom: 12, flexWrap: "wrap" }}>
@@ -4013,8 +4435,9 @@ function EventsView({ events }: { events: EventRow[] }) {
               ))}
             </select>
             <input
+              ref={searchRef}
               className="input"
-              placeholder="Label / host / type…"
+              placeholder="Label / host / type… (/)"
               value={labelF}
               onChange={(e) => setLabelF(e.target.value)}
             />
@@ -4165,22 +4588,53 @@ function AuditView({ isPrincipal }: { isPrincipal: boolean }) {
     return (
       <div className="card">
         <h2>Audit administration</h2>
-        <div className="empty">
-          Réservé à l’<strong>Administrator principal</strong>. Les admins
-          secondaires n’ont pas accès à ce journal.
-        </div>
+        <div className="empty">Réservé au principal</div>
       </div>
+    )
+  }
+
+  const exportCsv = () => {
+    const headers = ["created_at", "admin_label", "admin_email", "action", "detail"]
+    const lines = [headers.join(",")]
+    for (const r of rows) {
+      const cells = [
+        r.createdAt || "",
+        r.adminLabel || "",
+        r.adminEmail || "",
+        r.action || "",
+        (r.detail || "").replace(/"/g, '""')
+      ].map((c) =>
+        /[",\n]/.test(c) ? `"${c}"` : c
+      )
+      lines.push(cells.join(","))
+    }
+    downloadTextFile(
+      `opsgate-audit-${new Date().toISOString().slice(0, 10)}.csv`,
+      lines.join("\n"),
+      "text/csv;charset=utf-8"
     )
   }
 
   return (
     <div className="card">
-      <h2>Audit administration</h2>
-      <p className="muted">
-        Connexions, déconnexions (manuel / auto), policy (détail des champs),
-        packs, révocation, moving rules… Idle logout{" "}
-        <strong>5 min</strong>.
-      </p>
+      <div
+        className="row"
+        style={{
+          justifyContent: "space-between",
+          alignItems: "center",
+          flexWrap: "wrap",
+          gap: 8,
+          marginBottom: 12
+        }}>
+        <h2 style={{ margin: 0 }}>Audit administration</h2>
+        <button
+          type="button"
+          className="btn secondary btn-sm"
+          disabled={!rows.length}
+          onClick={exportCsv}>
+          Export CSV
+        </button>
+      </div>
       <div className="row" style={{ marginBottom: 12 }}>
         <select
           className="input"
@@ -4191,12 +4645,30 @@ function AuditView({ isPrincipal }: { isPrincipal: boolean }) {
           <option value="logout">logout</option>
           <option value="logout_idle">logout_idle</option>
           <option value="policy_update">policy_update</option>
+          <option value="profile_upsert">profile_upsert</option>
+          <option value="profile_delete">profile_delete</option>
+          <option value="group_upsert">group_upsert</option>
+          <option value="group_delete">group_delete</option>
+          <option value="user_upsert">user_upsert</option>
+          <option value="user_delete">user_delete</option>
           <option value="pack_publish">pack_publish</option>
-          <option value="rule_disable">rule_disable (règles désactivées)</option>
+          <option value="pack_activate">pack_activate</option>
+          <option value="rule_disable">rule_disable</option>
           <option value="agent_revoke">agent_revoke</option>
-          <option value="force_sync">force_sync</option>
+          <option value="agent_assign">agent_assign</option>
+          <option value="agent_license">agent_license</option>
+          <option value="agent_merge">agent_merge</option>
+          <option value="events_export">events_export</option>
           <option value="admin_create">admin_create</option>
+          <option value="admin_update">admin_update</option>
+          <option value="admin_delete">admin_delete</option>
+          <option value="admin_password_reset">admin_password_reset</option>
+          <option value="password_change">password_change</option>
+          <option value="org_settings_update">org_settings_update</option>
           <option value="moving_rule_upsert">moving_rule_upsert</option>
+          <option value="moving_rule_delete">moving_rule_delete</option>
+          <option value="moving_rule_apply">moving_rule_apply</option>
+          <option value="recovery_info_view">recovery_info_view</option>
         </select>
         <button className="btn secondary" type="button" disabled={busy} onClick={() => void load()}>
           {busy ? "…" : "Actualiser"}
@@ -4241,92 +4713,6 @@ function AuditView({ isPrincipal }: { isPrincipal: boolean }) {
             </tbody>
           </table>
         </div>
-      )}
-    </div>
-  )
-}
-
-/** Sélecteur d’hôtes IA : presets cliquables + customs + champ « + add AI » */
-export function HostPicker({
-  value,
-  onChange
-}: {
-  value: string[]
-  onChange: (hosts: string[]) => void
-}) {
-  const [custom, setCustom] = useState("")
-  const set = new Set(value)
-  const customHosts = value.filter((h) => !AI_HOST_PRESETS.includes(h))
-  const toggle = (h: string) => {
-    if (set.has(h)) onChange(value.filter((x) => x !== h))
-    else onChange([...value, h])
-  }
-  const addCustom = () => {
-    const h = custom
-      .trim()
-      .toLowerCase()
-      .replace(/^https?:\/\//, "")
-      .replace(/^www\./, "")
-      .split("/")[0]
-      .split("?")[0]
-    if (!h || !h.includes(".")) return
-    if (!set.has(h)) onChange([...value, h])
-    setCustom("")
-  }
-  return (
-    <div>
-      <div
-        style={{
-          display: "flex",
-          flexWrap: "wrap",
-          gap: 6,
-          marginBottom: 8
-        }}>
-        {AI_HOST_PRESETS.map((h) => (
-          <button
-            key={h}
-            type="button"
-            className={`btn btn-sm ${set.has(h) ? "accent" : "secondary"}`}
-            onClick={() => toggle(h)}>
-            {set.has(h) ? "✓ " : "+ "}
-            {h}
-          </button>
-        ))}
-        {customHosts.map((h) => (
-          <button
-            key={`custom-${h}`}
-            type="button"
-            className="btn btn-sm accent"
-            title="Domaine personnalisé — cliquer pour retirer"
-            onClick={() => toggle(h)}>
-            ✓ {h}
-          </button>
-        ))}
-      </div>
-      <div className="row">
-        <input
-          className="input"
-          placeholder="autre-domaine.ai"
-          value={custom}
-          onChange={(e) => setCustom(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") {
-              e.preventDefault()
-              addCustom()
-            }
-          }}
-        />
-        <button
-          type="button"
-          className="btn secondary btn-sm"
-          onClick={addCustom}>
-          + Add AI
-        </button>
-      </div>
-      {customHosts.length > 0 && (
-        <p className="muted" style={{ fontSize: 12, marginTop: 6 }}>
-          Domaines custom actifs : {customHosts.join(", ")}
-        </p>
       )}
     </div>
   )
@@ -4434,17 +4820,10 @@ function MovingRulesView({
 
   return (
     <>
-      <div className="pack-help">
-        <strong>Règles d’affectation auto</strong> (inspiré Kaspersky{" "}
-        <em>moving rules</em>) : multi-conditions en <strong>AND</strong> sur
-        label / hostname. Priorité plus petite = évaluée en premier (style
-        firewall). Déplacez ↑↓ ou éditez la prio. Appliqué à l’enroll et via «
-        Ré-évaluer ».
-      </div>
       <div className="card">
-        <h2>Règles actives</h2>
+        <h2>Règles d’affectation</h2>
         {rules.length === 0 ? (
-          <div className="empty">Aucune règle — créez-en une ci-dessous</div>
+          <div className="empty">Aucune règle</div>
         ) : (
           <div className="table-wrap">
             <table className="table">

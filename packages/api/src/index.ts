@@ -23,8 +23,15 @@ async function main() {
   )
   console.log(`[opsgate-api] Dev admin header: X-OpsGate-Dev-Admin: demo`)
   if (store.kind === "memory") {
+    console.warn(
+      "[opsgate-api] ⚠ store=memory — AUCUNE persistance : redémarrage API = données perdues (admins, agents, events)."
+    )
+    console.warn(
+      "[opsgate-api] Pour pilote/prod : docker compose up -d puis DATABASE_URL=postgres://opsgate:opsgate@127.0.0.1:5432/opsgate"
+    )
+  } else {
     console.log(
-      `[opsgate-api] Tip: set DATABASE_URL=postgres://... for durable store`
+      "[opsgate-api] store=postgres — données durables (volume Docker opsgate_pg_data)"
     )
   }
 

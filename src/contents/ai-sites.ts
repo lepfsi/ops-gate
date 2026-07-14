@@ -638,7 +638,7 @@ async function processQuarantinedFiles(
               match: warnOnly.map((w) => w.fileName).join(", "),
               index: 0
             }
-          ] as Detection[])
+          ] as unknown as Detection[])
 
     const fileAction = settings.defaultAction || "mask_recommend"
     const fileMsgs = mergeUserMessages(settings.userMessages)

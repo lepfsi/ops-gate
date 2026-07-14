@@ -32,8 +32,8 @@ export async function verifyAnyPassword(
 
 /**
  * Username + password pour désenrôlement.
- * Username = label ou email de l'admin (insensible à la casse).
- * Recovery vendor : username "vendor" | "recovery" | "opsgate".
+ * Username = label ou email admin.
+ * Recovery : username "vendor" | "recovery" | "opsgate" + code one-time ou secret legacy.
  */
 export async function matchExitPassword(
   password: string,
@@ -41,17 +41,23 @@ export async function matchExitPassword(
   username?: string
 ): Promise<ExitActorInfo | null> {
   if (!password || credentials.length === 0) return null
-  const h = await hashManagementPassword(password)
+  // Codes recovery formatés XXXX-XXXX… → normaliser comme le serveur
+  const normalizedPwd = password.trim().toUpperCase().replace(/\s+/g, "")
+  const h = await hashManagementPassword(normalizedPwd)
+  // Aussi essayer le hash du mot de passe tel quel (admins / legacy)
+  const hRaw = await hashManagementPassword(password.trim())
   const user = (username || "").trim().toLowerCase()
 
-  // Sans username : comportement legacy (premier hash match) — déconseillé
   if (!user) {
     for (const c of credentials) {
-      if (c.hash !== h) continue
+      if (c.hash !== h && c.hash !== hRaw) continue
       if (c.kind === "admin") {
         return { type: "admin", adminId: c.id, adminLabel: c.label }
       }
-      return { type: "vendor_recovery" }
+      return {
+        type: "vendor_recovery",
+        recoveryCodeId: c.codeId
+      }
     }
     return null
   }
@@ -60,9 +66,14 @@ export async function matchExitPassword(
     user === "vendor" || user === "recovery" || user === "opsgate"
 
   for (const c of credentials) {
-    if (c.hash !== h) continue
+    if (c.hash !== h && c.hash !== hRaw) continue
     if (c.kind === "recovery") {
-      if (isVendorUser) return { type: "vendor_recovery" }
+      if (isVendorUser) {
+        return {
+          type: "vendor_recovery",
+          recoveryCodeId: c.codeId
+        }
+      }
       continue
     }
     const labelOk = c.label?.toLowerCase() === user

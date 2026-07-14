@@ -1,5 +1,6 @@
 import {
   detectSensitiveData,
+  maskSensitiveData,
   type Detection,
   type DetectionRule
 } from "@opsgate/engine"

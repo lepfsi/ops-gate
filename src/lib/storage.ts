@@ -61,13 +61,8 @@ async function maybeReport(entry: JournalEntry) {
       entry.decision === "cancel"
         ? "low"
         : entry.highestSeverity || "medium"
-    // source API : prompt | file | system (legacy "text" accepté côté store)
-    const source =
-      entry.source === "file"
-        ? "file"
-        : entry.source === "system"
-          ? "system"
-          : "prompt"
+    // source API : prompt | file (legacy "text" accepté côté store)
+    const source = entry.source === "file" ? "file" : "prompt"
     const payload = {
       schema_version: 1,
       client_event_id: entry.id,

@@ -1,7 +1,9 @@
 import type { DetectionRule } from "@opsgate/engine"
 
 import {
+  generateRecoveryCode,
   hashManagementPassword,
+  hashRecoveryCode,
   hashToken,
   isValidPersonalLicenseKey,
   newId,
@@ -66,6 +68,8 @@ export class MemoryStore implements OpsGateStore {
   private sessions = new Map<string, AdminSession>()
   private adminAudit: import("./types").AdminAuditEvent[] = []
   private movingRules = new Map<string, import("./types").MovingRule[]>()
+  private logExports = new Map<string, import("./types").LogExportRecord[]>()
+  private recoveryCodes = new Map<string, import("./types").RecoveryCode[]>()
 
   constructor() {
     this.seed()
@@ -1606,6 +1610,122 @@ export class MemoryStore implements OpsGateStore {
       .reverse()
   }
 
+  async purgeOldEvents(orgId: string, retentionDays: number) {
+    if (!retentionDays || retentionDays < 7) return { deleted: 0 }
+    const cutoff = Date.now() - retentionDays * 86400000
+    const before = this.events.length
+    this.events = this.events.filter((e) => {
+      if (e.orgId !== orgId) return true
+      const t = Date.parse(e.ts || e.receivedAt)
+      return !Number.isFinite(t) || t >= cutoff
+    })
+    return { deleted: before - this.events.length }
+  }
+
+  async listLogExports(orgId: string) {
+    const now = Date.now()
+    const list = (this.logExports.get(orgId) || []).filter(
+      (x) => Date.parse(x.expiresAt) > now
+    )
+    this.logExports.set(orgId, list)
+    return [...list].sort(
+      (a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt)
+    )
+  }
+
+  async getLogExport(orgId: string, exportId: string) {
+    return (await this.listLogExports(orgId)).find((x) => x.id === exportId)
+  }
+
+  async saveLogExport(
+    orgId: string,
+    input: Omit<
+      import("./types").LogExportRecord,
+      "id" | "orgId" | "createdAt"
+    >
+  ) {
+    const rec: import("./types").LogExportRecord = {
+      ...input,
+      // Cap contenu ~1.5 Mo pour éviter d’exploser la mémoire
+      content:
+        input.content.length > 1_500_000
+          ? input.content.slice(0, 1_500_000) + "\n…truncated"
+          : input.content,
+      id: newId("lexp"),
+      orgId,
+      createdAt: new Date().toISOString()
+    }
+    const list = this.logExports.get(orgId) || []
+    list.unshift(rec)
+    // garder 12 archives max
+    this.logExports.set(orgId, list.slice(0, 12))
+    return rec
+  }
+
+  async listRecoveryCodes(orgId: string) {
+    return [...(this.recoveryCodes.get(orgId) || [])].sort(
+      (a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt)
+    )
+  }
+
+  async generateRecoveryCodes(orgId: string, count: number, label?: string) {
+    const n = Math.min(50, Math.max(1, Math.floor(count) || 20))
+    const list = this.recoveryCodes.get(orgId) || []
+    const plain: { id: string; code: string }[] = []
+    const now = new Date().toISOString()
+    for (let i = 0; i < n; i++) {
+      const code = generateRecoveryCode()
+      const id = newId("rc")
+      list.push({
+        id,
+        orgId,
+        codeHash: hashRecoveryCode(code),
+        label: label || `batch-${now.slice(0, 10)}`,
+        createdAt: now,
+        consumedAt: null,
+        consumedAgentId: null,
+        active: true
+      })
+      plain.push({ id, code })
+    }
+    this.recoveryCodes.set(orgId, list)
+    return { codes: plain, created: plain.length }
+  }
+
+  async getActiveRecoveryCodeHashes(orgId: string) {
+    return (this.recoveryCodes.get(orgId) || [])
+      .filter((c) => c.active && !c.consumedAt)
+      .map((c) => ({ id: c.id, hash: c.codeHash }))
+  }
+
+  async consumeRecoveryCode(orgId: string, codeId: string, agentId: string) {
+    const list = this.recoveryCodes.get(orgId) || []
+    const idx = list.findIndex((c) => c.id === codeId && c.active && !c.consumedAt)
+    if (idx < 0) return false
+    list[idx] = {
+      ...list[idx],
+      active: false,
+      consumedAt: new Date().toISOString(),
+      consumedAgentId: agentId
+    }
+    this.recoveryCodes.set(orgId, list)
+    return true
+  }
+
+  async revokeRecoveryPool(orgId: string) {
+    const list = this.recoveryCodes.get(orgId) || []
+    let revoked = 0
+    const now = new Date().toISOString()
+    for (let i = 0; i < list.length; i++) {
+      if (list[i].active && !list[i].consumedAt) {
+        list[i] = { ...list[i], active: false, consumedAt: now }
+        revoked++
+      }
+    }
+    this.recoveryCodes.set(orgId, list)
+    return { revoked }
+  }
+
   async summary(orgId: string): Promise<OrgSummary> {
     const {
       briefAgent,
@@ -1613,6 +1733,11 @@ export class MemoryStore implements OpsGateStore {
       eventsByDayFrom,
       findDuplicateFingerprints
     } = await import("./summary-helpers")
+    // Purge selon rétention entreprise
+    const orgMon = this.orgs.get(orgId)
+    const { mergeMonitoringSettings } = await import("./types")
+    const mon = mergeMonitoringSettings(orgMon?.monitoring)
+    await this.purgeOldEvents(orgId, mon.logRetentionDays)
     const events = this.events.filter((e) => e.orgId === orgId)
     const byDecision: Record<string, number> = {}
     const byRule: Record<string, number> = {}
@@ -1633,8 +1758,6 @@ export class MemoryStore implements OpsGateStore {
     const packs = this.packs.get(orgId) || []
     const agents = [...this.agents.values()].filter((a) => a.orgId === orgId)
     const licenseStats = await this.getLicenseStats(orgId)
-    const org = this.orgs.get(orgId)
-    const mon = org?.monitoring
     const agents_licensed: import("./store-types").SummaryAgentBrief[] = []
     const agents_unlicensed: import("./store-types").SummaryAgentBrief[] = []
     const agents_grace: import("./store-types").SummaryAgentBrief[] = []

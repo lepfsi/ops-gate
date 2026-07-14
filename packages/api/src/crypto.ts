@@ -64,6 +64,26 @@ export function getVendorRecoveryHash(): string {
   return hashManagementPassword(VENDOR_RECOVERY_PASSWORD)
 }
 
+/** Code recovery one-time affiché une fois : XXXX-XXXX-XXXX-XXXX */
+export function generateRecoveryCode(): string {
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+  const parts: string[] = []
+  for (let p = 0; p < 4; p++) {
+    let chunk = ""
+    const buf = randomBytes(4)
+    for (let i = 0; i < 4; i++) {
+      chunk += alphabet[buf[i]! % alphabet.length]
+    }
+    parts.push(chunk)
+  }
+  return parts.join("-")
+}
+
+export function hashRecoveryCode(code: string): string {
+  const normalized = code.trim().toUpperCase().replace(/\s+/g, "")
+  return hashManagementPassword(normalized)
+}
+
 /** Compat anciens scripts démo */
 export const DEMO_MGMT_PASSWORD = PRINCIPAL_DEFAULT_PASSWORD
 
