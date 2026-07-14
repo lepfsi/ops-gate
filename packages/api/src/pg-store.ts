@@ -99,6 +99,16 @@ const DEFAULT_HOSTS = [
 ]
 
 function rowOrg(r: pg.QueryResultRow): Organization {
+  let monitoring: Organization["monitoring"]
+  try {
+    const raw = r.monitoring_json
+    if (raw) {
+      const j = typeof raw === "string" ? JSON.parse(raw) : raw
+      if (j && typeof j === "object") monitoring = j
+    }
+  } catch {
+    /* ignore */
+  }
   return {
     id: r.id,
     name: r.name,
@@ -110,6 +120,7 @@ function rowOrg(r: pg.QueryResultRow): Organization {
     isPersonal: !!r.is_personal,
     licenseSeats:
       typeof r.license_seats === "number" ? r.license_seats : Number(r.license_seats) || 0,
+    monitoring,
     createdAt: new Date(r.created_at).toISOString()
   }
 }
@@ -348,7 +359,8 @@ export class PgStore implements OpsGateStore {
       `ALTER TABLE agents ALTER COLUMN license_assigned SET DEFAULT FALSE`,
       `ALTER TABLE policies ADD COLUMN IF NOT EXISTS user_messages_json TEXT NOT NULL DEFAULT '{}'`,
       `ALTER TABLE policy_profiles ADD COLUMN IF NOT EXISTS user_messages_json TEXT NOT NULL DEFAULT '{}'`,
-      `ALTER TABLE agents ADD COLUMN IF NOT EXISTS device_fingerprint TEXT`
+      `ALTER TABLE agents ADD COLUMN IF NOT EXISTS device_fingerprint TEXT`,
+      `ALTER TABLE organizations ADD COLUMN IF NOT EXISTS monitoring_json TEXT NOT NULL DEFAULT '{}'`
     ]
     for (const q of alters) {
       await this.pool.query(q)
@@ -728,6 +740,66 @@ export class PgStore implements OpsGateStore {
       [id]
     )
     return rows[0] ? rowOrg(rows[0]) : undefined
+  }
+
+  async updateOrgMonitoring(
+    orgId: string,
+    monitoring: Partial<import("./types").OrgMonitoringSettings>
+  ) {
+    const org = await this.getOrg(orgId)
+    if (!org) return undefined
+    const { mergeMonitoringSettings } = await import("./types")
+    const next = mergeMonitoringSettings({
+      ...org.monitoring,
+      ...monitoring,
+      schedule: monitoring.schedule
+        ? {
+            ...(org.monitoring?.schedule || {}),
+            ...monitoring.schedule
+          }
+        : org.monitoring?.schedule
+    })
+    await this.pool.query(
+      `UPDATE organizations SET monitoring_json = $2 WHERE id = $1`,
+      [orgId, JSON.stringify(next)]
+    )
+    return this.getOrg(orgId)
+  }
+
+  async mergeAgents(orgId: string, keepId: string, mergeIds: string[]) {
+    const ids = [...new Set(mergeIds.filter((id) => id && id !== keepId))]
+    if (!ids.length) return { ok: false as const, kept: keepId, removed: 0 }
+    const keep = (await this.listAgents(orgId)).find((a) => a.id === keepId)
+    if (!keep) return { ok: false as const, kept: keepId, removed: 0 }
+    let removed = 0
+    // Re-pointer events vers l’agent conservé (historique unifié)
+    for (const mid of ids) {
+      const other = (await this.listAgents(orgId)).find((a) => a.id === mid)
+      if (!other) continue
+      await this.pool.query(
+        `UPDATE detection_events SET agent_id = $1 WHERE org_id = $2 AND agent_id = $3`,
+        [keepId, orgId, mid]
+      )
+      // Conserver fingerprint / label utiles
+      if (!keep.deviceFingerprint && other.deviceFingerprint) {
+        await this.pool.query(
+          `UPDATE agents SET device_fingerprint = $2 WHERE id = $1`,
+          [keepId, other.deviceFingerprint]
+        )
+      }
+      const { rowCount } = await this.pool.query(
+        `DELETE FROM agents WHERE org_id = $1 AND id = $2`,
+        [orgId, mid]
+      )
+      if ((rowCount ?? 0) > 0) removed++
+    }
+    // last_seen = le plus récent
+    await this.pool.query(
+      `UPDATE agents SET last_seen_at = NOW() WHERE id = $1`,
+      [keepId]
+    )
+    await this.forceConfigSync(orgId)
+    return { ok: true as const, kept: keepId, removed }
   }
 
   async getPolicy(orgId: string) {
@@ -2626,10 +2698,11 @@ export class PgStore implements OpsGateStore {
     const {
       briefAgent,
       connectivityBuckets,
-      findDuplicateFingerprints,
-      OFFLINE_LONG_MS
+      findDuplicateFingerprints
     } = await import("./summary-helpers")
+    const orgMon = await this.getOrg(orgId)
     const licenseStats = await this.getLicenseStats(orgId)
+    const agents_licensed: import("./store-types").SummaryAgentBrief[] = []
     const agents_unlicensed: import("./store-types").SummaryAgentBrief[] = []
     const agents_grace: import("./store-types").SummaryAgentBrief[] = []
     const agents_offline_long: import("./store-types").SummaryAgentBrief[] = []
@@ -2637,19 +2710,23 @@ export class PgStore implements OpsGateStore {
     let licensedN = 0
     let graceN = 0
     let unlicensedN = 0
+    const conn = connectivityBuckets(agents, orgMon?.monitoring)
+    const offlineThreshold = conn.offline_long_ms
     for (const a of agents) {
       const lic = await this.isAgentLicensed(orgId, a.id)
       const b = briefAgent(a, lic)
       allBriefs.push(b)
-      if (b.license_status === "licensed") licensedN++
-      else if (b.license_status === "grace") {
+      if (b.license_status === "licensed") {
+        licensedN++
+        agents_licensed.push(b)
+      } else if (b.license_status === "grace") {
         graceN++
         agents_grace.push(b)
       } else {
         unlicensedN++
         agents_unlicensed.push(b)
       }
-      if (b.offline_for_ms > OFFLINE_LONG_MS) agents_offline_long.push(b)
+      if (b.offline_for_ms > offlineThreshold) agents_offline_long.push(b)
     }
     agents_offline_long.sort((a, b) => b.offline_for_ms - a.offline_for_ms)
 
@@ -2696,11 +2773,12 @@ export class PgStore implements OpsGateStore {
         seats_used: licenseStats.seats_used,
         seats_available: licenseStats.seats_available
       },
-      connectivity: connectivityBuckets(agents),
+      connectivity: conn,
       events_by_day: [...dayMap.entries()].map(([day, count]) => ({
         day,
         count
       })),
+      agents_licensed,
       agents_unlicensed,
       agents_grace,
       agents_offline_long,

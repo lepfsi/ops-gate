@@ -100,10 +100,15 @@ export type Summary = {
     online: number
     stale: number
     offline_long: number
+    offline_long_alertable?: number
     offline_long_ms: number
     online_ms: number
+    schedule_active?: boolean
+    within_work_hours?: boolean
+    monitoring?: MonitoringSettings
   }
   events_by_day?: { day: string; count: number }[]
+  agents_licensed?: SummaryAgentBrief[]
   agents_unlicensed?: SummaryAgentBrief[]
   agents_grace?: SummaryAgentBrief[]
   agents_offline_long?: SummaryAgentBrief[]
@@ -111,6 +116,19 @@ export type Summary = {
     fingerprint: string
     agents: SummaryAgentBrief[]
   }>
+}
+
+export type MonitoringSettings = {
+  onlineMs: number
+  offlineLongMs: number
+  schedule: {
+    enabled: boolean
+    timezone: string
+    workDays: number[]
+    workStart: string
+    workEnd: string
+    breaks?: Array<{ start: string; end: string }>
+  }
 }
 
 export type PackListItem = {
@@ -692,6 +710,26 @@ export const api = {
     request<{ ok: boolean; version: string }>(
       `/v1/org/rules/packs/${encodeURIComponent(version)}/activate`,
       { method: "POST" }
+    ),
+
+  monitoring: () =>
+    request<{ org_id: string; monitoring: MonitoringSettings }>(
+      "/v1/org/monitoring"
+    ),
+
+  updateMonitoring: (body: Partial<MonitoringSettings>) =>
+    request<{ ok: boolean; monitoring: MonitoringSettings }>(
+      "/v1/org/monitoring",
+      { method: "PATCH", body: JSON.stringify(body) }
+    ),
+
+  mergeAgents: (keep_id: string, merge_ids: string[]) =>
+    request<{ ok: boolean; kept: string; removed: number }>(
+      "/v1/org/agents/merge",
+      {
+        method: "POST",
+        body: JSON.stringify({ keep_id, merge_ids })
+      }
     ),
 
   revokeAgent: (agentId: string) =>

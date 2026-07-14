@@ -359,6 +359,57 @@ export class MemoryStore implements OpsGateStore {
     return this.orgs.get(id)
   }
 
+  async updateOrgMonitoring(
+    orgId: string,
+    monitoring: Partial<import("./types").OrgMonitoringSettings>
+  ) {
+    const org = this.orgs.get(orgId)
+    if (!org) return undefined
+    const { mergeMonitoringSettings } = await import("./types")
+    org.monitoring = mergeMonitoringSettings({
+      ...org.monitoring,
+      ...monitoring,
+      schedule: monitoring.schedule
+        ? {
+            ...(org.monitoring?.schedule || {}),
+            ...monitoring.schedule
+          }
+        : org.monitoring?.schedule
+    })
+    return org
+  }
+
+  async mergeAgents(orgId: string, keepId: string, mergeIds: string[]) {
+    const ids = [...new Set(mergeIds.filter((id) => id && id !== keepId))]
+    if (!ids.length) return { ok: false as const, kept: keepId, removed: 0 }
+    const keep = this.agents.get(keepId)
+    if (!keep || keep.orgId !== orgId) {
+      return { ok: false as const, kept: keepId, removed: 0 }
+    }
+    let removed = 0
+    for (const mid of ids) {
+      const other = this.agents.get(mid)
+      if (!other || other.orgId !== orgId) continue
+      for (const e of this.events) {
+        if (e.orgId === orgId && e.agentId === mid) e.agentId = keepId
+      }
+      if (!keep.deviceFingerprint && other.deviceFingerprint) {
+        keep.deviceFingerprint = other.deviceFingerprint
+      }
+      if (
+        new Date(other.lastSeenAt).getTime() >
+        new Date(keep.lastSeenAt).getTime()
+      ) {
+        keep.lastSeenAt = other.lastSeenAt
+      }
+      this.agentsByTokenHash.delete(other.tokenHash)
+      this.agents.delete(mid)
+      removed++
+    }
+    await this.forceConfigSync(orgId)
+    return { ok: true as const, kept: keepId, removed }
+  }
+
   async getPolicy(orgId: string) {
     return this.policies.get(orgId)
   }
@@ -1544,8 +1595,7 @@ export class MemoryStore implements OpsGateStore {
       briefAgent,
       connectivityBuckets,
       eventsByDayFrom,
-      findDuplicateFingerprints,
-      OFFLINE_LONG_MS
+      findDuplicateFingerprints
     } = await import("./summary-helpers")
     const events = this.events.filter((e) => e.orgId === orgId)
     const byDecision: Record<string, number> = {}
@@ -1567,6 +1617,9 @@ export class MemoryStore implements OpsGateStore {
     const packs = this.packs.get(orgId) || []
     const agents = [...this.agents.values()].filter((a) => a.orgId === orgId)
     const licenseStats = await this.getLicenseStats(orgId)
+    const org = this.orgs.get(orgId)
+    const mon = org?.monitoring
+    const agents_licensed: import("./store-types").SummaryAgentBrief[] = []
     const agents_unlicensed: import("./store-types").SummaryAgentBrief[] = []
     const agents_grace: import("./store-types").SummaryAgentBrief[] = []
     const agents_offline_long: import("./store-types").SummaryAgentBrief[] = []
@@ -1574,19 +1627,23 @@ export class MemoryStore implements OpsGateStore {
     let licensedN = 0
     let graceN = 0
     let unlicensedN = 0
+    const conn = connectivityBuckets(agents, mon)
+    const offlineThreshold = conn.offline_long_ms
     for (const a of agents) {
       const lic = await this.isAgentLicensed(orgId, a.id)
       const b = briefAgent(a, lic)
       allBriefs.push(b)
-      if (b.license_status === "licensed") licensedN++
-      else if (b.license_status === "grace") {
+      if (b.license_status === "licensed") {
+        licensedN++
+        agents_licensed.push(b)
+      } else if (b.license_status === "grace") {
         graceN++
         agents_grace.push(b)
       } else {
         unlicensedN++
         agents_unlicensed.push(b)
       }
-      if (b.offline_for_ms > OFFLINE_LONG_MS) agents_offline_long.push(b)
+      if (b.offline_for_ms > offlineThreshold) agents_offline_long.push(b)
     }
     agents_offline_long.sort((a, b) => b.offline_for_ms - a.offline_for_ms)
     return {
@@ -1614,8 +1671,9 @@ export class MemoryStore implements OpsGateStore {
         seats_used: licenseStats.seats_used,
         seats_available: licenseStats.seats_available
       },
-      connectivity: connectivityBuckets(agents),
+      connectivity: conn,
       events_by_day: eventsByDayFrom(events, 14),
+      agents_licensed,
       agents_unlicensed,
       agents_grace,
       agents_offline_long,

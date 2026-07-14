@@ -77,6 +77,76 @@ export function mergeUserMessages(
   return out
 }
 
+/** Horaires d’entreprise pour alertes « hors-ligne long » */
+export interface WorkBreak {
+  start: string // "12:00"
+  end: string // "13:00"
+}
+
+export interface WorkSchedule {
+  enabled: boolean
+  /** IANA, ex. Europe/Paris */
+  timezone: string
+  /** 1=lundi … 7=dimanche (ISO) */
+  workDays: number[]
+  workStart: string // "08:00"
+  workEnd: string // "17:00"
+  breaks?: WorkBreak[]
+}
+
+/** Seuils monitoring dashboard (admin configurable) */
+export interface OrgMonitoringSettings {
+  /** last_seen < onlineMs → online */
+  onlineMs: number
+  /** last_seen > offlineLongMs → not connected long time */
+  offlineLongMs: number
+  schedule: WorkSchedule
+}
+
+export const DEFAULT_MONITORING_SETTINGS: OrgMonitoringSettings = {
+  onlineMs: 15 * 60 * 1000,
+  offlineLongMs: 2 * 60 * 60 * 1000,
+  schedule: {
+    enabled: false,
+    timezone: "Europe/Paris",
+    workDays: [1, 2, 3, 4, 5],
+    workStart: "08:00",
+    workEnd: "17:00",
+    breaks: [{ start: "12:00", end: "13:00" }]
+  }
+}
+
+export function mergeMonitoringSettings(
+  partial?: Partial<OrgMonitoringSettings> | null
+): OrgMonitoringSettings {
+  const base = { ...DEFAULT_MONITORING_SETTINGS }
+  if (!partial || typeof partial !== "object") return base
+  if (typeof partial.onlineMs === "number" && partial.onlineMs >= 60_000) {
+    base.onlineMs = partial.onlineMs
+  }
+  if (
+    typeof partial.offlineLongMs === "number" &&
+    partial.offlineLongMs >= 5 * 60_000
+  ) {
+    base.offlineLongMs = partial.offlineLongMs
+  }
+  if (partial.schedule && typeof partial.schedule === "object") {
+    base.schedule = {
+      ...DEFAULT_MONITORING_SETTINGS.schedule,
+      ...partial.schedule,
+      workDays:
+        Array.isArray(partial.schedule.workDays) &&
+        partial.schedule.workDays.length
+          ? partial.schedule.workDays.map(Number)
+          : DEFAULT_MONITORING_SETTINGS.schedule.workDays,
+      breaks: Array.isArray(partial.schedule.breaks)
+        ? partial.schedule.breaks
+        : DEFAULT_MONITORING_SETTINGS.schedule.breaks
+    }
+  }
+  return base
+}
+
 export interface Organization {
   id: string
   name: string
@@ -93,6 +163,8 @@ export interface Organization {
   isPersonal?: boolean
   /** Sièges licences agents (0 = illimité démo) */
   licenseSeats?: number
+  /** Seuils offline + planning horaires */
+  monitoring?: Partial<OrgMonitoringSettings>
   createdAt: string
 }
 
@@ -379,6 +451,8 @@ export type AdminAuditAction =
   | "moving_rule_upsert"
   | "moving_rule_delete"
   | "moving_rule_apply"
+  | "org_settings_update"
+  | "agent_merge"
 
 export interface AdminAuditEvent {
   id: string

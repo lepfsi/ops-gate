@@ -80,13 +80,18 @@ export type OrgSummary = {
     online: number
     stale: number
     offline_long: number
-    /** ms sans sync pour « hors ligne long » (défaut 2h) */
+    /** Hors-ligne long ET heures de travail (alertes actives) */
+    offline_long_alertable?: number
     offline_long_ms: number
     online_ms: number
+    schedule_active?: boolean
+    within_work_hours?: boolean
+    monitoring?: import("./types").OrgMonitoringSettings
   }
   /** Events par jour (14 j) pour graphique temporel */
   events_by_day?: { day: string; count: number }[]
   /** Listes cliquables dashboard */
+  agents_licensed?: SummaryAgentBrief[]
   agents_unlicensed?: SummaryAgentBrief[]
   agents_grace?: SummaryAgentBrief[]
   agents_offline_long?: SummaryAgentBrief[]
@@ -125,6 +130,17 @@ export interface OpsGateStore {
 
   findOrgByCode(code: string): Promise<Organization | undefined>
   getOrg(id: string): Promise<Organization | undefined>
+  /** Met à jour monitoring (seuils offline + schedule) */
+  updateOrgMonitoring(
+    orgId: string,
+    monitoring: Partial<import("./types").OrgMonitoringSettings>
+  ): Promise<Organization | undefined>
+  /** Fusionne agents doublons : conserve keepId, supprime mergeIds */
+  mergeAgents(
+    orgId: string,
+    keepId: string,
+    mergeIds: string[]
+  ): Promise<{ ok: boolean; kept: string; removed: number }>
   getPolicy(orgId: string): Promise<Policy | undefined>
   updatePolicy(
     orgId: string,

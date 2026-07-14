@@ -1037,10 +1037,72 @@ textarea.input {
   border-left: 3px solid var(--accent);
 }
 
+/* Shell navigation latérale (tous les modules) */
+.shell-body {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+  margin-top: 8px;
+}
+
+@media (max-width: 900px) {
+  .shell-body {
+    grid-template-columns: 1fr;
+  }
+}
+
+.shell-nav {
+  background: var(--navy);
+  border-radius: var(--radius);
+  padding: 10px 8px 14px;
+  position: sticky;
+  top: 12px;
+  min-height: 280px;
+}
+
+.shell-nav-item,
+.shell-nav-sub {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: transparent;
+  color: #cbd5e1;
+  padding: 10px 12px;
+  border-radius: 8px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  margin-bottom: 2px;
+}
+
+.shell-nav-sub {
+  padding-left: 22px;
+  font-size: 0.78rem;
+  color: #94a3b8;
+}
+
+.shell-nav-item:hover,
+.shell-nav-sub:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: #fff;
+}
+
+.shell-nav-item.active,
+.shell-nav-sub.active {
+  background: rgba(43, 217, 197, 0.18);
+  color: #2bd9c5;
+}
+
+.shell-main {
+  min-width: 0;
+}
+
 /* Layout dashboard type Kaspersky (sidebar + main) */
 .dash-layout {
   display: grid;
-  grid-template-columns: 200px minmax(0, 1fr);
+  grid-template-columns: 180px minmax(0, 1fr);
   gap: 16px;
   align-items: start;
 }

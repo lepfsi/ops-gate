@@ -12,6 +12,8 @@ CREATE TABLE IF NOT EXISTS organizations (
   primary_email TEXT NOT NULL DEFAULT 'admin@demo.local',
   is_personal BOOLEAN NOT NULL DEFAULT FALSE,
   license_seats INT NOT NULL DEFAULT 0,
+  /** Seuils offline + schedule horaires (JSON OrgMonitoringSettings) */
+  monitoring_json TEXT NOT NULL DEFAULT '{}',
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 

@@ -560,6 +560,83 @@ export function createApp() {
     return c.json(await store.summary(auth.orgId))
   })
 
+  /** Paramètres monitoring (seuils offline + schedule) */
+  v1.get("/org/monitoring", async (c) => {
+    const _gate = await requireConsoleAuth(c, "console_access")
+    if (!_gate.ok) return c.json({ error: _gate.error }, _gate.status)
+    const org = await store.getOrg(_gate.orgId)
+    if (!org) return c.json({ error: "no_org" }, 404)
+    const { mergeMonitoringSettings } = await import("./types")
+    return c.json({
+      org_id: org.id,
+      monitoring: mergeMonitoringSettings(org.monitoring)
+    })
+  })
+
+  v1.patch("/org/monitoring", async (c) => {
+    const _gate = await requireConsoleAuth(c, "manage_policies")
+    if (!_gate.ok) return c.json({ error: _gate.error }, _gate.status)
+    const org = await store.getOrg(_gate.orgId)
+    if (!org) return c.json({ error: "no_org" }, 404)
+    let body: Partial<import("./types").OrgMonitoringSettings>
+    try {
+      body = await c.req.json()
+    } catch {
+      return c.json({ error: "invalid_json" }, 400)
+    }
+    const updated = await store.updateOrgMonitoring(org.id, body)
+    await store.appendAdminAudit({
+      orgId: org.id,
+      adminId: _gate.admin.id,
+      adminEmail: _gate.admin.email,
+      adminLabel: _gate.admin.label,
+      action: "org_settings_update",
+      detail: `Monitoring : offline ${Math.round((updated?.monitoring as { offlineLongMs?: number })?.offlineLongMs || 0) / 60000} min · schedule ${(updated?.monitoring as { schedule?: { enabled?: boolean } })?.schedule?.enabled ? "ON" : "OFF"}`
+    })
+    const { mergeMonitoringSettings } = await import("./types")
+    return c.json({
+      ok: true,
+      monitoring: mergeMonitoringSettings(updated?.monitoring)
+    })
+  })
+
+  /** Fusionner agents doublons */
+  v1.post("/org/agents/merge", async (c) => {
+    const _gate = await requireConsoleAuth(c, "manage_policies")
+    if (!_gate.ok) return c.json({ error: _gate.error }, _gate.status)
+    const org = await store.getOrg(_gate.orgId)
+    if (!org) return c.json({ error: "no_org" }, 404)
+    let body: { keep_id?: string; merge_ids?: string[] }
+    try {
+      body = await c.req.json()
+    } catch {
+      return c.json({ error: "invalid_json" }, 400)
+    }
+    if (!body.keep_id || !Array.isArray(body.merge_ids) || !body.merge_ids.length) {
+      return c.json({ error: "keep_id_and_merge_ids_required" }, 400)
+    }
+    const result = await store.mergeAgents(
+      org.id,
+      body.keep_id,
+      body.merge_ids
+    )
+    if (!result.ok) return c.json({ error: "merge_failed" }, 400)
+    await store.appendAdminAudit({
+      orgId: org.id,
+      adminId: _gate.admin.id,
+      adminEmail: _gate.admin.email,
+      adminLabel: _gate.admin.label,
+      action: "agent_merge",
+      detail: `Fusion agents → conservé ${result.kept}, supprimé ${result.removed}`,
+      meta: { keep_id: result.kept, removed: result.removed }
+    })
+    return c.json({
+      ok: true,
+      kept: result.kept,
+      removed: result.removed
+    })
+  })
+
   v1.get("/org/agents", async (c) => {
     const _gate = await requireConsoleAuth(c, "console_access")
     if (!_gate.ok) return c.json({ error: _gate.error }, _gate.status)
