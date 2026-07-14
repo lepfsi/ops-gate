@@ -136,7 +136,7 @@ CREATE TABLE IF NOT EXISTS agents (
 );
 
 CREATE INDEX IF NOT EXISTS agents_org_idx ON agents(org_id);
-CREATE INDEX IF NOT EXISTS agents_org_fp_idx ON agents(org_id, device_fingerprint);
+-- agents_org_fp_idx créé après soft-alter (bases existantes sans device_fingerprint)
 
 -- ── Rule packs ─────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS rule_packs (
