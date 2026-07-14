@@ -449,6 +449,23 @@ export default function App() {
                 onClick={() => {
                   setTab("summary")
                   setDashSection(id)
+                  const elId =
+                    id === "overview"
+                      ? null
+                      : id === "connectivity" || id === "licenses"
+                        ? "dash-licenses"
+                        : id === "activity"
+                          ? "dash-activity"
+                          : "dash-rules"
+                  if (elId) {
+                    setTimeout(() => {
+                      document
+                        .getElementById(elId)
+                        ?.scrollIntoView({ behavior: "smooth", block: "start" })
+                    }, 50)
+                  } else {
+                    window.scrollTo({ top: 0, behavior: "smooth" })
+                  }
                 }}>
                 {label}
               </button>
@@ -807,7 +824,7 @@ function SummaryView({
   const openDecision = async (k: string) => {
     setDrill(k)
     setPanel("decision")
-    setDashSection("activity")
+    setDashSection("overview")
     setDrillBusy(true)
     try {
       const r = await api.eventsByDecision(k)
@@ -964,9 +981,8 @@ function SummaryView({
         </div>
       </div>
 
-      {/* Licences + connexion — toujours visibles en overview / sections */}
-      {(dashSection === "overview" || dashSection === "licenses") && (
-      <div className="dash-grid">
+      {/* Tout visible au clic dashboard ; sous-liens = scroll uniquement */}
+      <div id="dash-licenses" className="dash-grid">
         <div className="card dash-widget">
           <div className="dash-widget-head">
             <h2>Licences</h2>
@@ -1032,13 +1048,23 @@ function SummaryView({
           </div>
           <ul className="dash-status-list">
             <li>
-              <span className="dash-dot ok" /> Online (&lt;{" "}
-              {Math.round(conn.online_ms / 60000)} min){" "}
-              <strong>{conn.online}</strong>
+              <button
+                type="button"
+                className="dash-link-row"
+                onClick={() => setPanel("online")}>
+                <span className="dash-dot ok" /> Online (&lt;{" "}
+                {Math.round(conn.online_ms / 60000)} min){" "}
+                <strong>{conn.online}</strong>
+              </button>
             </li>
             <li>
-              <span className="dash-dot warn" /> Stale{" "}
-              <strong>{conn.stale}</strong>
+              <button
+                type="button"
+                className="dash-link-row"
+                onClick={() => setPanel("stale")}>
+                <span className="dash-dot warn" /> Stale{" "}
+                <strong>{conn.stale}</strong>
+              </button>
             </li>
             <li>
               <button
@@ -1105,10 +1131,8 @@ function SummaryView({
           </div>
         </div>
       </div>
-      )}
 
-      {(dashSection === "overview" || dashSection === "activity") && (
-      <div className="dash-grid">
+      <div id="dash-activity" className="dash-grid">
         <div className="card dash-widget">
           <div className="dash-widget-head">
             <h2>Activité des décisions</h2>
@@ -1173,10 +1197,8 @@ function SummaryView({
           </div>
         </div>
       </div>
-      )}
 
-      {(dashSection === "overview" || dashSection === "rules") && (
-      <div className="dash-grid">
+      <div id="dash-rules" className="dash-grid">
         <div className="card dash-widget">
           <div className="dash-widget-head">
             <h2>Menaces / règles les + fréquentes</h2>
@@ -1223,9 +1245,39 @@ function SummaryView({
           </div>
         )}
       </div>
-      )}
 
       {/* Panneaux contextuels cliquables */}
+      {panel === "online" && (
+        <div className="card dash-context-panel">
+          <h3 style={{ marginTop: 0 }}>
+            Agents Online{" "}
+            <button
+              type="button"
+              className="btn secondary btn-sm"
+              onClick={() => setPanel(null)}>
+              Fermer
+            </button>
+          </h3>
+          {renderAgentList(summary.agents_online, "Aucun agent online")}
+        </div>
+      )}
+      {panel === "stale" && (
+        <div className="card dash-context-panel">
+          <h3 style={{ marginTop: 0 }}>
+            Agents Stale{" "}
+            <button
+              type="button"
+              className="btn secondary btn-sm"
+              onClick={() => setPanel(null)}>
+              Fermer
+            </button>
+          </h3>
+          <p className="muted">
+            Dernier sync entre « online » et « not connected long time ».
+          </p>
+          {renderAgentList(summary.agents_stale, "Aucun agent stale")}
+        </div>
+      )}
       {panel === "licensed" && (
         <div className="card dash-context-panel">
           <h3 style={{ marginTop: 0 }}>
@@ -1520,13 +1572,37 @@ function MonitoringSettingsView({
         </label>
         {schedOn && (
           <>
-            <label className="field-label">Fuseau</label>
-            <input
+            <label className="field-label">Fuseau horaire</label>
+            <select
               className="input"
               value={tz}
-              onChange={(e) => setTz(e.target.value)}
-              placeholder="Europe/Paris"
-            />
+              onChange={(e) => setTz(e.target.value)}>
+              {(
+                [
+                  ["Europe/Paris", "Europe/Paris (France)"],
+                  ["Europe/Brussels", "Europe/Brussels (Belgique)"],
+                  ["Europe/Zurich", "Europe/Zurich (Suisse)"],
+                  ["Europe/London", "Europe/London (UK)"],
+                  ["Europe/Berlin", "Europe/Berlin (Allemagne)"],
+                  ["Europe/Madrid", "Europe/Madrid (Espagne)"],
+                  ["Africa/Casablanca", "Africa/Casablanca (Maroc)"],
+                  ["Africa/Abidjan", "Africa/Abidjan (UTC)"],
+                  ["Africa/Lagos", "Africa/Lagos (Nigeria)"],
+                  ["America/New_York", "America/New_York (US Est)"],
+                  ["America/Chicago", "America/Chicago (US Centre)"],
+                  ["America/Los_Angeles", "America/Los_Angeles (US Ouest)"],
+                  ["America/Toronto", "America/Toronto (Canada)"],
+                  ["America/Montreal", "America/Toronto (alias)"],
+                  ["Asia/Dubai", "Asia/Dubai"],
+                  ["Asia/Tokyo", "Asia/Tokyo"],
+                  ["UTC", "UTC"]
+                ] as const
+              ).map(([v, lab]) => (
+                <option key={v} value={v === "America/Montreal" ? "America/Toronto" : v}>
+                  {lab}
+                </option>
+              ))}
+            </select>
             <label className="field-label">Jours travaillés</label>
             <div className="row" style={{ flexWrap: "wrap", gap: 8 }}>
               {dayLabels.map(([d, lab]) => (
@@ -1550,7 +1626,7 @@ function MonitoringSettingsView({
             </div>
             <div className="row">
               <div>
-                <label className="field-label">Début</label>
+                <label className="field-label">Début journée</label>
                 <input
                   className="input"
                   type="time"
@@ -1559,7 +1635,7 @@ function MonitoringSettingsView({
                 />
               </div>
               <div>
-                <label className="field-label">Fin</label>
+                <label className="field-label">Fin journée</label>
                 <input
                   className="input"
                   type="time"
@@ -1568,7 +1644,14 @@ function MonitoringSettingsView({
                 />
               </div>
             </div>
-            <div className="row">
+            <div
+              className="row"
+              style={{
+                alignItems: "flex-end",
+                flexWrap: "wrap",
+                gap: 10,
+                marginTop: 4
+              }}>
               <div>
                 <label className="field-label">Pause début</label>
                 <input
@@ -1587,43 +1670,75 @@ function MonitoringSettingsView({
                   onChange={(e) => setBreakEnd(e.target.value)}
                 />
               </div>
+              <button
+                className="btn"
+                type="button"
+                disabled={busy}
+                style={{ marginBottom: 2 }}
+                onClick={async () => {
+                  setBusy(true)
+                  setError(null)
+                  try {
+                    await api.updateMonitoring({
+                      onlineMs: onlineMin * 60 * 1000,
+                      offlineLongMs: offlineMin * 60 * 1000,
+                      schedule: {
+                        enabled: schedOn,
+                        timezone: tz,
+                        workDays: days,
+                        workStart,
+                        workEnd,
+                        breaks:
+                          breakStart && breakEnd
+                            ? [{ start: breakStart, end: breakEnd }]
+                            : []
+                      }
+                    })
+                    setInfo(
+                      "Paramètres monitoring enregistrés — seuils & planning appliqués."
+                    )
+                  } catch (e) {
+                    setError(String(e))
+                  } finally {
+                    setBusy(false)
+                  }
+                }}>
+                Enregistrer
+              </button>
             </div>
           </>
         )}
-        <button
-          className="btn"
-          type="button"
-          disabled={busy}
-          onClick={async () => {
-            setBusy(true)
-            setError(null)
-            try {
-              await api.updateMonitoring({
-                onlineMs: onlineMin * 60 * 1000,
-                offlineLongMs: offlineMin * 60 * 1000,
-                schedule: {
-                  enabled: schedOn,
-                  timezone: tz,
-                  workDays: days,
-                  workStart,
-                  workEnd,
-                  breaks:
-                    breakStart && breakEnd
-                      ? [{ start: breakStart, end: breakEnd }]
-                      : []
-                }
-              })
-              setInfo(
-                "Paramètres monitoring enregistrés — le dashboard applique les seuils immédiatement."
-              )
-            } catch (e) {
-              setError(String(e))
-            } finally {
-              setBusy(false)
-            }
-          }}>
-          Enregistrer
-        </button>
+        {!schedOn && (
+          <button
+            className="btn"
+            type="button"
+            disabled={busy}
+            onClick={async () => {
+              setBusy(true)
+              setError(null)
+              try {
+                await api.updateMonitoring({
+                  onlineMs: onlineMin * 60 * 1000,
+                  offlineLongMs: offlineMin * 60 * 1000,
+                  schedule: {
+                    enabled: false,
+                    timezone: tz,
+                    workDays: days,
+                    workStart,
+                    workEnd,
+                    breaks: []
+                  }
+                })
+                setInfo("Seuils enregistrés (planning désactivé).")
+              } catch (e) {
+                setError(String(e))
+              } finally {
+                setBusy(false)
+              }
+            }}>
+            Enregistrer
+          </button>
+        )}
       </div>
     </div>
   )
@@ -1961,8 +2076,14 @@ function PolicyView({
   const [profAction, setProfAction] = useState("mask_recommend")
   const [profGroups, setProfGroups] = useState<string[]>([])
   const [profMsgNotice, setProfMsgNotice] = useState("")
+  const [profMsgAlertTitle, setProfMsgAlertTitle] = useState("")
+  const [profMsgAlertBody, setProfMsgAlertBody] = useState("")
   const [profMsgBlockTitle, setProfMsgBlockTitle] = useState("")
   const [profMsgBlockBody, setProfMsgBlockBody] = useState("")
+  const [profMsgForceTitle, setProfMsgForceTitle] = useState("")
+  const [profMsgForceBody, setProfMsgForceBody] = useState("")
+  const [profMsgAlertTitleFile, setProfMsgAlertTitleFile] = useState("")
+  const [profMsgAlertBodyFile, setProfMsgAlertBodyFile] = useState("")
   const [showProfMsgs, setShowProfMsgs] = useState(false)
   const [editId, setEditId] = useState<string | null>(null)
 
@@ -2290,9 +2411,19 @@ function PolicyView({
                         setProfAction(p.defaultAction || "mask_recommend")
                         setProfGroups([...(p.assignedGroupIds || [])])
                         setProfMsgNotice(p.userMessages?.adminNotice || "")
+                        setProfMsgAlertTitle(p.userMessages?.alertTitle || "")
+                        setProfMsgAlertBody(p.userMessages?.alertBody || "")
                         setProfMsgBlockTitle(p.userMessages?.blockTitle || "")
                         setProfMsgBlockBody(p.userMessages?.blockBody || "")
-                        setShowProfMsgs(!!p.userMessages)
+                        setProfMsgForceTitle(p.userMessages?.maskForceTitle || "")
+                        setProfMsgForceBody(p.userMessages?.maskForceBody || "")
+                        setProfMsgAlertTitleFile(
+                          p.userMessages?.alertTitleFile || ""
+                        )
+                        setProfMsgAlertBodyFile(
+                          p.userMessages?.alertBodyFile || ""
+                        )
+                        setShowProfMsgs(true)
                       }}>
                       Modifier
                     </button>{" "}
@@ -2403,28 +2534,67 @@ function PolicyView({
               border: "1px solid var(--line)"
             }}>
             <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>
-              Ces messages remplacent ceux de la policy org pour les agents de ce
-              profil.
+              Même jeu de champs que la policy org. Les valeurs non vides
+              remplacent celles de la policy par défaut pour ce profil.
             </p>
-            <label className="field-label">Mention admin</label>
+            <label className="field-label">Mention « pas une erreur »</label>
             <textarea
               className="input"
               rows={2}
               value={profMsgNotice}
               onChange={(e) => setProfMsgNotice(e.target.value)}
             />
-            <label className="field-label">Blocage — titre</label>
+            <label className="field-label">Alerte — titre</label>
+            <input
+              className="input"
+              value={profMsgAlertTitle}
+              onChange={(e) => setProfMsgAlertTitle(e.target.value)}
+            />
+            <label className="field-label">Alerte — corps</label>
+            <textarea
+              className="input"
+              rows={2}
+              value={profMsgAlertBody}
+              onChange={(e) => setProfMsgAlertBody(e.target.value)}
+            />
+            <label className="field-label">Blocage total — titre</label>
             <input
               className="input"
               value={profMsgBlockTitle}
               onChange={(e) => setProfMsgBlockTitle(e.target.value)}
             />
-            <label className="field-label">Blocage — corps</label>
+            <label className="field-label">Blocage total — corps</label>
             <textarea
               className="input"
               rows={2}
               value={profMsgBlockBody}
               onChange={(e) => setProfMsgBlockBody(e.target.value)}
+            />
+            <label className="field-label">Masquage forcé — titre</label>
+            <input
+              className="input"
+              value={profMsgForceTitle}
+              onChange={(e) => setProfMsgForceTitle(e.target.value)}
+            />
+            <label className="field-label">Masquage forcé — corps</label>
+            <textarea
+              className="input"
+              rows={2}
+              value={profMsgForceBody}
+              onChange={(e) => setProfMsgForceBody(e.target.value)}
+            />
+            <label className="field-label">Fichier — titre</label>
+            <input
+              className="input"
+              value={profMsgAlertTitleFile}
+              onChange={(e) => setProfMsgAlertTitleFile(e.target.value)}
+            />
+            <label className="field-label">Fichier — corps</label>
+            <textarea
+              className="input"
+              rows={2}
+              value={profMsgAlertBodyFile}
+              onChange={(e) => setProfMsgAlertBodyFile(e.target.value)}
             />
           </div>
         )}
@@ -2465,12 +2635,21 @@ function PolicyView({
               setError(null)
               try {
                 const user_messages: import("./api").PolicyUserMessages = {}
-                if (profMsgNotice.trim())
-                  user_messages.adminNotice = profMsgNotice.trim()
-                if (profMsgBlockTitle.trim())
-                  user_messages.blockTitle = profMsgBlockTitle.trim()
-                if (profMsgBlockBody.trim())
-                  user_messages.blockBody = profMsgBlockBody.trim()
+                const put = (
+                  k: keyof import("./api").PolicyUserMessages,
+                  v: string
+                ) => {
+                  if (v.trim()) user_messages[k] = v.trim()
+                }
+                put("adminNotice", profMsgNotice)
+                put("alertTitle", profMsgAlertTitle)
+                put("alertBody", profMsgAlertBody)
+                put("blockTitle", profMsgBlockTitle)
+                put("blockBody", profMsgBlockBody)
+                put("maskForceTitle", profMsgForceTitle)
+                put("maskForceBody", profMsgForceBody)
+                put("alertTitleFile", profMsgAlertTitleFile)
+                put("alertBodyFile", profMsgAlertBodyFile)
                 const body = {
                   name: profName.trim(),
                   department: profDept || undefined,
@@ -2495,8 +2674,14 @@ function PolicyView({
                 setProfName("")
                 setProfGroups([])
                 setProfMsgNotice("")
+                setProfMsgAlertTitle("")
+                setProfMsgAlertBody("")
                 setProfMsgBlockTitle("")
                 setProfMsgBlockBody("")
+                setProfMsgForceTitle("")
+                setProfMsgForceBody("")
+                setProfMsgAlertTitleFile("")
+                setProfMsgAlertBodyFile("")
                 setShowProfMsgs(false)
                 setEditId(null)
                 onReload()
@@ -2779,6 +2964,7 @@ function PeopleView({
   const [grpDesc, setGrpDesc] = useState("")
   const [grpProfile, setGrpProfile] = useState("")
   const [grpEditId, setGrpEditId] = useState<string | null>(null)
+  const [showGrpForm, setShowGrpForm] = useState(false)
 
   const isPrincipal = !!sessionAdmin.is_principal
 
@@ -3077,6 +3263,7 @@ function PeopleView({
                           setGrpName(g.name)
                           setGrpDesc(g.description || "")
                           setGrpProfile(g.policyProfileId || "")
+                          setShowGrpForm(true)
                         }}>
                         Modifier
                       </button>
@@ -3105,74 +3292,109 @@ function PeopleView({
             </tbody>
           </table></div>
         )}
-        <div className="form-stack" style={{ maxWidth: 520, marginTop: 12 }}>
-          <label className="field-label">Nom</label>
-          <input
-            className="input"
-            value={grpName}
-            onChange={(e) => setGrpName(e.target.value)}
-            placeholder="Finance"
-          />
-          <label className="field-label">Description</label>
-          <input
-            className="input"
-            value={grpDesc}
-            onChange={(e) => setGrpDesc(e.target.value)}
-            placeholder="Équipe finance — policy stricte"
-          />
-          <label className="field-label">Profil policy lié</label>
-          <select
-            className="input"
-            value={grpProfile}
-            onChange={(e) => setGrpProfile(e.target.value)}>
-            <option value="">(pas de policy)</option>
-            {profiles.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
-          </select>
-          <div className="row" style={{ marginTop: 10 }}>
-            <button
-              className="btn"
-              type="button"
-              disabled={busy || !grpName.trim()}
-              onClick={async () => {
-                setBusy(true)
-                try {
-                  if (grpEditId) {
-                    await api.updateGroup(grpEditId, {
-                      name: grpName.trim(),
-                      description: grpDesc || undefined,
-                      policy_profile_id: grpProfile || null
-                    })
-                    setInfo("Groupe mis à jour")
-                  } else {
-                    await api.createGroup({
-                      name: grpName.trim(),
-                      description: grpDesc || undefined,
-                      policy_profile_id: grpProfile || null
-                    })
-                    setInfo("Groupe créé")
-                  }
+        {!showGrpForm && !grpEditId ? (
+          <button
+            className="btn"
+            type="button"
+            style={{ marginTop: 12 }}
+            onClick={() => {
+              setShowGrpForm(true)
+              setGrpEditId(null)
+              setGrpName("")
+              setGrpDesc("")
+              setGrpProfile("")
+            }}>
+            + Créer un groupe
+          </button>
+        ) : (
+          <div className="form-stack" style={{ maxWidth: 520, marginTop: 12 }}>
+            <div
+              className="row"
+              style={{ justifyContent: "space-between", alignItems: "center" }}>
+              <strong style={{ fontSize: 14 }}>
+                {grpEditId ? "Modifier le groupe" : "Nouveau groupe"}
+              </strong>
+              <button
+                className="btn secondary btn-sm"
+                type="button"
+                onClick={() => {
+                  setShowGrpForm(false)
+                  setGrpEditId(null)
                   setGrpName("")
                   setGrpDesc("")
                   setGrpProfile("")
-                  setGrpEditId(null)
-                  onReload()
-                } catch (e) {
-                  setError(String(e))
-                } finally {
-                  setBusy(false)
-                }
-              }}>
-              {grpEditId ? "Enregistrer le groupe" : "Créer groupe"}
-            </button>
-            {grpEditId && (
+                }}>
+                Fermer
+              </button>
+            </div>
+            <label className="field-label">Nom</label>
+            <input
+              className="input"
+              value={grpName}
+              onChange={(e) => setGrpName(e.target.value)}
+              placeholder="Finance"
+            />
+            <label className="field-label">Description</label>
+            <input
+              className="input"
+              value={grpDesc}
+              onChange={(e) => setGrpDesc(e.target.value)}
+              placeholder="Équipe finance — policy stricte"
+            />
+            <label className="field-label">Profil policy lié</label>
+            <select
+              className="input"
+              value={grpProfile}
+              onChange={(e) => setGrpProfile(e.target.value)}>
+              <option value="">(pas de policy — policy org par défaut)</option>
+              {profiles.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+            <div className="row" style={{ marginTop: 10 }}>
+              <button
+                className="btn"
+                type="button"
+                disabled={busy || !grpName.trim()}
+                onClick={async () => {
+                  setBusy(true)
+                  try {
+                    if (grpEditId) {
+                      await api.updateGroup(grpEditId, {
+                        name: grpName.trim(),
+                        description: grpDesc || undefined,
+                        policy_profile_id: grpProfile || null
+                      })
+                      setInfo("Groupe mis à jour")
+                    } else {
+                      await api.createGroup({
+                        name: grpName.trim(),
+                        description: grpDesc || undefined,
+                        policy_profile_id: grpProfile || null
+                      })
+                      setInfo("Groupe créé")
+                    }
+                    setGrpName("")
+                    setGrpDesc("")
+                    setGrpProfile("")
+                    setGrpEditId(null)
+                    setShowGrpForm(false)
+                    onReload()
+                  } catch (e) {
+                    setError(String(e))
+                  } finally {
+                    setBusy(false)
+                  }
+                }}>
+                {grpEditId ? "Enregistrer le groupe" : "Créer le groupe"}
+              </button>
               <button
                 className="btn secondary"
                 type="button"
                 onClick={() => {
+                  setShowGrpForm(false)
                   setGrpEditId(null)
                   setGrpName("")
                   setGrpDesc("")
@@ -3180,12 +3402,13 @@ function PeopleView({
                 }}>
                 Annuler
               </button>
-            )}
+            </div>
           </div>
-        </div>
+        )}
         <p className="muted" style={{ marginTop: 10 }}>
-          Affectation auto agents → groupe : onglet <strong>Règles auto</strong>{" "}
-          (moving rules). LDAP : V2.1.
+          Affectation auto agents → groupe : <strong>Agents → Règles auto</strong>.
+          Agent licencié <em>sans</em> groupe = <strong>policy org par défaut</strong>.
+          LDAP : V2.1.
         </p>
       </div>
 

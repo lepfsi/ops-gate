@@ -112,6 +112,8 @@ export type Summary = {
   agents_unlicensed?: SummaryAgentBrief[]
   agents_grace?: SummaryAgentBrief[]
   agents_offline_long?: SummaryAgentBrief[]
+  agents_stale?: SummaryAgentBrief[]
+  agents_online?: SummaryAgentBrief[]
   duplicate_fingerprints?: Array<{
     fingerprint: string
     agents: SummaryAgentBrief[]

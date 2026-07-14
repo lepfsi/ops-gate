@@ -302,6 +302,7 @@ export class MemoryStore implements OpsGateStore {
       orgId,
       version: 1,
       defaultAction: "mask_recommend",
+      // Même couverture large que l’org démo (mode personnel)
       enabledHosts: [
         "chatgpt.com",
         "chat.openai.com",
@@ -327,9 +328,24 @@ export class MemoryStore implements OpsGateStore {
         "notebooklm.google.com",
         "openrouter.ai",
         "together.ai",
+        "fireworks.ai",
         "blackbox.ai",
+        "chat.lmsys.org",
+        "lmarena.ai",
+        "typingmind.com",
+        "chat.qwen.ai",
+        "writesonic.com",
+        "jasper.ai",
+        "copy.ai",
         "notion.so",
-        "labs.google"
+        "platform.openai.com",
+        "labs.google",
+        "deepai.org",
+        "sider.ai",
+        "monica.im",
+        "chatpdf.com",
+        "consensus.app",
+        "elicit.com"
       ],
       scanUploads: true,
       eventReporting: false,
@@ -1627,10 +1643,14 @@ export class MemoryStore implements OpsGateStore {
     let licensedN = 0
     let graceN = 0
     let unlicensedN = 0
-    const conn = connectivityBuckets(agents, mon)
+    const licMap = new Map<string, boolean>()
+    for (const a of agents) {
+      licMap.set(a.id, await this.isAgentLicensed(orgId, a.id))
+    }
+    const conn = connectivityBuckets(agents, mon, (a) => !!licMap.get(a.id))
     const offlineThreshold = conn.offline_long_ms
     for (const a of agents) {
-      const lic = await this.isAgentLicensed(orgId, a.id)
+      const lic = !!licMap.get(a.id)
       const b = briefAgent(a, lic)
       allBriefs.push(b)
       if (b.license_status === "licensed") {
@@ -1677,6 +1697,8 @@ export class MemoryStore implements OpsGateStore {
       agents_unlicensed,
       agents_grace,
       agents_offline_long,
+      agents_stale: conn.agents_stale,
+      agents_online: conn.agents_online,
       duplicate_fingerprints: findDuplicateFingerprints(allBriefs)
     }
   }
