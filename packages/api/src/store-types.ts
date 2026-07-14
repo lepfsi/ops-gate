@@ -95,6 +95,8 @@ export type OrgSummary = {
   agents_unlicensed?: SummaryAgentBrief[]
   agents_grace?: SummaryAgentBrief[]
   agents_offline_long?: SummaryAgentBrief[]
+  agents_stale?: SummaryAgentBrief[]
+  agents_online?: SummaryAgentBrief[]
   /** Doublons potentiels (même fingerprint, labels différents) */
   duplicate_fingerprints?: Array<{
     fingerprint: string

@@ -106,7 +106,8 @@ export function briefAgent(
 
 export function connectivityBuckets(
   agents: Agent[],
-  monitoring?: Partial<OrgMonitoringSettings> | null
+  monitoring?: Partial<OrgMonitoringSettings> | null,
+  licenseOf?: (a: Agent) => boolean
 ) {
   const mon = mergeMonitoringSettings(monitoring)
   const onlineMs = mon.onlineMs
@@ -117,15 +118,24 @@ export function connectivityBuckets(
   let stale = 0
   let offline_long = 0
   let offline_long_alertable = 0
+  const agents_stale: SummaryAgentBrief[] = []
+  const agents_online: SummaryAgentBrief[] = []
   for (const a of agents) {
     const age = Date.now() - new Date(a.lastSeenAt).getTime()
-    if (age <= onlineMs) online++
-    else if (age <= offlineLongMs) stale++
-    else {
+    const lic = licenseOf ? licenseOf(a) : a.licenseAssigned === true
+    const b = briefAgent(a, lic)
+    if (age <= onlineMs) {
+      online++
+      agents_online.push(b)
+    } else if (age <= offlineLongMs) {
+      stale++
+      agents_stale.push(b)
+    } else {
       offline_long++
       if (inSchedule) offline_long_alertable++
     }
   }
+  agents_stale.sort((a, b) => b.offline_for_ms - a.offline_for_ms)
   return {
     online,
     stale,
@@ -135,7 +145,9 @@ export function connectivityBuckets(
     online_ms: onlineMs,
     schedule_active: !!mon.schedule.enabled,
     within_work_hours: inSchedule,
-    monitoring: mon
+    monitoring: mon,
+    agents_stale,
+    agents_online
   }
 }
 

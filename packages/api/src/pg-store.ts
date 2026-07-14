@@ -2710,10 +2710,18 @@ export class PgStore implements OpsGateStore {
     let licensedN = 0
     let graceN = 0
     let unlicensedN = 0
-    const conn = connectivityBuckets(agents, orgMon?.monitoring)
+    const licMap = new Map<string, boolean>()
+    for (const a of agents) {
+      licMap.set(a.id, await this.isAgentLicensed(orgId, a.id))
+    }
+    const conn = connectivityBuckets(
+      agents,
+      orgMon?.monitoring,
+      (a) => !!licMap.get(a.id)
+    )
     const offlineThreshold = conn.offline_long_ms
     for (const a of agents) {
-      const lic = await this.isAgentLicensed(orgId, a.id)
+      const lic = !!licMap.get(a.id)
       const b = briefAgent(a, lic)
       allBriefs.push(b)
       if (b.license_status === "licensed") {
@@ -2782,6 +2790,8 @@ export class PgStore implements OpsGateStore {
       agents_unlicensed,
       agents_grace,
       agents_offline_long,
+      agents_stale: conn.agents_stale,
+      agents_online: conn.agents_online,
       duplicate_fingerprints: findDuplicateFingerprints(allBriefs)
     }
   }
