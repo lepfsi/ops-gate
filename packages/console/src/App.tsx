@@ -62,6 +62,13 @@ export default function App() {
   const [error, setErrorRaw] = useState<string | null>(null)
   const [info, setInfoRaw] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [theme, setTheme] = useState<"light" | "dark">(() => {
+    try {
+      return localStorage.getItem("opsgate_theme") === "dark" ? "dark" : "light"
+    } catch {
+      return "light"
+    }
+  })
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const clearToast = useCallback(() => {
@@ -121,9 +128,13 @@ export default function App() {
   }, [])
 
   useEffect(() => {
-    const t = localStorage.getItem("opsgate_theme")
-    if (t === "dark") document.documentElement.setAttribute("data-theme", "dark")
-  }, [])
+    if (theme === "dark") {
+      document.documentElement.setAttribute("data-theme", "dark")
+    } else {
+      document.documentElement.removeAttribute("data-theme")
+    }
+    localStorage.setItem("opsgate_theme", theme)
+  }, [theme])
 
   useEffect(() => {
     void (async () => {
@@ -444,16 +455,9 @@ export default function App() {
         <button
           type="button"
           className="btn secondary btn-sm"
-          title="Basculer le thème"
-          onClick={() => {
-            const root = document.documentElement
-            const next =
-              root.getAttribute("data-theme") === "dark" ? "light" : "dark"
-            if (next === "dark") root.setAttribute("data-theme", "dark")
-            else root.removeAttribute("data-theme")
-            localStorage.setItem("opsgate_theme", next)
-          }}>
-          Thème
+          title="Clair / sombre"
+          onClick={() => setTheme((t) => (t === "dark" ? "light" : "dark"))}>
+          {theme === "dark" ? "Clair" : "Sombre"}
         </button>
       </div>
 
@@ -3650,10 +3654,19 @@ function PeopleView({
 
           <div className="card">
             <h2>Recovery concepteur — codes one-time</h2>
-            <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>
-              Actifs : <strong>{rcActive}</strong>
-              {rcLow ? " · stock bas (&lt;5)" : ""} · offline ≥ 2 h
-            </p>
+            <div className="row" style={{ gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
+              <span className="host-count-pill">
+                {rcActive} actif{rcActive !== 1 ? "s" : ""}
+              </span>
+              {rcLow && (
+                <span className="badge high" style={{ fontSize: 11 }}>
+                  stock bas
+                </span>
+              )}
+              <span className="muted" style={{ fontSize: 12 }}>
+                offline ≥ 2 h · username vendor
+              </span>
+            </div>
             <div className="row" style={{ flexWrap: "wrap", gap: 8 }}>
               <input
                 className="input"
@@ -3663,6 +3676,7 @@ function PeopleView({
                 value={rcCount}
                 onChange={(e) => setRcCount(Number(e.target.value) || 20)}
                 style={{ width: 90 }}
+                title="Nombre de codes"
               />
               <button
                 className="btn"
@@ -3673,8 +3687,15 @@ function PeopleView({
                   try {
                     const r = await api.generateRecoveryCodes(rcCount)
                     setRcPlain(r.codes)
-                    setInfo(r.note)
+                    setInfo(
+                      `${r.created} code(s) générés — copiez-les maintenant, puis force-sync agents`
+                    )
                     await loadRecoveryPool()
+                    try {
+                      await api.forceSync()
+                    } catch {
+                      /* force-sync best-effort */
+                    }
                   } catch (e) {
                     setError(String(e))
                   } finally {
@@ -3695,6 +3716,11 @@ function PeopleView({
                     setRcPlain(null)
                     setInfo(`Pool invalidé · ${r.revoked} code(s)`)
                     await loadRecoveryPool()
+                    try {
+                      await api.forceSync()
+                    } catch {
+                      /* ignore */
+                    }
                   } catch (e) {
                     setError(String(e))
                   } finally {
@@ -3702,6 +3728,13 @@ function PeopleView({
                   }
                 }}>
                 Invalider le pool
+              </button>
+              <button
+                className="btn secondary"
+                type="button"
+                disabled={busy}
+                onClick={() => void loadRecoveryPool()}>
+                Actualiser
               </button>
               <button
                 className="btn secondary"
@@ -3723,37 +3756,68 @@ function PeopleView({
             </div>
             {rcPlain && rcPlain.length > 0 && (
               <div
+                className="recovery-codes-once"
                 style={{
                   marginTop: 12,
                   padding: 12,
                   background: "var(--surface-2)",
                   borderRadius: 10,
-                  border: "1px solid var(--line)"
+                  border: "1px solid var(--accent)"
                 }}>
                 <strong style={{ fontSize: 13 }}>
-                  Codes (copier maintenant — unique)
+                  Affichage unique — stockez hors ligne
                 </strong>
                 <pre
+                  className="mono"
                   style={{
-                    fontSize: 12,
+                    fontSize: 13,
                     margin: "8px 0 0",
                     whiteSpace: "pre-wrap",
-                    wordBreak: "break-all"
+                    wordBreak: "break-all",
+                    letterSpacing: "0.04em"
                   }}>
                   {rcPlain.map((c) => c.code).join("\n")}
                 </pre>
-                <button
-                  type="button"
-                  className="btn secondary btn-sm"
-                  style={{ marginTop: 8 }}
-                  onClick={() => {
-                    void navigator.clipboard.writeText(
-                      rcPlain.map((c) => c.code).join("\n")
-                    )
-                    setInfo("Codes copiés")
-                  }}>
-                  Copier
-                </button>
+                <div className="row" style={{ marginTop: 8, gap: 8 }}>
+                  <button
+                    type="button"
+                    className="btn secondary btn-sm"
+                    onClick={() => {
+                      void navigator.clipboard.writeText(
+                        rcPlain.map((c) => c.code).join("\n")
+                      )
+                      setInfo("Codes copiés")
+                    }}>
+                    Copier
+                  </button>
+                  <button
+                    type="button"
+                    className="btn secondary btn-sm"
+                    onClick={() => {
+                      const body = [
+                        "# OpsGate recovery codes — usage unique",
+                        `# Généré ${new Date().toISOString()}`,
+                        "# Username agent: vendor | recovery | opsgate",
+                        "# Uniquement si offline ≥ 2h",
+                        "",
+                        ...rcPlain.map((c) => c.code)
+                      ].join("\n")
+                      downloadTextFile(
+                        `opsgate-recovery-codes-${new Date().toISOString().slice(0, 10)}.txt`,
+                        body,
+                        "text/plain;charset=utf-8"
+                      )
+                      setInfo("Fichier .txt téléchargé")
+                    }}>
+                    Télécharger .txt
+                  </button>
+                  <button
+                    type="button"
+                    className="btn secondary btn-sm"
+                    onClick={() => setRcPlain(null)}>
+                    Masquer
+                  </button>
+                </div>
               </div>
             )}
             {recoveryHint && (
@@ -3775,7 +3839,12 @@ function PeopleView({
                   <tbody>
                     {rcRows.slice(0, 40).map((c) => (
                       <tr key={c.id}>
-                        <td>{c.active ? "actif" : "utilisé"}</td>
+                        <td>
+                          <span
+                            className={`badge ${c.active ? "active" : "medium"}`}>
+                            {c.active ? "actif" : "utilisé"}
+                          </span>
+                        </td>
                         <td className="muted">{c.label || "—"}</td>
                         <td className="muted" style={{ fontSize: 12 }}>
                           {c.created_at

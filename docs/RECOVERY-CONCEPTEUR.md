@@ -74,6 +74,21 @@ Les OTP « cloud » purs (SMS, TOTP serveur) ne marchent **pas** sans réseau au
 
 **Usage agent** : username `vendor` (ou `recovery` / `opsgate`) + code `XXXX-XXXX-XXXX-XXXX`, uniquement si offline ≥ 2 h.
 
+## Checklist pilote réel (validation)
+
+| # | Étape | OK ? |
+|---|--------|------|
+| 1 | Principal : **Générer** 10 codes · copier / `.txt` | |
+| 2 | Force-sync auto (ou manuel) · agent **Synchroniser** | |
+| 3 | Agent offline ≥ 2 h (ou last sync vieux) | |
+| 4 | Désinscription Options : user `vendor` + **un** code | |
+| 5 | Agent désenrôlé · code **utilisé** en console | |
+| 6 | Même code rejoué → **échec** | |
+| 7 | **Invalider le pool** · force-sync · anciens codes morts | |
+| 8 | Stock bas (&lt;5) affiché · regénérer | |
+
+Fallback : mdp admin local si `protect_unenroll` ; secret legacy `OPSGATE_VENDOR_RECOVERY` encore poussé (transition).
+
 ### Cadre opérationnel du pool one-time (obligatoire)
 
 Sans cadre, un pool mal géré = encore un SPOF (fuite de la feuille de codes) ou un panne (plus de codes offline).
