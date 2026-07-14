@@ -172,9 +172,9 @@ export function createApp() {
       replaced: !!agent.replaced,
       license_assigned: agent.licenseAssigned,
       message: agent.replaced
-        ? "Existing device re-enrolled (same label) — previous token revoked."
+        ? "Existing installation re-enrolled (same fingerprint) — previous token revoked."
         : org.isPersonal
-          ? "Personal account enrolled. Management local : Options + API locale (pas encore de portal cloud)."
+          ? "Personal account enrolled."
           : "Store agent_token securely. It is shown only once."
     })
   })

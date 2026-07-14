@@ -2041,24 +2041,14 @@ export class PgStore implements OpsGateStore {
       return { ...(refreshed || agent), replaced: true as const }
     }
 
-    // 1) Fingerprint stable (même install extension, label peut changer)
+    // Même empreinte d’installation (même extension) → re-enroll, pas un 2e agent.
+    // Le label n’est PAS unique : Chrome + Edge avec le même nom = 2 agents.
     if (fp) {
       const { rows: byFp } = await this.pool.query(
         `SELECT id FROM agents WHERE org_id = $1 AND device_fingerprint = $2 LIMIT 1`,
         [input.orgId, fp]
       )
       if (byFp[0]) return rebind(byFp[0].id)
-    }
-
-    // 2) Même label
-    if (label) {
-      const { rows: existing } = await this.pool.query(
-        `SELECT id FROM agents
-         WHERE org_id = $1 AND lower(trim(device_label)) = lower(trim($2))
-         LIMIT 1`,
-        [input.orgId, label]
-      )
-      if (existing[0]) return rebind(existing[0].id)
     }
 
     const agentId = newId("agt")
