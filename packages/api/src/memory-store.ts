@@ -1428,24 +1428,13 @@ export class MemoryStore implements OpsGateStore {
       return { ...this.agents.get(existing.id)!, replaced: true as const }
     }
 
-    // 1) Même empreinte d’installation → même agent (même si label change)
+    // Même empreinte d’installation → re-enroll (label peut changer).
+    // Labels non uniques : deux navigateurs avec le même nom = deux agents.
     if (fp) {
       for (const existing of this.agents.values()) {
         if (
           existing.orgId === input.orgId &&
           (existing.deviceFingerprint || "").trim() === fp
-        ) {
-          return rebind(existing)
-        }
-      }
-    }
-
-    // 2) Même label (compat)
-    if (labelKey) {
-      for (const existing of this.agents.values()) {
-        if (
-          existing.orgId === input.orgId &&
-          (existing.deviceLabel || "").trim().toLowerCase() === labelKey
         ) {
           return rebind(existing)
         }
