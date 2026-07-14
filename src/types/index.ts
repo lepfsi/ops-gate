@@ -13,6 +13,69 @@ export type {
 export type UserDecision = "mask_send" | "send_anyway" | "cancel"
 export type DetectionSource = "prompt" | "file"
 export type AgentMode = "local_only" | "org_managed" | "org_managed_strict"
+export type DefaultAction = "warn" | "mask_recommend" | "mask_force" | "block"
+
+/** Messages banner/toast (sync policy org) */
+export interface PolicyUserMessages {
+  adminNotice: string
+  alertTitle: string
+  alertBody: string
+  blockTitle: string
+  blockBody: string
+  maskForceTitle: string
+  maskForceBody: string
+  btnMask: string
+  btnSendAnyway: string
+  btnCancel: string
+  btnBlockAck: string
+  toastCancel: string
+  toastMask: string
+  toastSendAnyway: string
+  toastBlocked: string
+  alertTitleFile: string
+  alertBodyFile: string
+}
+
+export const DEFAULT_USER_MESSAGES: PolicyUserMessages = {
+  adminNotice:
+    "Cette restriction est appliquée par la politique de sécurité de votre organisation (administrée via OpsGate). Ce n’est pas une erreur technique.",
+  alertTitle: "Données sensibles détectées — action requise",
+  alertBody:
+    "Votre administrateur a configuré OpsGate pour protéger les données de l’entreprise avant envoi vers l’IA. Choisissez une action autorisée ci-dessous.",
+  blockTitle: "Envoi non autorisé par votre administrateur",
+  blockBody:
+    "La politique de sécurité de votre organisation bloque cet envoi vers l’IA. Ce n’est pas un bug : l’accès est volontairement restreint. Contactez votre administrateur IT si vous avez besoin d’une exception.",
+  maskForceTitle: "Masquage obligatoire (politique admin)",
+  maskForceBody:
+    "Votre administrateur impose le masquage des données sensibles avant tout envoi. L’envoi « tel quel » n’est pas autorisé.",
+  btnMask: "Masquer & Envoyer",
+  btnSendAnyway: "Envoyer quand même",
+  btnCancel: "Annuler",
+  btnBlockAck: "Compris — ne pas envoyer",
+  toastCancel: "Envoi annulé — vos données n’ont pas été transmises à l’IA.",
+  toastMask: "Données masquées selon la politique — envoi en cours…",
+  toastSendAnyway:
+    "Envoi sans masquage — action journalisée pour votre administrateur.",
+  toastBlocked:
+    "Envoi bloqué par la politique de votre organisation. Aucune donnée n’a été envoyée.",
+  alertTitleFile: "Fichier retenu — données sensibles",
+  alertBodyFile:
+    "Votre administrateur a configuré OpsGate pour analyser les fichiers avant envoi à l’IA. Choisissez une action autorisée."
+}
+
+export function mergeUserMessages(
+  partial?: Partial<PolicyUserMessages> | null
+): PolicyUserMessages {
+  if (!partial || typeof partial !== "object") {
+    return { ...DEFAULT_USER_MESSAGES }
+  }
+  const out = { ...DEFAULT_USER_MESSAGES }
+  for (const key of Object.keys(DEFAULT_USER_MESSAGES) as (keyof PolicyUserMessages)[]) {
+    const v = partial[key]
+    if (typeof v === "string" && v.trim()) out[key] = v.trim()
+  }
+  return out
+}
 
 import type { DetectionRule, Severity } from "@opsgate/engine"
 
@@ -101,6 +164,10 @@ export interface OpsGateSettings {
   unlicensedSince?: number
   licenseGraceMs?: number
   securityActive?: boolean
+  /** Policy action effective (sync) */
+  defaultAction?: DefaultAction
+  /** Messages UX custom admin (partial) */
+  userMessages?: Partial<PolicyUserMessages>
 }
 
 export type ExitActorInfo = {
@@ -120,6 +187,8 @@ export const DEFAULT_SETTINGS: OpsGateSettings = {
   apiBaseUrl: "http://127.0.0.1:8787",
   eventReporting: false,
   managedLockActive: false,
+  defaultAction: "mask_recommend",
+  userMessages: { ...DEFAULT_USER_MESSAGES },
   enabledHosts: [
     "chatgpt.com",
     "chat.openai.com",

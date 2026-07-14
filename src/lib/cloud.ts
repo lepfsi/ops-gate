@@ -37,6 +37,7 @@ export interface ConfigResponse {
     event_reporting: boolean
     rules_pack_version: string
     protect_unenroll?: boolean
+    user_messages?: Record<string, string>
     require_unenroll_password?: boolean
     admin_credentials?: Array<{
       id: string
@@ -327,6 +328,9 @@ export async function syncConfig(
         : undefined,
       licenseGraceMs: body.policy.license_grace_ms || 5 * 60 * 1000,
       securityActive: body.policy.security_active !== false,
+      defaultAction: (body.policy.default_action as OpsGateSettings["defaultAction"]) ||
+        "mask_recommend",
+      userMessages: body.policy.user_messages || {},
       // Si unlicensed après grace → désactive la protection locale
       enabled:
         body.policy.security_active === false

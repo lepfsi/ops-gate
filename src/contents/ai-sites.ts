@@ -2,7 +2,14 @@ import type { PlasmoCSConfig } from "plasmo"
 import type { DetectionRule } from "@opsgate/engine"
 
 import { initRulesMemoryListener } from "~lib/agent-store"
-import { isBannerOpen, removeBanner, showAlertBanner, showToast } from "~lib/banner"
+import {
+  isBannerOpen,
+  removeBanner,
+  showAlertBanner,
+  showToast,
+  toastFromDecision
+} from "~lib/banner"
+import { mergeUserMessages } from "~types"
 import { detectTextSync, ensureRulesWarm, maskText } from "~lib/detect"
 import {
   buildMaskedFileList,
@@ -396,30 +403,48 @@ function handlePotentialSend(event: Event, sourceEl?: Element | null): void {
     settings.rulesPackVersion ? `pack=${settings.rulesPackVersion}` : "pack=embedded"
   )
 
-  showAlertBanner(detections, (decision) => {
-    pending = false
+  const action = settings.defaultAction || "mask_recommend"
+  const msgs = mergeUserMessages(settings.userMessages)
 
-    if (decision === "cancel") {
-      logDecision("cancel", detections, false, "prompt")
-      showToast("Envoi annulé — vos données restent dans le champ")
-      return
-    }
+  showAlertBanner(
+    detections,
+    (decision) => {
+      pending = false
 
-    if (decision === "mask_send") {
-      const masked = maskText(text, detections, rules)
-      setPromptText(masked)
-      logDecision("mask_send", detections, true, "prompt")
-      showToast("Données masquées — envoi…")
+      if (action === "block" || decision === "cancel") {
+        logDecision("cancel", detections, false, "prompt")
+        toastFromDecision(action === "block" ? "blocked" : "cancel", msgs)
+        return
+      }
+
+      if (decision === "mask_send") {
+        const masked = maskText(text, detections, rules)
+        setPromptText(masked)
+        logDecision("mask_send", detections, true, "prompt")
+        toastFromDecision("mask_send", msgs)
+        bypassOnce = true
+        setTimeout(() => retriggerSend(sourceEl), 120)
+        return
+      }
+
+      // send_anyway — interdit en mask_force (banner le filtre déjà)
+      if (action === "mask_force") {
+        toastFromDecision("blocked", msgs)
+        return
+      }
+
+      logDecision("send_anyway", detections, false, "prompt")
+      toastFromDecision("send_anyway", msgs)
       bypassOnce = true
-      setTimeout(() => retriggerSend(sourceEl), 120)
-      return
+      setTimeout(() => retriggerSend(sourceEl), 60)
+    },
+    {
+      source: "prompt",
+      defaultAction: action,
+      userMessages: settings.userMessages,
+      orgName: settings.orgName
     }
-
-    logDecision("send_anyway", detections, false, "prompt")
-    showToast("Envoi sans masquage — attention aux données exposées")
-    bypassOnce = true
-    setTimeout(() => retriggerSend(sourceEl), 60)
-  })
+  )
 }
 
 // ---------- Uploads de fichiers ----------
@@ -615,6 +640,9 @@ async function processQuarantinedFiles(
             }
           ] as Detection[])
 
+    const fileAction = settings.defaultAction || "mask_recommend"
+    const fileMsgs = mergeUserMessages(settings.userMessages)
+
     showAlertBanner(
       bannerDetections,
       (decision) => {
@@ -627,14 +655,13 @@ async function processQuarantinedFiles(
         ]
 
         try {
-          if (decision === "cancel") {
+          if (fileAction === "block" || decision === "cancel") {
             clearAllFileInputs(input)
             logDecision("cancel", bannerDetections, false, "file", fileNames)
-            showToast("Aucune pièce jointe n’a été transmise à l’IA.", {
-              tone: "success",
-              title: "Fichier non joint",
-              durationMs: 4000
-            })
+            toastFromDecision(
+              fileAction === "block" ? "blocked" : "cancel",
+              fileMsgs
+            )
             return
           }
 
@@ -656,16 +683,7 @@ async function processQuarantinedFiles(
             const ok = replaceAttachments(maskedFiles, input)
             logDecision("mask_send", detections, true, "file", fileNames)
             if (ok) {
-              showToast(
-                sensitiveScans.length > 1
-                  ? "Seules les versions masquées sont jointes. L’original n’a pas été envoyé."
-                  : "Seule la version masquée est jointe. L’original n’a pas été envoyé.",
-                {
-                  tone: "success",
-                  title: "Masquage appliqué",
-                  durationMs: 5500
-                }
-              )
+              toastFromDecision("mask_send", fileMsgs)
             } else {
               clearAllFileInputs(input)
               downloadMaskedFallback(maskedFiles)
@@ -678,6 +696,13 @@ async function processQuarantinedFiles(
                 }
               )
             }
+            void sensitiveScans
+            return
+          }
+
+          if (fileAction === "mask_force") {
+            clearAllFileInputs(input)
+            toastFromDecision("blocked", fileMsgs)
             return
           }
 
@@ -692,16 +717,7 @@ async function processQuarantinedFiles(
           )
           void typeTags
           if (ok) {
-            showToast(
-              detections.length
-                ? "Le fichier ORIGINAL non masqué est joint. Des secrets peuvent être lus par l’IA."
-                : "Fichier joint après confirmation (type non scanné en profondeur).",
-              {
-                tone: "danger",
-                title: detections.length ? "Joint sans masquage" : "Joint confirmé",
-                durationMs: 7000
-              }
-            )
+            toastFromDecision("send_anyway", fileMsgs)
           } else {
             showToast(
               "Impossible de re-joindre automatiquement. Re-sélectionnez le fichier si vous voulez l’envoyer.",
@@ -727,7 +743,10 @@ async function processQuarantinedFiles(
       {
         source: "file",
         fileNames,
-        note: notes.length ? notes.join(" ") : undefined
+        note: notes.length ? notes.join(" ") : undefined,
+        defaultAction: fileAction,
+        userMessages: settings.userMessages,
+        orgName: settings.orgName
       }
     )
   } catch (err) {

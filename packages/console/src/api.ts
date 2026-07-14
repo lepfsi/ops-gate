@@ -124,6 +124,26 @@ export type EventRow = {
   file_names?: string[] | null
 }
 
+export type PolicyUserMessages = {
+  adminNotice?: string
+  alertTitle?: string
+  alertBody?: string
+  blockTitle?: string
+  blockBody?: string
+  maskForceTitle?: string
+  maskForceBody?: string
+  btnMask?: string
+  btnSendAnyway?: string
+  btnCancel?: string
+  btnBlockAck?: string
+  toastCancel?: string
+  toastMask?: string
+  toastSendAnyway?: string
+  toastBlocked?: string
+  alertTitleFile?: string
+  alertBodyFile?: string
+}
+
 export type PolicyDoc = {
   id: string
   orgId: string
@@ -136,6 +156,7 @@ export type PolicyDoc = {
   protectUnenroll?: boolean
   rulesPackVersion: string
   managementPasswordHash: string
+  userMessages?: PolicyUserMessages
   updatedAt: string
 }
 
@@ -417,6 +438,7 @@ export const api = {
     event_reporting?: boolean
     protect_unenroll?: boolean
     management_password?: string
+    user_messages?: PolicyUserMessages
   }) =>
     request<{ ok: boolean; policy: unknown }>("/v1/org/policy", {
       method: "PATCH",

@@ -97,6 +97,7 @@ export interface OpsGateStore {
         | "managementPasswordHash"
         | "protectUnenroll"
         | "configEpoch"
+        | "userMessages"
       >
     >
   ): Promise<Policy | undefined>

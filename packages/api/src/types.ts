@@ -4,6 +4,79 @@ export type OrgMode = "local_only" | "org_managed" | "org_managed_strict"
 export type EventPayloadPolicy = "metadata_only" | "metadata_plus_redacted_match"
 export type DefaultAction = "warn" | "mask_recommend" | "mask_force" | "block"
 
+/**
+ * Messages utilisateur affichés par l’extension (banner / toast).
+ * Personnalisables par l’admin ; valeurs par défaut ci-dessous.
+ * But : l’utilisateur comprend que c’est une policy admin, pas une erreur technique.
+ */
+export interface PolicyUserMessages {
+  /** Mention permanente : décision de l’organisation / admin */
+  adminNotice: string
+  /** Alerte détection (warn / mask_recommend) */
+  alertTitle: string
+  alertBody: string
+  /** Blocage total (defaultAction = block) */
+  blockTitle: string
+  blockBody: string
+  /** Masquage obligatoire (mask_force) */
+  maskForceTitle: string
+  maskForceBody: string
+  /** Libellés boutons */
+  btnMask: string
+  btnSendAnyway: string
+  btnCancel: string
+  btnBlockAck: string
+  /** Toasts après décision */
+  toastCancel: string
+  toastMask: string
+  toastSendAnyway: string
+  toastBlocked: string
+  /** Fichier (variantes courtes) */
+  alertTitleFile: string
+  alertBodyFile: string
+}
+
+export const DEFAULT_USER_MESSAGES: PolicyUserMessages = {
+  adminNotice:
+    "Cette restriction est appliquée par la politique de sécurité de votre organisation (administrée via OpsGate). Ce n’est pas une erreur technique.",
+  alertTitle: "Données sensibles détectées — action requise",
+  alertBody:
+    "Votre administrateur a configuré OpsGate pour protéger les données de l’entreprise avant envoi vers l’IA. Choisissez une action autorisée ci-dessous.",
+  blockTitle: "Envoi non autorisé par votre administrateur",
+  blockBody:
+    "La politique de sécurité de votre organisation bloque cet envoi vers l’IA. Ce n’est pas un bug : l’accès est volontairement restreint. Contactez votre administrateur IT si vous avez besoin d’une exception.",
+  maskForceTitle: "Masquage obligatoire (politique admin)",
+  maskForceBody:
+    "Votre administrateur impose le masquage des données sensibles avant tout envoi. L’envoi « tel quel » n’est pas autorisé.",
+  btnMask: "Masquer & Envoyer",
+  btnSendAnyway: "Envoyer quand même",
+  btnCancel: "Annuler",
+  btnBlockAck: "Compris — ne pas envoyer",
+  toastCancel: "Envoi annulé — vos données n’ont pas été transmises à l’IA.",
+  toastMask: "Données masquées selon la politique — envoi en cours…",
+  toastSendAnyway:
+    "Envoi sans masquage — action journalisée pour votre administrateur.",
+  toastBlocked:
+    "Envoi bloqué par la politique de votre organisation. Aucune donnée n’a été envoyée.",
+  alertTitleFile: "Fichier retenu — données sensibles",
+  alertBodyFile:
+    "Votre administrateur a configuré OpsGate pour analyser les fichiers avant envoi à l’IA. Choisissez une action autorisée."
+}
+
+export function mergeUserMessages(
+  partial?: Partial<PolicyUserMessages> | null
+): PolicyUserMessages {
+  if (!partial || typeof partial !== "object") {
+    return { ...DEFAULT_USER_MESSAGES }
+  }
+  const out = { ...DEFAULT_USER_MESSAGES }
+  for (const key of Object.keys(DEFAULT_USER_MESSAGES) as (keyof PolicyUserMessages)[]) {
+    const v = partial[key]
+    if (typeof v === "string" && v.trim()) out[key] = v.trim()
+  }
+  return out
+}
+
 export interface Organization {
   id: string
   name: string
@@ -162,6 +235,8 @@ export interface Policy {
    * Epoch de force-sync (incrémenté depuis la console).
    */
   configEpoch: number
+  /** Messages UX end-user (banner) — partial OK, merge avec defaults */
+  userMessages?: Partial<PolicyUserMessages>
   updatedAt: string
 }
 

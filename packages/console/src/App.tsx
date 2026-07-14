@@ -697,65 +697,167 @@ function SummaryView({
     }
   }
 
+  const maskN = decisions.mask_send || 0
+  const riskN = decisions.send_anyway || 0
+  const cancelN = decisions.cancel || 0
+  const totalDec = maskN + riskN + cancelN
+  const maxRule = Math.max(
+    1,
+    ...(summary.top_rules || []).map((r) => r.count)
+  )
+
   return (
     <>
       <div className="hero-card card">
         <div className="hero-copy">
-          <p className="hero-kicker">OpsGate Console · V1</p>
-          <h2>Vue d&apos;ensemble</h2>
+          <p className="hero-kicker">Monitoring &amp; rapports · Tableau de bord</p>
+          <h2>Statut de protection OpsGate</h2>
           <p className="muted">
-            Agents protégés, events metadata-only, packs de règles versionnés.
-            Force-sync pour pousser policy / mdp / profils (poll agent ~2&nbsp;min).
+            Vue inspirée console SOC (widgets contextuels) — charte DailyOps navy /
+            teal. Force-sync pour pousser policy &amp; messages utilisateur aux agents
+            (≤&nbsp;2&nbsp;min).
           </p>
         </div>
-        <button
-          className="btn"
-          type="button"
-          disabled={busy}
-          onClick={onForceSync}>
-          Forcer la synchronisation
-        </button>
+        <div className="row" style={{ gap: 8 }}>
+          <button
+            className="btn secondary"
+            type="button"
+            disabled={busy}
+            onClick={onRefresh}>
+            Actualiser
+          </button>
+          <button
+            className="btn"
+            type="button"
+            disabled={busy}
+            onClick={onForceSync}>
+            Forcer la synchronisation
+          </button>
+        </div>
       </div>
 
-      <div className="card">
-        <h2>Indicateurs</h2>
-        <div className="grid">
-          <div className="stat">
-            <div className="label">Agents</div>
-            <div className="value">{summary.agents}</div>
+      {/* Rangée widgets type Kaspersky */}
+      <div className="dash-grid">
+        <div className="card dash-widget">
+          <div className="dash-widget-head">
+            <h2>Statut de protection</h2>
+            <span className="muted" style={{ fontSize: 11 }}>
+              Agents &amp; pack
+            </span>
           </div>
-          <div className="stat">
-            <div className="label">Événements</div>
-            <div className="value">{summary.events_total}</div>
-          </div>
-          <div className="stat">
-            <div className="label">Packs publiés</div>
-            <div className="value">{summary.packs_published}</div>
-          </div>
-          <div className="stat">
-            <div className="label">Pack actif</div>
-            <div className="value" style={{ fontSize: 18 }}>
-              {summary.active_rules_pack?.version || "—"}
+          <div className="dash-status-row">
+            <div className="dash-donut" aria-hidden>
+              <div className="dash-donut-inner">
+                <span className="dash-donut-num">{summary.agents}</span>
+                <span className="dash-donut-lbl">agents</span>
+              </div>
             </div>
-            <div className="muted">
-              {summary.active_rules_pack
-                ? `${summary.active_rules_pack.rules_count} règles`
-                : ""}
-            </div>
+            <ul className="dash-status-list">
+              <li>
+                <span className="dash-dot ok" /> Agents enrôlés{" "}
+                <strong>{summary.agents}</strong>
+              </li>
+              <li>
+                <span className="dash-dot warn" /> Events total{" "}
+                <strong>{summary.events_total}</strong>
+              </li>
+              <li>
+                <span className="dash-dot crit" /> Envois risqués{" "}
+                <strong>{riskN}</strong>
+              </li>
+              <li className="muted" style={{ fontSize: 12 }}>
+                Pack actif :{" "}
+                <strong className="mono">
+                  {summary.active_rules_pack?.version || "—"}
+                </strong>
+                {summary.active_rules_pack
+                  ? ` · ${summary.active_rules_pack.rules_count} règles`
+                  : ""}
+              </li>
+            </ul>
           </div>
-          {typeof summary.admins_count === "number" ? (
-            <div className="stat">
-              <div className="label">Admins</div>
-              <div className="value">{summary.admins_count}</div>
+        </div>
+
+        <div className="card dash-widget">
+          <div className="dash-widget-head">
+            <h2>Activité des décisions</h2>
+            <span className="muted" style={{ fontSize: 11 }}>
+              Clic = détail contextuel
+            </span>
+          </div>
+          <div className="dash-bars">
+            {(
+              [
+                ["mask_send", "Masquer", maskN, "ok"],
+                ["send_anyway", "Risqué", riskN, "crit"],
+                ["cancel", "Annuler", cancelN, "warn"]
+              ] as const
+            ).map(([k, label, n, tone]) => (
+              <button
+                key={k}
+                type="button"
+                className={`dash-bar-row ${drill === k ? "is-active" : ""}`}
+                onClick={() => void openDecision(k)}>
+                <span className="dash-bar-label">{label}</span>
+                <span className="dash-bar-track">
+                  <span
+                    className={`dash-bar-fill ${tone}`}
+                    style={{
+                      width: `${totalDec ? Math.max(6, (n / totalDec) * 100) : 0}%`
+                    }}
+                  />
+                </span>
+                <span className="dash-bar-n mono">{n}</span>
+              </button>
+            ))}
+          </div>
+          <div className="dash-mini-stats">
+            <span>
+              Packs publiés <strong>{summary.packs_published}</strong>
+            </span>
+            {typeof summary.admins_count === "number" ? (
+              <span>
+                Admins <strong>{summary.admins_count}</strong>
+              </span>
+            ) : null}
+          </div>
+        </div>
+
+        <div className="card dash-widget">
+          <div className="dash-widget-head">
+            <h2>Menaces / règles les + fréquentes</h2>
+          </div>
+          {summary.top_rules?.length ? (
+            <ol className="dash-rank">
+              {summary.top_rules.slice(0, 6).map((r, i) => (
+                <li key={r.rule_id}>
+                  <span className="dash-rank-i">{i + 1}.</span>
+                  <span className="mono dash-rank-id" title={r.rule_id}>
+                    {r.rule_id}
+                  </span>
+                  <span className="dash-rank-bar-wrap">
+                    <span
+                      className="dash-rank-bar"
+                      style={{ width: `${(r.count / maxRule) * 100}%` }}
+                    />
+                  </span>
+                  <strong className="dash-rank-n">{r.count}</strong>
+                </li>
+              ))}
+            </ol>
+          ) : (
+            <div className="empty" style={{ padding: 16 }}>
+              Aucun event encore — enrôlez un agent et testez un prompt.
             </div>
-          ) : null}
+          )}
         </div>
       </div>
 
       <div className="card">
-        <h2>Décisions utilisateur</h2>
+        <h2>Décisions utilisateur (panneau contextuel)</h2>
         <p className="muted">
-          Cliquez une décision pour voir les agents / sites concernés.
+          Cliquez une décision pour ouvrir le détail agents / sites — sans quitter
+          le tableau de bord.
         </p>
         <div className="decision-grid">
           {(
@@ -779,13 +881,15 @@ function SummaryView({
           ))}
         </div>
         {drill && (
-          <div style={{ marginTop: 16 }}>
-            <h3 style={{ fontSize: 14 }}>
-              Détail « {drill} »{" "}
+          <div className="dash-context-panel">
+            <h3 style={{ fontSize: 14, marginTop: 0 }}>
+              Détail « {decisionLabelFr(drill)} »{" "}
+              <span className="mono muted" style={{ fontSize: 11 }}>
+                {drill}
+              </span>{" "}
               <button
                 type="button"
-                className="btn secondary"
-                style={{ fontSize: 11, padding: "2px 8px" }}
+                className="btn secondary btn-sm"
                 onClick={() => setDrill(null)}>
                 Fermer
               </button>
@@ -795,70 +899,46 @@ function SummaryView({
             ) : drillEvents.length === 0 ? (
               <div className="empty">Aucun event pour cette décision</div>
             ) : (
-              <div className="table-wrap"><table className="table">
-                <thead>
-                  <tr>
-                    <th>Quand</th>
-                    <th>Label appareil</th>
-                    <th>Sévérité</th>
-                    <th>Acteur</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {drillEvents.slice(0, 50).map((e) => (
-                    <tr key={e.id}>
-                      <td className="muted">
-                        {e.ts
-                          ? new Date(e.ts).toLocaleString("fr-FR")
-                          : "—"}
-                      </td>
-                      <td>
-                        <strong>{e.device_label || "—"}</strong>
-                        {e.hostname && e.hostname !== "opsgate-agent" ? (
-                          <div className="muted" style={{ fontSize: 11 }}>
-                            site · {e.hostname}
-                          </div>
-                        ) : null}
-                      </td>
-                      <td>
-                        <span className={`badge ${e.highest_severity}`}>
-                          {e.highest_severity}
-                        </span>
-                      </td>
-                      <td className="muted" style={{ fontSize: 12 }}>
-                        {e.exit_actor || "—"}
-                      </td>
+              <div className="table-wrap">
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th>Quand</th>
+                      <th>Label appareil</th>
+                      <th>Sévérité</th>
+                      <th>Acteur</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table></div>
+                  </thead>
+                  <tbody>
+                    {drillEvents.slice(0, 50).map((e) => (
+                      <tr key={e.id}>
+                        <td className="muted">
+                          {e.ts
+                            ? new Date(e.ts).toLocaleString("fr-FR")
+                            : "—"}
+                        </td>
+                        <td>
+                          <strong>{e.device_label || "—"}</strong>
+                          {e.hostname && e.hostname !== "opsgate-agent" ? (
+                            <div className="muted" style={{ fontSize: 11 }}>
+                              site · {e.hostname}
+                            </div>
+                          ) : null}
+                        </td>
+                        <td>
+                          <span className={`badge ${e.highest_severity}`}>
+                            {e.highest_severity}
+                          </span>
+                        </td>
+                        <td className="muted" style={{ fontSize: 12 }}>
+                          {e.exit_actor || "—"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             )}
-          </div>
-        )}
-      </div>
-
-      <div className="card">
-        <h2>Top règles</h2>
-        {summary.top_rules?.length ? (
-          <div className="table-wrap"><table className="table">
-            <thead>
-              <tr>
-                <th>Rule ID</th>
-                <th>Count</th>
-              </tr>
-            </thead>
-            <tbody>
-              {summary.top_rules.map((r) => (
-                <tr key={r.rule_id}>
-                  <td className="mono">{r.rule_id}</td>
-                  <td>{r.count}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table></div>
-        ) : (
-          <div className="empty">
-            Aucun event encore — enrôle un agent et teste un prompt.
           </div>
         )}
       </div>
@@ -1174,6 +1254,14 @@ function PolicyView({
   const [eventReporting, setEventReporting] = useState(true)
   const [protectUnenroll, setProtectUnenroll] = useState(false)
   const [defaultAction, setDefaultAction] = useState("mask_recommend")
+  const [msgAdminNotice, setMsgAdminNotice] = useState("")
+  const [msgAlertTitle, setMsgAlertTitle] = useState("")
+  const [msgAlertBody, setMsgAlertBody] = useState("")
+  const [msgBlockTitle, setMsgBlockTitle] = useState("")
+  const [msgBlockBody, setMsgBlockBody] = useState("")
+  const [msgForceTitle, setMsgForceTitle] = useState("")
+  const [msgForceBody, setMsgForceBody] = useState("")
+  const [showMsgEditor, setShowMsgEditor] = useState(false)
   const [otp, setOtp] = useState("")
   const [otpNewPwd, setOtpNewPwd] = useState("")
   const [devOtp, setDevOtp] = useState<string | null>(null)
@@ -1198,6 +1286,14 @@ function PolicyView({
     setEventReporting(!!policy.eventReporting)
     setProtectUnenroll(!!policy.protectUnenroll)
     setDefaultAction(policy.defaultAction || "mask_recommend")
+    const um = policy.userMessages || {}
+    setMsgAdminNotice(um.adminNotice || "")
+    setMsgAlertTitle(um.alertTitle || "")
+    setMsgAlertBody(um.alertBody || "")
+    setMsgBlockTitle(um.blockTitle || "")
+    setMsgBlockBody(um.blockBody || "")
+    setMsgForceTitle(um.maskForceTitle || "")
+    setMsgForceBody(um.maskForceBody || "")
   }, [policy])
 
   if (!policy) {
@@ -1218,6 +1314,14 @@ function PolicyView({
     setError(null)
     setInfo(null)
     try {
+      const user_messages: import("./api").PolicyUserMessages = {}
+      if (msgAdminNotice.trim()) user_messages.adminNotice = msgAdminNotice.trim()
+      if (msgAlertTitle.trim()) user_messages.alertTitle = msgAlertTitle.trim()
+      if (msgAlertBody.trim()) user_messages.alertBody = msgAlertBody.trim()
+      if (msgBlockTitle.trim()) user_messages.blockTitle = msgBlockTitle.trim()
+      if (msgBlockBody.trim()) user_messages.blockBody = msgBlockBody.trim()
+      if (msgForceTitle.trim()) user_messages.maskForceTitle = msgForceTitle.trim()
+      if (msgForceBody.trim()) user_messages.maskForceBody = msgForceBody.trim()
       await api.updatePolicy({
         enabled_hosts: hosts
           .split("\n")
@@ -1226,10 +1330,11 @@ function PolicyView({
         scan_uploads: scanUploads,
         event_reporting: eventReporting,
         protect_unenroll: protectUnenroll,
-        default_action: defaultAction
+        default_action: defaultAction,
+        user_messages
       })
       setInfo(
-        "Policy org enregistrée + epoch incrémenté. Agents sous ~2 min (ou Force sync)."
+        "Policy org + messages utilisateur enregistrés. Agents sous ~2 min (ou Force sync)."
       )
       onReload()
     } catch (e) {
@@ -1314,17 +1419,103 @@ function PolicyView({
         </p>
 
         <label className="field-label" style={{ marginTop: 12 }}>
-          Action par défaut
+          Action par défaut (mode de blocage)
         </label>
         <select
           className="input"
           value={defaultAction}
           onChange={(e) => setDefaultAction(e.target.value)}>
-          <option value="warn">warn</option>
-          <option value="mask_recommend">mask_recommend</option>
-          <option value="mask_force">mask_force</option>
-          <option value="block">block</option>
+          <option value="warn">warn — alerte, choix libre</option>
+          <option value="mask_recommend">
+            mask_recommend — recommande le masquage (défaut)
+          </option>
+          <option value="mask_force">
+            mask_force — masquage obligatoire (pas d’envoi tel quel)
+          </option>
+          <option value="block">
+            block — envoi interdit (message admin explicite)
+          </option>
         </select>
+        <p className="muted" style={{ fontSize: 12, marginTop: 6 }}>
+          Les messages doivent expliquer que c’est une <strong>décision admin</strong>,
+          pas une erreur. Personnalisez-les ci-dessous ou laissez les défauts OpsGate.
+        </p>
+
+        <button
+          type="button"
+          className="btn secondary btn-sm"
+          style={{ marginTop: 10 }}
+          onClick={() => setShowMsgEditor((v) => !v)}>
+          {showMsgEditor
+            ? "Masquer les messages utilisateur"
+            : "Personnaliser les messages utilisateur (banner)"}
+        </button>
+        {showMsgEditor && (
+          <div
+            className="form-stack"
+            style={{
+              marginTop: 12,
+              maxWidth: 640,
+              padding: 14,
+              background: "var(--surface-2)",
+              borderRadius: 10,
+              border: "1px solid var(--line)"
+            }}>
+            <p className="muted" style={{ marginTop: 0, fontSize: 12 }}>
+              Champs vides = message par défaut OpsGate. Sync aux agents au prochain
+              force-sync / poll.
+            </p>
+            <label className="field-label">Mention « pas une erreur » (toujours visible)</label>
+            <textarea
+              className="input"
+              rows={2}
+              placeholder="Cette restriction est appliquée par la politique…"
+              value={msgAdminNotice}
+              onChange={(e) => setMsgAdminNotice(e.target.value)}
+            />
+            <label className="field-label">Alerte — titre</label>
+            <input
+              className="input"
+              value={msgAlertTitle}
+              onChange={(e) => setMsgAlertTitle(e.target.value)}
+              placeholder="Données sensibles détectées — action requise"
+            />
+            <label className="field-label">Alerte — corps</label>
+            <textarea
+              className="input"
+              rows={2}
+              value={msgAlertBody}
+              onChange={(e) => setMsgAlertBody(e.target.value)}
+            />
+            <label className="field-label">Blocage total — titre</label>
+            <input
+              className="input"
+              value={msgBlockTitle}
+              onChange={(e) => setMsgBlockTitle(e.target.value)}
+              placeholder="Envoi non autorisé par votre administrateur"
+            />
+            <label className="field-label">Blocage total — corps</label>
+            <textarea
+              className="input"
+              rows={3}
+              value={msgBlockBody}
+              onChange={(e) => setMsgBlockBody(e.target.value)}
+            />
+            <label className="field-label">Masquage forcé — titre</label>
+            <input
+              className="input"
+              value={msgForceTitle}
+              onChange={(e) => setMsgForceTitle(e.target.value)}
+            />
+            <label className="field-label">Masquage forcé — corps</label>
+            <textarea
+              className="input"
+              rows={2}
+              value={msgForceBody}
+              onChange={(e) => setMsgForceBody(e.target.value)}
+            />
+          </div>
+        )}
 
         <div className="row" style={{ marginTop: 14 }}>
           <button

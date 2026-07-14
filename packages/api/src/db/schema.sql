@@ -28,6 +28,8 @@ CREATE TABLE IF NOT EXISTS policies (
   management_password_hash TEXT NOT NULL DEFAULT '',
   protect_unenroll BOOLEAN NOT NULL DEFAULT FALSE,
   config_epoch INT NOT NULL DEFAULT 1,
+  /** Messages end-user banner (JSON partial PolicyUserMessages) */
+  user_messages_json TEXT NOT NULL DEFAULT '{}',
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   UNIQUE (org_id)
 );
