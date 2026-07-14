@@ -298,7 +298,11 @@ export default function App() {
         disable_rule_ids: ids.length ? ids : undefined,
         activate: true
       })
-      setInfo(`Publié & activé ${res.version} (${res.rules_count} règles)`)
+      setInfo(
+        ids.length
+          ? `Pack ${res.version} : ${res.rules_count} règles actives — désactivées : ${ids.join(", ")} (voir Audit → rule_disable)`
+          : `Publié & activé ${res.version} (${res.rules_count} règles)`
+      )
       await loadTab("packs")
       if (tab === "summary") await loadTab("summary")
     } catch (e) {
@@ -1724,7 +1728,7 @@ function PacksView({
             style={{ minWidth: 280 }}
             value={disableRuleId}
             onChange={(e) => onDisableRuleId(e.target.value)}
-            placeholder="email-address,phone-fr"
+            placeholder="IDs à désactiver : email-address,phone-fr"
           />
           <input
             className="input"
@@ -1738,7 +1742,8 @@ function PacksView({
           </button>
         </div>
         <p className="muted">
-          Pack actif servi aux agents :{" "}
+          Les IDs saisis sont <strong>retirés</strong> du pack actif → journal
+          d’audit <code>rule_disable</code> avec la liste exacte. Pack actif :{" "}
           <strong>{activeVersion || "—"}</strong>
         </p>
       </div>
@@ -2721,6 +2726,23 @@ function AgentsView({
   )
 }
 
+function decisionLabelFr(d: string): string {
+  switch (d) {
+    case "mask_send":
+      return "Masquer et envoyer"
+    case "send_anyway":
+      return "Envoyer quand même"
+    case "cancel":
+      return "Annuler"
+    case "enroll":
+      return "Enrôlement"
+    case "unenroll":
+      return "Désenrôlement"
+    default:
+      return d || "—"
+  }
+}
+
 function EventsView({ events }: { events: EventRow[] }) {
   const [decisionF, setDecisionF] = useState("")
   const [severityF, setSeverityF] = useState("")
@@ -2801,7 +2823,7 @@ function EventsView({ events }: { events: EventRow[] }) {
               <option value="">Toutes décisions</option>
               {decisions.map((d) => (
                 <option key={d} value={d}>
-                  {d}
+                  {decisionLabelFr(d)} ({d})
                 </option>
               ))}
             </select>
@@ -2882,9 +2904,19 @@ function EventsView({ events }: { events: EventRow[] }) {
                         ) : null}
                       </td>
                       <td>
-                        {e.decision}
-                        {e.source === "system" ? " · system" : ""}
-                        {e.source === "file" ? " · fichier" : ""}
+                        <strong>{decisionLabelFr(e.decision)}</strong>
+                        <div className="muted" style={{ fontSize: 11 }}>
+                          {e.decision}
+                          {e.source === "system"
+                            ? " · système"
+                            : e.source === "file"
+                              ? " · fichier"
+                              : e.source === "prompt" || e.source === "text"
+                                ? " · prompt"
+                                : e.source
+                                  ? ` · ${e.source}`
+                                  : ""}
+                        </div>
                       </td>
                       <td className="mono" style={{ fontSize: 12 }}>
                         {e.exit_actor ||
@@ -2997,9 +3029,11 @@ function AuditView({ isPrincipal }: { isPrincipal: boolean }) {
           <option value="logout_idle">logout_idle</option>
           <option value="policy_update">policy_update</option>
           <option value="pack_publish">pack_publish</option>
+          <option value="rule_disable">rule_disable (règles désactivées)</option>
           <option value="agent_revoke">agent_revoke</option>
           <option value="force_sync">force_sync</option>
           <option value="admin_create">admin_create</option>
+          <option value="moving_rule_upsert">moving_rule_upsert</option>
         </select>
         <button className="btn secondary" type="button" disabled={busy} onClick={() => void load()}>
           {busy ? "…" : "Actualiser"}
@@ -3263,7 +3297,16 @@ function MovingRulesView({
               </thead>
               <tbody>
                 {rules.map((r, idx) => (
-                  <tr key={r.id}>
+                  <tr
+                    key={r.id}
+                    style={
+                      r.enabled
+                        ? undefined
+                        : {
+                            background: "var(--warn-soft)",
+                            opacity: 0.92
+                          }
+                    }>
                     <td>
                       <div className="row" style={{ gap: 4 }}>
                         <button
@@ -3285,8 +3328,26 @@ function MovingRulesView({
                       </div>
                     </td>
                     <td>
-                      <strong>{r.name}</strong>
-                      {!r.enabled && <span className="muted"> · off</span>}
+                      <strong
+                        style={
+                          r.enabled
+                            ? undefined
+                            : { textDecoration: "line-through", color: "var(--warn)" }
+                        }>
+                        {r.name}
+                      </strong>
+                      {!r.enabled && (
+                        <span
+                          className="badge warning"
+                          style={{
+                            marginLeft: 8,
+                            fontWeight: 700,
+                            letterSpacing: "0.04em"
+                          }}
+                          title="Cette règle n’est pas évaluée">
+                          INACTIF
+                        </span>
+                      )}
                     </td>
                     <td className="mono" style={{ fontSize: 12 }}>
                       {condsOf(r).map((c, i) => (

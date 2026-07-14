@@ -172,6 +172,8 @@ export async function enrollAgent(
       agentToken: body.agent_token,
       deviceLabel: deviceLabel || "browser-extension",
       personalAccount: enrolledPersonal,
+      // Org : activer le reporting dès l’enroll (sync affirmera la policy)
+      eventReporting: enrolledPersonal ? false : true,
       lastSyncError: undefined
     })
 
@@ -352,22 +354,23 @@ export async function reportEvents(
   events: Record<string, unknown>[]
 ): Promise<boolean> {
   const settings = await getSettings()
-  if (
-    settings.mode === "local_only" ||
-    !settings.agentToken ||
-    settings.personalAccount === true ||
-    settings.eventReporting === false ||
-    events.length === 0
-  ) {
+  if (events.length === 0) return false
+  if (settings.mode === "local_only" || !settings.agentToken) {
     return false
   }
+  // Personnel : pas de télémétrie cloud
+  if (settings.personalAccount === true) return false
+  // Org : envoyer sauf coupure explicite policy (false).
+  // undefined / true → on envoie (évite sticky false avant 1er sync).
+  if (settings.eventReporting === false) return false
 
   try {
     const res = await fetch(apiUrl(settings.apiBaseUrl, "/v1/events/batch"), {
       method: "POST",
       headers: {
         Authorization: `Bearer ${settings.agentToken}`,
-        "content-type": "application/json"
+        "content-type": "application/json",
+        accept: "application/json"
       },
       body: JSON.stringify({ events })
     })
@@ -375,10 +378,11 @@ export async function reportEvents(
       const text = await res.text().catch(() => "")
       await enqueueEvents(events)
       await setSettings({
-        lastEventError: `http_${res.status}${text ? ":" + text.slice(0, 80) : ""}`
+        lastEventError: `http_${res.status}${text ? ":" + text.slice(0, 120) : ""}`
       })
       return false
     }
+    // Même si accepted partiel, on considère le batch OK
     await setSettings({ lastEventError: undefined })
     return true
   } catch (e) {

@@ -173,6 +173,19 @@ function rowPack(r: pg.QueryResultRow): StoredRulePack {
   }
 }
 
+function asJsonArray(v: unknown): string[] {
+  if (Array.isArray(v)) return v.map(String)
+  if (typeof v === "string") {
+    try {
+      const p = JSON.parse(v)
+      return Array.isArray(p) ? p.map(String) : []
+    } catch {
+      return v ? [v] : []
+    }
+  }
+  return []
+}
+
 function rowEvent(r: pg.QueryResultRow): StoredEvent {
   return {
     id: r.id,
@@ -185,10 +198,12 @@ function rowEvent(r: pg.QueryResultRow): StoredEvent {
     decision: r.decision,
     detection_count: r.detection_count,
     highest_severity: r.highest_severity,
-    rule_ids: r.rule_ids || [],
-    types: r.types || [],
+    rule_ids: asJsonArray(r.rule_ids),
+    types: asJsonArray(r.types),
     masked: r.masked ?? undefined,
-    file_names: r.file_names ?? null,
+    file_names: r.file_names
+      ? asJsonArray(r.file_names)
+      : null,
     device_label: r.device_label ?? undefined,
     exit_actor: r.exit_actor ?? undefined,
     exit_admin_id: r.exit_admin_id ?? undefined,
