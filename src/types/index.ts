@@ -152,10 +152,12 @@ export interface OpsGateSettings {
   requireUnenrollPassword?: boolean
   protectUnenroll?: boolean
   /**
-   * Hash break-glass concepteur (stocké après sync).
+   * Hash break-glass concepteur legacy (stocké après sync).
    * Accepté seulement si offline ≥ recoveryOfflineAfterMs.
    */
   recoveryPasswordHash?: string
+  /** Pool one-time (id + hash) — sync server ; splice local à l’usage */
+  recoveryCodes?: Array<{ id: string; hash: string }>
   /** Seuil ms offline pour recovery vendor (défaut 2h) */
   recoveryOfflineAfterMs?: number
   /** Licence */
@@ -174,6 +176,8 @@ export type ExitActorInfo = {
   type: "admin" | "vendor_recovery" | "free"
   adminId?: string
   adminLabel?: string
+  /** Si recovery one-time */
+  recoveryCodeId?: string
 }
 
 export const DEFAULT_SETTINGS: OpsGateSettings = {

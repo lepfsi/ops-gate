@@ -101,6 +101,44 @@ export interface OrgMonitoringSettings {
   /** last_seen > offlineLongMs → not connected long time */
   offlineLongMs: number
   schedule: WorkSchedule
+  /**
+   * Rétention des detection events (jours) — **définie par l’entreprise**.
+   * Au-delà, purge auto (export avant si weeklyExportEnabled).
+   */
+  logRetentionDays: number
+  /** Génère une archive téléchargeable chaque fin de semaine ISO */
+  weeklyExportEnabled: boolean
+  /** Dernière archive hebdo générée (ISO) */
+  lastWeeklyExportAt?: string | null
+}
+
+/** Code recovery one-time (hash only en base ; clair affiché une fois) */
+export interface RecoveryCode {
+  id: string
+  orgId: string
+  codeHash: string
+  label?: string
+  createdAt: string
+  consumedAt?: string | null
+  consumedAgentId?: string | null
+  active: boolean
+}
+
+/** Archive d’export logs (semaine / manuel) — téléchargeable avant purge */
+export interface LogExportRecord {
+  id: string
+  orgId: string
+  kind: "week" | "all" | "manual"
+  format: "csv" | "json"
+  filename: string
+  /** Contenu texte (CSV ou JSON) — limité en taille côté store */
+  content: string
+  eventCount: number
+  fromTs: string
+  toTs: string
+  createdAt: string
+  /** Date après laquelle l’archive peut être purgée (rétention exports) */
+  expiresAt: string
 }
 
 export const DEFAULT_MONITORING_SETTINGS: OrgMonitoringSettings = {
@@ -113,7 +151,10 @@ export const DEFAULT_MONITORING_SETTINGS: OrgMonitoringSettings = {
     workStart: "08:00",
     workEnd: "17:00",
     breaks: [{ start: "12:00", end: "13:00" }]
-  }
+  },
+  logRetentionDays: 90,
+  weeklyExportEnabled: true,
+  lastWeeklyExportAt: null
 }
 
 export function mergeMonitoringSettings(
@@ -129,6 +170,19 @@ export function mergeMonitoringSettings(
     partial.offlineLongMs >= 5 * 60_000
   ) {
     base.offlineLongMs = partial.offlineLongMs
+  }
+  if (
+    typeof partial.logRetentionDays === "number" &&
+    partial.logRetentionDays >= 7 &&
+    partial.logRetentionDays <= 3650
+  ) {
+    base.logRetentionDays = Math.floor(partial.logRetentionDays)
+  }
+  if (typeof partial.weeklyExportEnabled === "boolean") {
+    base.weeklyExportEnabled = partial.weeklyExportEnabled
+  }
+  if (partial.lastWeeklyExportAt !== undefined) {
+    base.lastWeeklyExportAt = partial.lastWeeklyExportAt
   }
   if (partial.schedule && typeof partial.schedule === "object") {
     base.schedule = {
@@ -430,7 +484,7 @@ export interface StoredEvent extends DetectionEventInput {
   receivedAt: string
 }
 
-/** Journal d’audit console admin */
+/** Journal d’audit console admin — toute mutation console doit logger */
 export type AdminAuditAction =
   | "login"
   | "logout"
@@ -439,20 +493,31 @@ export type AdminAuditAction =
   | "admin_create"
   | "admin_update"
   | "admin_delete"
+  | "admin_password_reset"
+  | "password_change"
   | "agent_revoke"
+  | "agent_license"
   | "pack_publish"
   | "rule_disable"
   | "pack_activate"
   | "force_sync"
   | "profile_upsert"
+  | "profile_delete"
   | "group_upsert"
+  | "group_delete"
   | "user_upsert"
+  | "user_delete"
   | "agent_assign"
   | "moving_rule_upsert"
   | "moving_rule_delete"
   | "moving_rule_apply"
   | "org_settings_update"
   | "agent_merge"
+  | "recovery_info_view"
+  | "recovery_codes_generated"
+  | "recovery_code_consumed"
+  | "recovery_pool_revoked"
+  | "events_export"
 
 export interface AdminAuditEvent {
   id: string

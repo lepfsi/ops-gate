@@ -52,7 +52,14 @@ async function request<T>(
   }
 
   if (!res.ok) {
-    const err = (data as { error?: string; details?: string[] }) || {}
+    const err =
+      (data as {
+        error?: string
+        message?: string
+        details?: string[]
+      }) || {}
+    // Préférer le message humain (ex. e-mail déjà inscrit)
+    if (err.message) throw new Error(err.message)
     throw new Error(
       err.error
         ? `${err.error}${err.details ? ": " + err.details.join(", ") : ""}`
@@ -131,6 +138,10 @@ export type MonitoringSettings = {
     workEnd: string
     breaks?: Array<{ start: string; end: string }>
   }
+  /** Rétention detection events (jours) — définie par l’entreprise */
+  logRetentionDays?: number
+  weeklyExportEnabled?: boolean
+  lastWeeklyExportAt?: string | null
 }
 
 export type PackListItem = {
@@ -481,9 +492,6 @@ export const api = {
   agents: () =>
     request<{ org_id: string; agents: AgentRow[] }>("/v1/org/agents"),
 
-  events: () =>
-    request<{ org_id: string; events: EventRow[] }>("/v1/org/events"),
-
   policy: () =>
     request<{ org: unknown; policy: PolicyDoc }>("/v1/org/policy"),
 
@@ -650,6 +658,59 @@ export const api = {
       `/v1/org/events/by-decision/${encodeURIComponent(decision)}`
     ),
 
+  events: () =>
+    request<{
+      org_id: string
+      events: EventRow[]
+      count?: number
+      retention?: {
+        days: number
+        weekly_export_enabled: boolean
+        oldest_event_ts: string | null
+        days_until_oldest_purge: number | null
+        note?: string
+      }
+    }>("/v1/org/events"),
+
+  exportEvents: (range: "week" | "all", format: "csv" | "json" = "csv") =>
+    request<{
+      ok: boolean
+      filename: string
+      format: string
+      content: string
+      count: number
+      retention_days: number
+      days_until_oldest_purge: number | null
+    }>(
+      `/v1/org/events/export?range=${range}&format=${format}`
+    ),
+
+  listEventExports: () =>
+    request<{
+      org_id: string
+      exports: Array<{
+        id: string
+        kind: string
+        format: string
+        filename: string
+        event_count: number
+        from_ts: string
+        to_ts: string
+        created_at: string
+        expires_at: string
+        remaining_days: number
+      }>
+    }>("/v1/org/events/exports"),
+
+  downloadEventExport: (id: string) =>
+    request<{
+      ok: boolean
+      filename: string
+      format: string
+      content: string
+      remaining_days: number
+    }>(`/v1/org/events/exports/${encodeURIComponent(id)}`),
+
   deleteUser: (id: string) =>
     request<{ ok: boolean }>(`/v1/org/users/${encodeURIComponent(id)}`, {
       method: "DELETE"
@@ -746,14 +807,63 @@ export const api = {
       recovery_password_hint: string
       offline_after_ms: number
       env_override: string
-    }>("/v1/org/recovery-info")
+    }>("/v1/org/recovery-info"),
+
+  recoveryCodes: () =>
+    request<{
+      org_id: string
+      active_count: number
+      low_stock: boolean
+      codes: Array<{
+        id: string
+        label?: string
+        created_at: string
+        consumed_at?: string | null
+        consumed_agent_id?: string | null
+        active: boolean
+      }>
+    }>("/v1/org/recovery-codes"),
+
+  generateRecoveryCodes: (count = 20, label?: string) =>
+    request<{
+      ok: boolean
+      created: number
+      codes: Array<{ id: string; code: string }>
+      note: string
+    }>("/v1/org/recovery-codes/generate", {
+      method: "POST",
+      body: JSON.stringify({ count, label })
+    }),
+
+  revokeRecoveryPool: () =>
+    request<{ ok: boolean; revoked: number }>(
+      "/v1/org/recovery-codes/revoke-pool",
+      { method: "POST", body: "{}" }
+    )
 }
 
+function asStringArray(v: unknown): string[] {
+  if (Array.isArray(v)) return v.map(String)
+  if (typeof v === "string") {
+    try {
+      const p = JSON.parse(v)
+      if (Array.isArray(p)) return p.map(String)
+    } catch {
+      /* plain string */
+    }
+    return v ? [v] : []
+  }
+  return []
+}
+
+/** Normalise camelCase / snake_case / JSON-string arrays depuis l’API */
 export function normalizeEvent(raw: Record<string, unknown>): EventRow {
-  const files = (raw.file_names ?? raw.fileNames) as string[] | null | undefined
+  const files = raw.file_names ?? raw.fileNames
+  const types = asStringArray(raw.types)
+  const ruleIds = asStringArray(raw.rule_ids ?? raw.ruleIds)
   return {
     id: String(raw.id || ""),
-    ts: String(raw.ts || raw.receivedAt || ""),
+    ts: String(raw.ts || raw.received_at || raw.receivedAt || ""),
     source: String(raw.source || ""),
     hostname: String(raw.hostname || ""),
     decision: String(raw.decision || ""),
@@ -761,9 +871,9 @@ export function normalizeEvent(raw: Record<string, unknown>): EventRow {
     highest_severity: String(
       raw.highest_severity || raw.highestSeverity || "low"
     ),
-    types: (raw.types as string[]) || [],
+    types,
     masked: Boolean(raw.masked),
-    rule_ids: (raw.rule_ids as string[]) || (raw.ruleIds as string[]) || [],
+    rule_ids: ruleIds,
     exit_actor: raw.exit_actor
       ? String(raw.exit_actor)
       : raw.exitActor
@@ -771,12 +881,18 @@ export function normalizeEvent(raw: Record<string, unknown>): EventRow {
         : undefined,
     exit_admin_label: raw.exit_admin_label
       ? String(raw.exit_admin_label)
-      : undefined,
+      : raw.exitAdminLabel
+        ? String(raw.exitAdminLabel)
+        : undefined,
     device_label: raw.device_label
       ? String(raw.device_label)
       : raw.deviceLabel
         ? String(raw.deviceLabel)
         : undefined,
-    file_names: Array.isArray(files) ? files : null
+    file_names: Array.isArray(files)
+      ? files.map(String)
+      : files
+        ? asStringArray(files)
+        : null
   }
 }

@@ -6,7 +6,9 @@ import type { DetectionRule } from "@opsgate/engine"
 import pg from "pg"
 
 import {
+  generateRecoveryCode,
   hashManagementPassword,
+  hashRecoveryCode,
   hashToken,
   isValidPersonalLicenseKey,
   newId,
@@ -360,11 +362,49 @@ export class PgStore implements OpsGateStore {
       `ALTER TABLE policies ADD COLUMN IF NOT EXISTS user_messages_json TEXT NOT NULL DEFAULT '{}'`,
       `ALTER TABLE policy_profiles ADD COLUMN IF NOT EXISTS user_messages_json TEXT NOT NULL DEFAULT '{}'`,
       `ALTER TABLE agents ADD COLUMN IF NOT EXISTS device_fingerprint TEXT`,
-      `ALTER TABLE organizations ADD COLUMN IF NOT EXISTS monitoring_json TEXT NOT NULL DEFAULT '{}'`
+      `ALTER TABLE organizations ADD COLUMN IF NOT EXISTS monitoring_json TEXT NOT NULL DEFAULT '{}'`,
+      `CREATE TABLE IF NOT EXISTS log_exports (
+        id TEXT PRIMARY KEY,
+        org_id TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+        kind TEXT NOT NULL,
+        format TEXT NOT NULL,
+        filename TEXT NOT NULL,
+        content TEXT NOT NULL,
+        event_count INT NOT NULL DEFAULT 0,
+        from_ts TIMESTAMPTZ NOT NULL,
+        to_ts TIMESTAMPTZ NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        expires_at TIMESTAMPTZ NOT NULL
+      )`,
+      `CREATE TABLE IF NOT EXISTS recovery_codes (
+        id TEXT PRIMARY KEY,
+        org_id TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+        code_hash TEXT NOT NULL,
+        label TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        consumed_at TIMESTAMPTZ,
+        consumed_agent_id TEXT,
+        active BOOLEAN NOT NULL DEFAULT TRUE
+      )`
     ]
     for (const q of alters) {
       await this.pool.query(q)
     }
+    await this.pool
+      .query(
+        `CREATE INDEX IF NOT EXISTS log_exports_org_idx ON log_exports(org_id, created_at DESC)`
+      )
+      .catch(() => {
+        /* ignore */
+      })
+    await this.pool
+      .query(
+        `CREATE INDEX IF NOT EXISTS recovery_codes_org_active_idx
+         ON recovery_codes(org_id) WHERE active = TRUE AND consumed_at IS NULL`
+      )
+      .catch(() => {
+        /* ignore */
+      })
     // Index anti-doublon : uniquement après ADD COLUMN device_fingerprint
     await this.pool
       .query(
@@ -2301,6 +2341,189 @@ export class PgStore implements OpsGateStore {
     return rows.map(rowEvent)
   }
 
+  async purgeOldEvents(orgId: string, retentionDays: number) {
+    if (!retentionDays || retentionDays < 7) return { deleted: 0 }
+    const { rowCount } = await this.pool.query(
+      `DELETE FROM detection_events
+       WHERE org_id = $1
+         AND COALESCE(ts, received_at) < NOW() - ($2 || ' days')::interval`,
+      [orgId, String(retentionDays)]
+    )
+    return { deleted: rowCount || 0 }
+  }
+
+  async listLogExports(orgId: string) {
+    await this.pool.query(
+      `DELETE FROM log_exports WHERE org_id = $1 AND expires_at < NOW()`,
+      [orgId]
+    )
+    const { rows } = await this.pool.query(
+      `SELECT * FROM log_exports WHERE org_id = $1 ORDER BY created_at DESC LIMIT 20`,
+      [orgId]
+    )
+    return rows.map(
+      (r): import("./types").LogExportRecord => ({
+        id: r.id,
+        orgId: r.org_id,
+        kind: r.kind,
+        format: r.format,
+        filename: r.filename,
+        content: r.content,
+        eventCount: r.event_count,
+        fromTs: new Date(r.from_ts).toISOString(),
+        toTs: new Date(r.to_ts).toISOString(),
+        createdAt: new Date(r.created_at).toISOString(),
+        expiresAt: new Date(r.expires_at).toISOString()
+      })
+    )
+  }
+
+  async getLogExport(orgId: string, exportId: string) {
+    const { rows } = await this.pool.query(
+      `SELECT * FROM log_exports WHERE org_id = $1 AND id = $2 AND expires_at > NOW()`,
+      [orgId, exportId]
+    )
+    if (!rows[0]) return undefined
+    const r = rows[0]
+    return {
+      id: r.id,
+      orgId: r.org_id,
+      kind: r.kind,
+      format: r.format,
+      filename: r.filename,
+      content: r.content,
+      eventCount: r.event_count,
+      fromTs: new Date(r.from_ts).toISOString(),
+      toTs: new Date(r.to_ts).toISOString(),
+      createdAt: new Date(r.created_at).toISOString(),
+      expiresAt: new Date(r.expires_at).toISOString()
+    } as import("./types").LogExportRecord
+  }
+
+  async saveLogExport(
+    orgId: string,
+    input: Omit<
+      import("./types").LogExportRecord,
+      "id" | "orgId" | "createdAt"
+    >
+  ) {
+    const id = newId("lexp")
+    const now = new Date().toISOString()
+    const content =
+      input.content.length > 1_500_000
+        ? input.content.slice(0, 1_500_000) + "\n…truncated"
+        : input.content
+    await this.pool.query(
+      `INSERT INTO log_exports (
+        id, org_id, kind, format, filename, content, event_count,
+        from_ts, to_ts, created_at, expires_at
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+      [
+        id,
+        orgId,
+        input.kind,
+        input.format,
+        input.filename,
+        content,
+        input.eventCount,
+        input.fromTs,
+        input.toTs,
+        now,
+        input.expiresAt
+      ]
+    )
+    // garder 12 max
+    await this.pool.query(
+      `DELETE FROM log_exports
+       WHERE org_id = $1 AND id NOT IN (
+         SELECT id FROM log_exports WHERE org_id = $1
+         ORDER BY created_at DESC LIMIT 12
+       )`,
+      [orgId]
+    )
+    return {
+      id,
+      orgId,
+      kind: input.kind,
+      format: input.format,
+      filename: input.filename,
+      content,
+      eventCount: input.eventCount,
+      fromTs: input.fromTs,
+      toTs: input.toTs,
+      createdAt: now,
+      expiresAt: input.expiresAt
+    }
+  }
+
+  async listRecoveryCodes(orgId: string) {
+    const { rows } = await this.pool.query(
+      `SELECT * FROM recovery_codes WHERE org_id = $1 ORDER BY created_at DESC`,
+      [orgId]
+    )
+    return rows.map(
+      (r): import("./types").RecoveryCode => ({
+        id: r.id,
+        orgId: r.org_id,
+        codeHash: r.code_hash,
+        label: r.label ?? undefined,
+        createdAt: new Date(r.created_at).toISOString(),
+        consumedAt: r.consumed_at
+          ? new Date(r.consumed_at).toISOString()
+          : null,
+        consumedAgentId: r.consumed_agent_id ?? null,
+        active: !!r.active
+      })
+    )
+  }
+
+  async generateRecoveryCodes(orgId: string, count: number, label?: string) {
+    const n = Math.min(50, Math.max(1, Math.floor(count) || 20))
+    const plain: { id: string; code: string }[] = []
+    const now = new Date().toISOString()
+    const lbl = label || `batch-${now.slice(0, 10)}`
+    for (let i = 0; i < n; i++) {
+      const code = generateRecoveryCode()
+      const id = newId("rc")
+      await this.pool.query(
+        `INSERT INTO recovery_codes (id, org_id, code_hash, label, created_at, active)
+         VALUES ($1,$2,$3,$4,$5,true)`,
+        [id, orgId, hashRecoveryCode(code), lbl, now]
+      )
+      plain.push({ id, code })
+    }
+    return { codes: plain, created: plain.length }
+  }
+
+  async getActiveRecoveryCodeHashes(orgId: string) {
+    const { rows } = await this.pool.query(
+      `SELECT id, code_hash FROM recovery_codes
+       WHERE org_id = $1 AND active = TRUE AND consumed_at IS NULL`,
+      [orgId]
+    )
+    return rows.map((r) => ({ id: r.id as string, hash: r.code_hash as string }))
+  }
+
+  async consumeRecoveryCode(orgId: string, codeId: string, agentId: string) {
+    const { rowCount } = await this.pool.query(
+      `UPDATE recovery_codes
+       SET active = FALSE, consumed_at = NOW(), consumed_agent_id = $3
+       WHERE org_id = $1 AND id = $2 AND active = TRUE AND consumed_at IS NULL`,
+      [orgId, codeId, agentId]
+    )
+    return (rowCount || 0) > 0
+  }
+
+  async revokeRecoveryPool(orgId: string) {
+    const { rowCount } = await this.pool.query(
+      `UPDATE recovery_codes
+       SET active = FALSE, consumed_at = COALESCE(consumed_at, NOW())
+       WHERE org_id = $1 AND active = TRUE AND consumed_at IS NULL`,
+      [orgId]
+    )
+    return { revoked: rowCount || 0 }
+  }
+
   private parseMovingConditions(
     r: pg.QueryResultRow
   ): import("./types").MovingCondition[] {
@@ -2652,6 +2875,11 @@ export class PgStore implements OpsGateStore {
   }
 
   async summary(orgId: string): Promise<OrgSummary> {
+    const orgForMon = await this.getOrg(orgId)
+    const { mergeMonitoringSettings } = await import("./types")
+    const mon = mergeMonitoringSettings(orgForMon?.monitoring)
+    await this.purgeOldEvents(orgId, mon.logRetentionDays)
+
     const agents = await this.listAgents(orgId)
     const { rows: countRows } = await this.pool.query(
       `SELECT COUNT(*)::int AS n FROM detection_events WHERE org_id = $1`,

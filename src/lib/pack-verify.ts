@@ -83,7 +83,6 @@ export async function verifyRulesPack(input: {
     const ok = await crypto.subtle.verify(
       { name: "Ed25519" },
       key,
-      // @ts-expect-error BufferSource
       sigBytes,
       data
     )

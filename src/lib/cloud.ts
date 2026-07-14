@@ -18,6 +18,8 @@ export interface EnrollResponse {
   mode: string
   rules_pack_version?: string
   policy_etag?: string
+  /** Compte personnel (abonnement) — renvoyé par l’API enroll */
+  personal?: boolean
 }
 
 export interface ConfigResponse {
@@ -49,6 +51,7 @@ export interface ConfigResponse {
     management_password_hash?: string
     recovery_password_hash?: string
     recovery_offline_after_ms?: number
+    recovery_codes?: Array<{ id: string; hash: string }>
     profile_id?: string | null
     profile_name?: string | null
     department?: string | null
@@ -96,6 +99,7 @@ export async function revokeCurrentAgent(exit?: {
   type: "admin" | "vendor_recovery" | "free"
   adminId?: string
   adminLabel?: string
+  recoveryCodeId?: string
 }): Promise<boolean> {
   const settings = await getSettings()
   if (!settings.agentToken || !settings.apiBaseUrl) return false
@@ -110,7 +114,8 @@ export async function revokeCurrentAgent(exit?: {
       body: JSON.stringify({
         exit_actor: exit?.type || "free",
         admin_id: exit?.adminId,
-        admin_label: exit?.adminLabel
+        admin_label: exit?.adminLabel,
+        recovery_code_id: exit?.recoveryCodeId
       })
     })
     return res.ok
@@ -183,7 +188,8 @@ export async function enrollAgent(
 
     const sync = await syncConfig(next)
     if (!sync.ok) {
-      return { ok: false, error: `enrolled_but_sync_failed:${sync.error}` }
+      const syncErr = "error" in sync ? sync.error : "unknown"
+      return { ok: false, error: `enrolled_but_sync_failed:${syncErr}` }
     }
     return { ok: true, settings: sync.settings }
   } catch (e) {
@@ -250,7 +256,8 @@ export async function syncConfig(
       publicKeySpkiBase64: pubKey
     })
     if (!verified.ok) {
-      const err = `pack_verify_failed:${verified.error}`
+      const verr = "error" in verified ? verified.error : "unknown"
+      const err = `pack_verify_failed:${verr}`
       await setSettings({ lastSyncError: err })
       const needsPwd = !!(
         settings.managementPasswordHash &&
@@ -292,6 +299,9 @@ export async function syncConfig(
       (rawHash.length > 0 ? rawHash : undefined)
     const rawRecovery = (body.policy.recovery_password_hash || "").trim()
     const recoveryHash = rawRecovery.length > 0 ? rawRecovery : undefined
+    const recoveryCodes = (body.policy.recovery_codes || [])
+      .filter((c) => c?.id && c?.hash)
+      .map((c) => ({ id: String(c.id), hash: String(c.hash).trim() }))
     const requireUnenroll = !!body.policy.require_unenroll_password
     const protectUnenroll = !!body.policy.protect_unenroll
 
@@ -319,6 +329,7 @@ export async function syncConfig(
       requireUnenrollPassword: requireUnenroll,
       protectUnenroll,
       recoveryPasswordHash: recoveryHash,
+      recoveryCodes: recoveryCodes.length > 0 ? recoveryCodes : [],
       recoveryOfflineAfterMs:
         body.policy.recovery_offline_after_ms || 2 * 60 * 60 * 1000,
       configEpoch: body.policy.config_epoch,

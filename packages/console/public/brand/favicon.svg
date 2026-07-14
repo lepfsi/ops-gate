@@ -1,7 +1,15 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none">
-  <rect width="32" height="32" rx="8" fill="#0A1128"/>
-  <!-- Gate arch -->
-  <path d="M8 24V14c0-4.4 3.6-8 8-8s8 3.6 8 8v10" stroke="#2BD9C5" stroke-width="2.2" stroke-linecap="round"/>
-  <!-- Shield / filter -->
-  <path d="M16 12.5l4.5 2v3.2c0 2.8-1.9 4.4-4.5 5.5-2.6-1.1-4.5-2.7-4.5-5.5V14.5l4.5-2z" stroke="#2BD9C5" stroke-width="1.6" fill="rgba(43,217,197,0.12)"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="OpsGate">
+  <!--
+    Favicon “tab-first” : contraste max, 1 forme lisible à 16px.
+    Teal plein (se détache des onglets gris) + monogramme O navy épais.
+    Ce n’est PAS une miniature du logo produit.
+  -->
+  <rect width="32" height="32" rx="7" fill="#2BD9C5"/>
+  <!-- O épais (anneau plein) — lisible même flou -->
+  <path
+    fill="#0A1128"
+    fill-rule="evenodd"
+    d="M16 5.2c-6 0-10.8 4.8-10.8 10.8S10 26.8 16 26.8 26.8 22 26.8 16 22 5.2 16 5.2zm0 6.2c2.5 0 4.6 2 4.6 4.6s-2.1 4.6-4.6 4.6-4.6-2-4.6-4.6 2.1-4.6 4.6-4.6z"/>
+  <!-- Entaille bas = “gate” ouverte (coupe le bas de l’O) -->
+  <rect x="12.5" y="20.5" width="7" height="7.5" fill="#2BD9C5"/>
 </svg>

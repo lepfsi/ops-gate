@@ -135,8 +135,8 @@ function IndexPopup() {
             </div>
             <div style={{ fontSize: 12, color: "#64748b", marginTop: 2 }}>
               {settings.mode === "local_only"
-                ? "Mode local · règles embarquées"
-                : `${settings.orgName || "Org"} · pack ${settings.rulesPackVersion || "?"}`}
+                ? "Mode local"
+                : settings.orgName || "Organisation"}
             </div>
           </div>
         </div>
@@ -146,7 +146,7 @@ function IndexPopup() {
             disabled={enrolled || hardLock}
             title={
               hardLock
-                ? "Endpoint protégé — désactivation interdite"
+                ? "Géré par l’organisation"
                 : enrolled
                   ? "Géré par l’organisation"
                   : settings.enabled
@@ -167,13 +167,13 @@ function IndexPopup() {
             {settings.enabled ? "Actif" : "Inactif"}
           </button>
           {hardLock && (
-            <span style={{ fontSize: 10, fontWeight: 700, color: "#b91c1c" }}>
-              🔒 Lock admin
+            <span style={{ fontSize: 10, fontWeight: 700, color: "#0f766e" }}>
+              Géré
             </span>
           )}
           {enrolled && !hardLock && (
-            <span style={{ fontSize: 10, fontWeight: 700, color: "#0f766e" }}>
-              Org · en attente sync
+            <span style={{ fontSize: 10, fontWeight: 700, color: "#64748b" }}>
+              Sync…
             </span>
           )}
         </div>
@@ -220,8 +220,7 @@ function IndexPopup() {
               color: "#64748b",
               lineHeight: 1.45
             }}>
-            Aucune détection pour l’instant. Ouvrez ChatGPT, Claude ou Gemini et
-            essayez un prompt contenant une clé API ou une config réseau.
+            Aucune détection récente
           </div>
         )}
 
@@ -301,11 +300,7 @@ function IndexPopup() {
           Options
         </button>
         <span style={{ fontSize: 11, color: "#94a3b8" }}>
-          {hardLock
-            ? "Endpoint protégé"
-            : enrolled
-              ? "Org · sync requise"
-              : "Traitement local"}
+          {hardLock ? "Géré" : enrolled ? "Organisation" : "Local"}
         </span>
       </footer>
     </div>

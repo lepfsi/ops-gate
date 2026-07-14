@@ -1,5 +1,4 @@
 import {
-  canUseVendorRecovery,
   clearCloudState,
   exitCredentials,
   getSettings,
@@ -64,11 +63,15 @@ async function maybeAutoSync() {
   const s = await getSettings()
   if (s.agentToken && s.mode !== "local_only") {
     const r = await syncConfig(s)
-    console.log("[OpsGate] auto-sync", r.ok ? "ok" : r.error)
     if (r.ok) {
+      console.log("[OpsGate] auto-sync", "ok")
       const n = await flushEventQueue(r.settings)
       if (n > 0) console.log("[OpsGate] flushed events", n)
     } else {
+      console.log(
+        "[OpsGate] auto-sync",
+        "error" in r ? r.error : "failed"
+      )
       void flushPendingEvents()
     }
   }
@@ -127,7 +130,7 @@ async function handleMessage(message: OpsGateMessage): Promise<unknown> {
           ok: false,
           error: "org_managed_locked",
           message:
-            "Endpoint protégé. Modification de policy interdite. Désinscription via Options.",
+            "Paramètres gérés par l’organisation. Désinscription via Options.",
           settings: current
         }
       }
@@ -274,12 +277,18 @@ async function exitManagedMode(
       return {
         ok: false,
         error: "admin_password_invalid",
-        message: canUseVendorRecovery(current)
-          ? "Identifiants incorrects (admin ou recovery vendor offline)."
-          : "Identifiants incorrects. Recovery vendor : username « vendor » si offline > 2h."
+        message: "Identifiants incorrects."
       }
     }
     exit = matched
+  }
+
+  // Burn one-time recovery code locally (même si offline / revoke échoue)
+  if (exit.type === "vendor_recovery" && exit.recoveryCodeId) {
+    const remaining = (current.recoveryCodes || []).filter(
+      (c) => c.id !== exit.recoveryCodeId
+    )
+    await setSettings({ recoveryCodes: remaining })
   }
 
   try {
@@ -288,16 +297,10 @@ async function exitManagedMode(
     /* ignore */
   }
   const settings = await clearCloudState()
-  const who =
-    exit.type === "admin"
-      ? `admin « ${exit.adminLabel || exit.adminId} »`
-      : exit.type === "vendor_recovery"
-        ? "vendor recovery"
-        : "sortie libre (policy non protégée)"
   return {
     ok: true,
     settings,
     exit_actor: exit,
-    message: `Mode local_only. Désenrôlement enregistré (${who}).`
+    message: "Appareil désenrôlé."
   }
 }

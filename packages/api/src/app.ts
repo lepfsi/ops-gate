@@ -206,6 +206,7 @@ export function createApp() {
       exit_actor?: "admin" | "vendor_recovery" | "free"
       admin_id?: string
       admin_label?: string
+      recovery_code_id?: string
     } = {}
     try {
       body = await c.req.json()
@@ -217,6 +218,28 @@ export function createApp() {
       type: (body.exit_actor || "free") as "admin" | "vendor_recovery" | "free",
       admin_id: body.admin_id,
       admin_label: body.admin_label
+    }
+
+    if (
+      exit.type === "vendor_recovery" &&
+      body.recovery_code_id?.trim()
+    ) {
+      const ok = await store.consumeRecoveryCode(
+        agent.orgId,
+        body.recovery_code_id.trim(),
+        agent.id
+      )
+      if (ok) {
+        await store.appendAdminAudit({
+          orgId: agent.orgId,
+          action: "recovery_code_consumed",
+          detail: `Code recovery consommé par agent ${agent.deviceLabel || agent.id.slice(0, 12)}…`,
+          meta: {
+            recovery_code_id: body.recovery_code_id,
+            agent_id: agent.id
+          }
+        })
+      }
     }
 
     const result = await store.recordUnenrollAndRevoke(
@@ -317,11 +340,11 @@ export function createApp() {
           ? admins[0]?.password_hash || policy.managementPasswordHash || ""
           : "",
         /**
-         * Recovery vendor — agent ne l'accepte que si offline > 2h
-         * (évite désinscription massive si fuite du secret).
+         * Recovery vendor legacy + pool one-time (hashes) — offline ≥ 2h.
          */
         recovery_password_hash: getVendorRecoveryHash(),
         recovery_offline_after_ms: VENDOR_RECOVERY_OFFLINE_MS,
+        recovery_codes: await store.getActiveRecoveryCodeHashes(org.id),
         profile_id: profile?.id || null,
         profile_name: profile?.name || null,
         department: profile?.department || null,
@@ -389,6 +412,49 @@ export function createApp() {
       created_at: a.createdAt,
       updated_at: a.updatedAt
     }
+  }
+
+  /** Events console en snake_case stable (mask_send / send_anyway / cancel…) */
+  function publicEvent(e: import("./types").StoredEvent) {
+    return {
+      id: e.id,
+      org_id: e.orgId,
+      agent_id: e.agentId ?? null,
+      client_event_id: e.client_event_id,
+      ts: e.ts,
+      source: e.source,
+      hostname: e.hostname,
+      decision: e.decision,
+      detection_count: e.detection_count,
+      highest_severity: e.highest_severity,
+      rule_ids: e.rule_ids || [],
+      types: e.types || [],
+      masked: e.masked ?? null,
+      file_names: e.file_names ?? null,
+      device_label: e.device_label ?? null,
+      exit_actor: e.exit_actor ?? null,
+      exit_admin_id: e.exit_admin_id ?? null,
+      exit_admin_label: e.exit_admin_label ?? null,
+      schema_version: e.schema_version,
+      received_at: e.receivedAt
+    }
+  }
+
+  async function audit(
+    gate: { admin: OrgAdmin; orgId: string },
+    action: import("./types").AdminAuditAction,
+    detail: string,
+    meta?: Record<string, unknown>
+  ) {
+    await store.appendAdminAudit({
+      orgId: gate.orgId,
+      adminId: gate.admin.id,
+      adminEmail: gate.admin.email,
+      adminLabel: gate.admin.label,
+      action,
+      detail,
+      meta
+    })
   }
 
   function adminHas(
@@ -557,8 +623,59 @@ export function createApp() {
   v1.get("/org/summary", async (c) => {
     const auth = await requireConsoleAuth(c, "console_access")
     if (!auth.ok) return c.json({ error: auth.error }, auth.status)
+    // Side-effect soft : archive hebdo si activée (fin de semaine passée)
+    void ensureWeeklyExportIfDue(auth.orgId).catch(() => {
+      /* non bloquant */
+    })
     return c.json(await store.summary(auth.orgId))
   })
+
+  async function ensureWeeklyExportIfDue(orgId: string) {
+    const org = await store.getOrg(orgId)
+    if (!org) return
+    const { mergeMonitoringSettings } = await import("./types")
+    const mon = mergeMonitoringSettings(org.monitoring)
+    if (!mon.weeklyExportEnabled) return
+    const {
+      previousIsoWeekRange,
+      filterEventsRange,
+      eventsToCsv
+    } = await import("./events-export")
+    const { from, to, weekKey } = previousIsoWeekRange()
+    const last = mon.lastWeeklyExportAt
+      ? Date.parse(mon.lastWeeklyExportAt)
+      : 0
+    // Une archive max par semaine ISO (clé dans lastWeeklyExportAt weekKey)
+    if (last && mon.lastWeeklyExportAt?.includes(weekKey)) return
+    // Ne générer que si on est au-delà de la fin de la semaine précédente
+    if (Date.now() < to.getTime()) return
+    const all = await store.listEvents(orgId, 5000)
+    const slice = filterEventsRange(all, from.getTime(), to.getTime())
+    if (slice.length === 0) {
+      await store.updateOrgMonitoring(orgId, {
+        lastWeeklyExportAt: `${weekKey}:${new Date().toISOString()}`
+      })
+      return
+    }
+    const content = eventsToCsv(slice)
+    const filename = `opsgate-events-${weekKey}.csv`
+    const expires = new Date(
+      Date.now() + Math.max(mon.logRetentionDays, 30) * 86400000
+    ).toISOString()
+    await store.saveLogExport(orgId, {
+      kind: "week",
+      format: "csv",
+      filename,
+      content,
+      eventCount: slice.length,
+      fromTs: from.toISOString(),
+      toTs: to.toISOString(),
+      expiresAt: expires
+    })
+    await store.updateOrgMonitoring(orgId, {
+      lastWeeklyExportAt: `${weekKey}:${new Date().toISOString()}`
+    })
+  }
 
   /** Paramètres monitoring (seuils offline + schedule) */
   v1.get("/org/monitoring", async (c) => {
@@ -683,10 +800,17 @@ export function createApp() {
     if (!_gate.ok) return c.json({ error: _gate.error }, _gate.status)
     const org = await store.getOrg(_gate.orgId)
     if (!org) return c.json({ error: "no_org" }, 404)
-    const decision = c.req.param("decision")
+    const decision = decodeURIComponent(c.req.param("decision") || "").trim()
     const all = await store.listEvents(org.id, 500)
-    const events = all.filter((e) => e.decision === decision)
-    return c.json({ org_id: org.id, decision, events })
+    const events = all
+      .filter((e) => String(e.decision || "") === decision)
+      .map(publicEvent)
+    return c.json({
+      org_id: org.id,
+      decision,
+      count: events.length,
+      events
+    })
   })
 
   /** Assigner profil et/ou user à un agent */
@@ -723,6 +847,16 @@ export function createApp() {
       )
       if (!agent) return c.json({ error: "agent_or_user_not_found" }, 404)
     }
+    await audit(
+      _gate,
+      "agent_assign",
+      `Assign agent ${c.req.param("agentId").slice(0, 12)}… · profil=${agent.policyProfileId || "—"} · user=${agent.userId || "—"}`,
+      {
+        agent_id: agent.id,
+        policy_profile_id: agent.policyProfileId,
+        user_id: agent.userId
+      }
+    )
     return c.json({
       ok: true,
       agent: {
@@ -774,6 +908,20 @@ export function createApp() {
         400
       )
     }
+    const emailNorm = body.email.trim().toLowerCase()
+    const emailTaken = (await store.listAdmins(org.id)).some(
+      (a) => a.email.toLowerCase() === emailNorm
+    )
+    if (emailTaken) {
+      return c.json(
+        {
+          error: "email_already_registered",
+          message:
+            "Cet e-mail est déjà inscrit comme administrateur. Choisissez une autre adresse."
+        },
+        409
+      )
+    }
     const admin = await store.upsertAdmin(org.id, {
       label: body.label.trim(),
       email: body.email.trim(),
@@ -782,10 +930,19 @@ export function createApp() {
     })
     if (!admin) {
       return c.json(
-        { error: "create_failed_email_exists_or_invalid" },
+        {
+          error: "admin_create_failed",
+          message: "Création impossible (e-mail invalide ou mot de passe trop court)."
+        },
         400
       )
     }
+    await audit(
+      _gate,
+      "admin_create",
+      `Création admin « ${admin.label} » (${admin.email})`,
+      { admin_id: admin.id }
+    )
     return c.json({ ok: true, admin: publicAdminView(admin) })
   })
 
@@ -843,6 +1000,12 @@ export function createApp() {
         password: body.password,
         mustChangePassword: false
       })
+      await audit(
+        _gate,
+        "admin_update",
+        `Self-update admin « ${admin?.label || existing.label} »`,
+        { admin_id: existing.id, self: true }
+      )
       return c.json({ ok: true, admin: admin ? publicAdminView(admin) : null })
     }
 
@@ -870,6 +1033,12 @@ export function createApp() {
         : body.permissions ?? existing.permissions,
       mustChangePassword: body.must_change_password
     })
+    await audit(
+      _gate,
+      "admin_update",
+      `Modif admin « ${admin?.label || existing.label} »`,
+      { admin_id: existing.id, fields: Object.keys(body), self: isSelf }
+    )
     return c.json({
       ok: true,
       admin: admin ? publicAdminView(admin) : null
@@ -911,6 +1080,11 @@ export function createApp() {
       password: body.new_password,
       mustChangePassword: false
     })
+    await audit(
+      _gate,
+      "password_change",
+      `Changement de mot de passe (self)${body.email ? " + email" : ""}`
+    )
     return c.json({ ok: true, admin: admin ? publicAdminView(admin) : null })
   })
 
@@ -948,6 +1122,12 @@ export function createApp() {
       password: body.new_password,
       mustChangePassword: true
     })
+    await audit(
+      _gate,
+      "admin_password_reset",
+      `Reset mdp admin secondaire « ${existing.label} » (${existing.email})`,
+      { admin_id: existing.id }
+    )
     return c.json({
       ok: true,
       admin: admin ? publicAdminView(admin) : null,
@@ -960,6 +1140,9 @@ export function createApp() {
     if (!_gate.ok) return c.json({ error: _gate.error }, _gate.status)
     const org = await store.getOrg(_gate.orgId)
     if (!org) return c.json({ error: "no_org" }, 404)
+    const existing = (await store.listAdmins(org.id)).find(
+      (a) => a.id === c.req.param("adminId")
+    )
     const ok = await store.deleteAdmin(org.id, c.req.param("adminId"))
     if (!ok) {
       return c.json(
@@ -967,6 +1150,12 @@ export function createApp() {
         400
       )
     }
+    await audit(
+      _gate,
+      "admin_delete",
+      `Suppression admin « ${existing?.label || c.req.param("adminId")} »`,
+      { admin_id: c.req.param("adminId") }
+    )
     return c.json({ ok: true })
   })
 
@@ -1003,6 +1192,12 @@ export function createApp() {
     if (!agent) {
       return c.json({ error: "agent_not_found_or_no_seats" }, 400)
     }
+    await audit(
+      _gate,
+      "agent_license",
+      `Licence agent ${agent.deviceLabel || agent.id.slice(0, 12)}… → ${body.licensed ? "ON" : "OFF"}`,
+      { agent_id: agent.id, licensed: body.licensed }
+    )
     return c.json({
       ok: true,
       agent_id: agent.id,
@@ -1044,6 +1239,13 @@ export function createApp() {
       externalId: body.external_id,
       groupIds: body.group_ids
     })
+    if (!user) return c.json({ error: "user_create_failed" }, 500)
+    await audit(
+      _gate,
+      "user_upsert",
+      `Création user « ${user.displayName} »`,
+      { user_id: user.id, group_ids: user.groupIds }
+    )
     return c.json({ ok: true, user })
   })
 
@@ -1074,6 +1276,13 @@ export function createApp() {
       externalId: body.external_id ?? existing.externalId,
       groupIds: body.group_ids ?? existing.groupIds
     })
+    if (!user) return c.json({ error: "user_update_failed" }, 500)
+    await audit(
+      _gate,
+      "user_upsert",
+      `Modif user « ${user.displayName} »`,
+      { user_id: user.id, fields: Object.keys(body) }
+    )
     return c.json({ ok: true, user })
   })
 
@@ -1082,8 +1291,17 @@ export function createApp() {
     if (!_gate.ok) return c.json({ error: _gate.error }, _gate.status)
     const org = await store.getOrg(_gate.orgId)
     if (!org) return c.json({ error: "no_org" }, 404)
+    const existing = (await store.listUsers(org.id)).find(
+      (u) => u.id === c.req.param("userId")
+    )
     const ok = await store.deleteUser(org.id, c.req.param("userId"))
     if (!ok) return c.json({ error: "user_not_found" }, 404)
+    await audit(
+      _gate,
+      "user_delete",
+      `Suppression user « ${existing?.displayName || c.req.param("userId")} »`,
+      { user_id: c.req.param("userId") }
+    )
     return c.json({ ok: true })
   })
 
@@ -1119,6 +1337,13 @@ export function createApp() {
       policyProfileId: body.policy_profile_id,
       ldapExternalId: body.ldap_external_id
     })
+    if (!group) return c.json({ error: "group_create_failed" }, 500)
+    await audit(
+      _gate,
+      "group_upsert",
+      `Création groupe « ${group.name} »`,
+      { group_id: group.id, policy_profile_id: group.policyProfileId }
+    )
     return c.json({ ok: true, group })
   })
 
@@ -1152,6 +1377,17 @@ export function createApp() {
           : body.policy_profile_id,
       ldapExternalId: body.ldap_external_id ?? existing.ldapExternalId
     })
+    if (!group) return c.json({ error: "group_update_failed" }, 500)
+    await audit(
+      _gate,
+      "group_upsert",
+      `Modif groupe « ${group.name} »`,
+      {
+        group_id: group.id,
+        policy_profile_id: group.policyProfileId,
+        fields: Object.keys(body)
+      }
+    )
     return c.json({ ok: true, group })
   })
 
@@ -1160,8 +1396,17 @@ export function createApp() {
     if (!_gate.ok) return c.json({ error: _gate.error }, _gate.status)
     const org = await store.getOrg(_gate.orgId)
     if (!org) return c.json({ error: "no_org" }, 404)
+    const existing = (await store.listGroups(org.id)).find(
+      (g) => g.id === c.req.param("groupId")
+    )
     const ok = await store.deleteGroup(org.id, c.req.param("groupId"))
     if (!ok) return c.json({ error: "group_not_found" }, 404)
+    await audit(
+      _gate,
+      "group_delete",
+      `Suppression groupe « ${existing?.name || c.req.param("groupId")} »`,
+      { group_id: c.req.param("groupId") }
+    )
     return c.json({ ok: true })
   })
 
@@ -1173,14 +1418,7 @@ export function createApp() {
     if (!org) return c.json({ error: "no_org" }, 404)
     const result = await store.forceConfigSync(org.id)
     if (!result.ok) return c.json({ error: result.error }, 500)
-    await store.appendAdminAudit({
-      orgId: org.id,
-      adminId: _gate.admin.id,
-      adminEmail: _gate.admin.email,
-      adminLabel: _gate.admin.label,
-      action: "force_sync",
-      detail: `epoch=${result.configEpoch}`
-    })
+    // Intentionnel : force-sync n’est PAS audit-loggé (bruit opérationnel)
     return c.json({
       ok: true,
       config_epoch: result.configEpoch,
@@ -1235,6 +1473,17 @@ export function createApp() {
       assignedUserIds: body.assigned_user_ids,
       userMessages: body.user_messages
     })
+    if (!profile) return c.json({ error: "profile_create_failed" }, 500)
+    await audit(
+      _gate,
+      "profile_upsert",
+      `Création profil « ${profile.name} » · action=${profile.defaultAction} · hosts=${(profile.enabledHosts || []).length} · events=${profile.eventReporting}`,
+      {
+        profile_id: profile.id,
+        hosts_count: (profile.enabledHosts || []).length,
+        default_action: profile.defaultAction
+      }
+    )
     return c.json({ ok: true, profile })
   })
 
@@ -1289,6 +1538,32 @@ export function createApp() {
       assignedGroupIds: body.assigned_group_ids ?? existing.assignedGroupIds,
       assignedUserIds: body.assigned_user_ids ?? existing.assignedUserIds
     })
+    if (!profile) return c.json({ error: "profile_update_failed" }, 500)
+    const changed: string[] = []
+    if (body.name !== undefined) changed.push(`name=${profile.name}`)
+    if (body.default_action !== undefined)
+      changed.push(`action=${profile.defaultAction}`)
+    if (body.enabled_hosts !== undefined)
+      changed.push(`hosts=${(profile.enabledHosts || []).length}`)
+    if (body.scan_uploads !== undefined)
+      changed.push(`uploads=${profile.scanUploads}`)
+    if (body.event_reporting !== undefined)
+      changed.push(`events=${profile.eventReporting}`)
+    if (body.protect_unenroll !== undefined)
+      changed.push(`protect=${profile.protectUnenroll}`)
+    if (body.user_messages !== undefined) changed.push("messages_banner")
+    if (body.assigned_group_ids !== undefined) changed.push("groupes")
+    if (body.assigned_user_ids !== undefined) changed.push("users")
+    await audit(
+      _gate,
+      "profile_upsert",
+      `Modif profil « ${profile.name} » · ${changed.length ? changed.join(" · ") : "sans détail"}`,
+      {
+        profile_id: profile.id,
+        fields: Object.keys(body),
+        hosts_count: (profile.enabledHosts || []).length
+      }
+    )
     return c.json({ ok: true, profile })
   })
 
@@ -1297,8 +1572,17 @@ export function createApp() {
     if (!_gate.ok) return c.json({ error: _gate.error }, _gate.status)
     const org = await store.getOrg(_gate.orgId)
     if (!org) return c.json({ error: "no_org" }, 404)
+    const existing = (await store.listProfiles(org.id)).find(
+      (p) => p.id === c.req.param("profileId")
+    )
     const ok = await store.deleteProfile(org.id, c.req.param("profileId"))
     if (!ok) return c.json({ error: "profile_not_found" }, 404)
+    await audit(
+      _gate,
+      "profile_delete",
+      `Suppression profil « ${existing?.name || c.req.param("profileId")} »`,
+      { profile_id: c.req.param("profileId") }
+    )
     return c.json({ ok: true })
   })
 
@@ -1385,6 +1669,82 @@ export function createApp() {
     return c.json({ ok: true })
   })
 
+  /** Pool recovery one-time — liste (pas de clair) */
+  v1.get("/org/recovery-codes", async (c) => {
+    const _gate = await requireConsoleAuth(c, "console_access")
+    if (!_gate.ok) return c.json({ error: _gate.error }, _gate.status)
+    if (!_gate.admin.isPrincipal) {
+      return c.json({ error: "principal_only" }, 403)
+    }
+    const codes = await store.listRecoveryCodes(_gate.orgId)
+    const active = codes.filter((c) => c.active && !c.consumedAt).length
+    return c.json({
+      org_id: _gate.orgId,
+      active_count: active,
+      low_stock: active < 5,
+      codes: codes.map((c) => ({
+        id: c.id,
+        label: c.label,
+        created_at: c.createdAt,
+        consumed_at: c.consumedAt,
+        consumed_agent_id: c.consumedAgentId,
+        active: c.active && !c.consumedAt
+      }))
+    })
+  })
+
+  /** Génère N codes — clair renvoyé UNE FOIS */
+  v1.post("/org/recovery-codes/generate", async (c) => {
+    const _gate = await requireConsoleAuth(c, "console_access")
+    if (!_gate.ok) return c.json({ error: _gate.error }, _gate.status)
+    if (!_gate.admin.isPrincipal) {
+      return c.json({ error: "principal_only" }, 403)
+    }
+    let body: { count?: number; label?: string } = {}
+    try {
+      body = await c.req.json()
+    } catch {
+      body = {}
+    }
+    const count = body.count ?? 20
+    const result = await store.generateRecoveryCodes(
+      _gate.orgId,
+      count,
+      body.label
+    )
+    await store.forceConfigSync(_gate.orgId)
+    await audit(
+      _gate,
+      "recovery_codes_generated",
+      `Génération ${result.created} code(s) recovery one-time`,
+      { count: result.created }
+    )
+    return c.json({
+      ok: true,
+      created: result.created,
+      codes: result.codes,
+      note: "Copiez ces codes maintenant — ils ne seront plus jamais réaffichés."
+    })
+  })
+
+  /** Invalide tout le pool actif */
+  v1.post("/org/recovery-codes/revoke-pool", async (c) => {
+    const _gate = await requireConsoleAuth(c, "console_access")
+    if (!_gate.ok) return c.json({ error: _gate.error }, _gate.status)
+    if (!_gate.admin.isPrincipal) {
+      return c.json({ error: "principal_only" }, 403)
+    }
+    const { revoked } = await store.revokeRecoveryPool(_gate.orgId)
+    await store.forceConfigSync(_gate.orgId)
+    await audit(
+      _gate,
+      "recovery_pool_revoked",
+      `Pool recovery invalidé · ${revoked} code(s)`,
+      { revoked }
+    )
+    return c.json({ ok: true, revoked })
+  })
+
   /** Vendor recovery — info limitée au principal */
   v1.get("/org/recovery-info", async (c) => {
     const _gate = await requireConsoleAuth(c, "console_access")
@@ -1392,10 +1752,15 @@ export function createApp() {
     if (!_gate.admin.isPrincipal) {
       return c.json({ error: "principal_only" }, 403)
     }
+    await audit(
+      _gate,
+      "recovery_info_view",
+      "Consultation info recovery concepteur (hint, pas le secret complet en prod)"
+    )
     return c.json({
       ok: true,
       note:
-        "Recovery vendor UNIQUEMENT si agent offline > 2h (sync toutes les 15 min). N'ouvre pas les postes synchronisés.",
+        "Recovery vendor UNIQUEMENT si agent offline > 2h (sync toutes les 15 min). N'ouvre pas les postes synchronisés. V1.x : préférer pool de codes one-time (voir RECOVERY-CONCEPTEUR.md).",
       recovery_password_hint: VENDOR_RECOVERY_PASSWORD,
       offline_after_ms: VENDOR_RECOVERY_OFFLINE_MS,
       env_override: "OPSGATE_VENDOR_RECOVERY"
@@ -1664,31 +2029,170 @@ export function createApp() {
     if (!_gate.ok) return c.json({ error: _gate.error }, _gate.status)
     const org = await store.getOrg(_gate.orgId)
     if (!org) return c.json({ error: "no_org" }, 404)
-    const raw = await store.listEvents(org.id, 300)
-    // Normaliser snake_case pour la console (décisions mask_send / send_anyway / cancel)
-    const events = raw.map((e) => ({
-      id: e.id,
-      org_id: e.orgId,
-      agent_id: e.agentId ?? null,
-      client_event_id: e.client_event_id,
-      ts: e.ts,
-      source: e.source,
-      hostname: e.hostname,
-      decision: e.decision,
-      detection_count: e.detection_count,
-      highest_severity: e.highest_severity,
-      rule_ids: e.rule_ids || [],
-      types: e.types || [],
-      masked: e.masked ?? null,
-      file_names: e.file_names ?? null,
-      device_label: e.device_label ?? null,
-      exit_actor: e.exit_actor ?? null,
-      exit_admin_id: e.exit_admin_id ?? null,
-      exit_admin_label: e.exit_admin_label ?? null,
-      schema_version: e.schema_version,
-      received_at: e.receivedAt
-    }))
-    return c.json({ org_id: org.id, events })
+    const { mergeMonitoringSettings } = await import("./types")
+    const mon = mergeMonitoringSettings(org.monitoring)
+    await store.purgeOldEvents(org.id, mon.logRetentionDays)
+    void ensureWeeklyExportIfDue(org.id).catch(() => {
+      /* non bloquant */
+    })
+    const raw = await store.listEvents(org.id, 500)
+    // snake_case stable — mask_send / send_anyway / cancel / enroll / unenroll
+    const events = raw.map(publicEvent)
+    const oldest = raw.length
+      ? raw.reduce((a, b) =>
+          Date.parse(a.ts) < Date.parse(b.ts) ? a : b
+        ).ts
+      : undefined
+    const { daysUntilPurge } = await import("./events-export")
+    const remaining = daysUntilPurge(oldest, mon.logRetentionDays)
+    return c.json({
+      org_id: org.id,
+      events,
+      count: events.length,
+      retention: {
+        days: mon.logRetentionDays,
+        weekly_export_enabled: mon.weeklyExportEnabled,
+        oldest_event_ts: oldest || null,
+        days_until_oldest_purge: remaining,
+        note:
+          "La rétention est définie par l’entreprise (Monitoring). Exportez avant purge."
+      }
+    })
+  })
+
+  /** Export téléchargeable (semaine / tout) — CSV ou JSON */
+  v1.get("/org/events/export", async (c) => {
+    const _gate = await requireConsoleAuth(c, "console_access")
+    if (!_gate.ok) return c.json({ error: _gate.error }, _gate.status)
+    const org = await store.getOrg(_gate.orgId)
+    if (!org) return c.json({ error: "no_org" }, 404)
+    const range = (c.req.query("range") || "week") as "week" | "all"
+    const format = (c.req.query("format") || "csv") as "csv" | "json"
+    const storeExport = c.req.query("store") === "1"
+    const { mergeMonitoringSettings } = await import("./types")
+    const mon = mergeMonitoringSettings(org.monitoring)
+    const {
+      previousIsoWeekRange,
+      filterEventsRange,
+      eventsToCsv,
+      eventsToJson,
+      daysUntilPurge
+    } = await import("./events-export")
+    const all = await store.listEvents(org.id, 5000)
+    let slice = all
+    let fromTs = all.length
+      ? all.reduce((a, b) =>
+          Date.parse(a.ts) < Date.parse(b.ts) ? a : b
+        ).ts
+      : new Date().toISOString()
+    let toTs = new Date().toISOString()
+    let label = "all"
+    if (range === "week") {
+      const { from, to, weekKey } = previousIsoWeekRange()
+      slice = filterEventsRange(all, from.getTime(), to.getTime())
+      fromTs = from.toISOString()
+      toTs = to.toISOString()
+      label = weekKey
+    }
+    const content =
+      format === "json" ? eventsToJson(slice) : eventsToCsv(slice)
+    const filename = `opsgate-events-${label}.${format}`
+    if (storeExport) {
+      const rec = await store.saveLogExport(org.id, {
+        kind: range === "week" ? "week" : "manual",
+        format,
+        filename,
+        content,
+        eventCount: slice.length,
+        fromTs,
+        toTs,
+        expiresAt: new Date(
+          Date.now() + Math.max(mon.logRetentionDays, 30) * 86400000
+        ).toISOString()
+      })
+      await audit(
+        _gate,
+        "events_export",
+        `Export ${range} ${format} · ${slice.length} events · stocké ${rec.id.slice(0, 10)}…`
+      )
+    } else {
+      await audit(
+        _gate,
+        "events_export",
+        `Export ${range} ${format} · ${slice.length} events (téléchargement direct)`
+      )
+    }
+    const oldest = slice.length
+      ? slice.reduce((a, b) =>
+          Date.parse(a.ts) < Date.parse(b.ts) ? a : b
+        ).ts
+      : undefined
+    return c.json({
+      ok: true,
+      filename,
+      format,
+      range,
+      content,
+      count: slice.length,
+      from_ts: fromTs,
+      to_ts: toTs,
+      retention_days: mon.logRetentionDays,
+      days_until_oldest_purge: daysUntilPurge(oldest, mon.logRetentionDays)
+    })
+  })
+
+  /** Archives disponibles (hebdo auto + manuels stockés) */
+  v1.get("/org/events/exports", async (c) => {
+    const _gate = await requireConsoleAuth(c, "console_access")
+    if (!_gate.ok) return c.json({ error: _gate.error }, _gate.status)
+    void ensureWeeklyExportIfDue(_gate.orgId).catch(() => {
+      /* ignore */
+    })
+    const list = await store.listLogExports(_gate.orgId)
+    return c.json({
+      org_id: _gate.orgId,
+      exports: list.map((x) => ({
+        id: x.id,
+        kind: x.kind,
+        format: x.format,
+        filename: x.filename,
+        event_count: x.eventCount,
+        from_ts: x.fromTs,
+        to_ts: x.toTs,
+        created_at: x.createdAt,
+        expires_at: x.expiresAt,
+        remaining_days: Math.max(
+          0,
+          Math.ceil((Date.parse(x.expiresAt) - Date.now()) / 86400000)
+        )
+      }))
+    })
+  })
+
+  v1.get("/org/events/exports/:exportId", async (c) => {
+    const _gate = await requireConsoleAuth(c, "console_access")
+    if (!_gate.ok) return c.json({ error: _gate.error }, _gate.status)
+    const rec = await store.getLogExport(
+      _gate.orgId,
+      c.req.param("exportId")
+    )
+    if (!rec) return c.json({ error: "export_not_found" }, 404)
+    return c.json({
+      ok: true,
+      id: rec.id,
+      filename: rec.filename,
+      format: rec.format,
+      content: rec.content,
+      event_count: rec.eventCount,
+      from_ts: rec.fromTs,
+      to_ts: rec.toTs,
+      created_at: rec.createdAt,
+      expires_at: rec.expiresAt,
+      remaining_days: Math.max(
+        0,
+        Math.ceil((Date.parse(rec.expiresAt) - Date.now()) / 86400000)
+      )
+    })
   })
 
   v1.get("/org/policy", async (c) => {
@@ -1761,6 +2265,14 @@ export function createApp() {
       parts.push(`events=${patch.eventReporting}`)
     if (patch.protectUnenroll !== undefined)
       parts.push(`protect_unenroll=${patch.protectUnenroll}`)
+    if (patch.userMessages !== undefined) {
+      const keys = Object.keys(patch.userMessages || {})
+      parts.push(
+        keys.length
+          ? `messages_banner=[${keys.join(",")}]`
+          : "messages_banner=reset"
+      )
+    }
     if (patch.managementPasswordHash !== undefined)
       parts.push(
         patch.managementPasswordHash
@@ -1771,21 +2283,19 @@ export function createApp() {
       parts.push(`pack=${patch.rulesPackVersion}`)
     if (patch.configEpoch !== undefined)
       parts.push(`epoch=${patch.configEpoch}`)
-    await store.appendAdminAudit({
-      orgId: org.id,
-      adminId: _gate.admin.id,
-      adminEmail: _gate.admin.email,
-      adminLabel: _gate.admin.label,
-      action: "policy_update",
-      detail:
-        parts.length > 0
-          ? `Policy org · ${parts.join(" · ")}`
-          : "Mise à jour policy org",
-      meta: {
+    await audit(
+      _gate,
+      "policy_update",
+      parts.length > 0
+        ? `Policy org · ${parts.join(" · ")}`
+        : "Mise à jour policy org",
+      {
         fields: Object.keys(patch),
-        hosts_count: patch.enabledHosts?.length
+        hosts_count: patch.enabledHosts?.length,
+        default_action: patch.defaultAction,
+        event_reporting: patch.eventReporting
       }
-    })
+    )
     return c.json({
       ok: true,
       policy: policy

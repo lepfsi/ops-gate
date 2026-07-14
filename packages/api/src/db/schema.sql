@@ -25,7 +25,7 @@ CREATE TABLE IF NOT EXISTS policies (
   default_action TEXT NOT NULL,
   enabled_hosts JSONB NOT NULL DEFAULT '[]',
   scan_uploads BOOLEAN NOT NULL DEFAULT TRUE,
-  event_reporting BOOLEAN NOT NULL DEFAULT FALSE,
+  event_reporting BOOLEAN NOT NULL DEFAULT TRUE,
   rules_pack_version TEXT NOT NULL,
   management_password_hash TEXT NOT NULL DEFAULT '',
   protect_unenroll BOOLEAN NOT NULL DEFAULT FALSE,
@@ -188,6 +188,38 @@ CREATE TABLE IF NOT EXISTS detection_events (
 
 CREATE INDEX IF NOT EXISTS events_org_ts_idx ON detection_events(org_id, received_at DESC);
 CREATE INDEX IF NOT EXISTS events_agent_idx ON detection_events(agent_id);
+
+-- ── Recovery codes one-time (concepteur) ───────────────────────
+CREATE TABLE IF NOT EXISTS recovery_codes (
+  id TEXT PRIMARY KEY,
+  org_id TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  code_hash TEXT NOT NULL,
+  label TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  consumed_at TIMESTAMPTZ,
+  consumed_agent_id TEXT,
+  active BOOLEAN NOT NULL DEFAULT TRUE
+);
+
+CREATE INDEX IF NOT EXISTS recovery_codes_org_active_idx
+  ON recovery_codes(org_id) WHERE active = TRUE AND consumed_at IS NULL;
+
+-- ── Archives export logs (semaine / manuel) ────────────────────
+CREATE TABLE IF NOT EXISTS log_exports (
+  id TEXT PRIMARY KEY,
+  org_id TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL,
+  format TEXT NOT NULL,
+  filename TEXT NOT NULL,
+  content TEXT NOT NULL,
+  event_count INT NOT NULL DEFAULT 0,
+  from_ts TIMESTAMPTZ NOT NULL,
+  to_ts TIMESTAMPTZ NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  expires_at TIMESTAMPTZ NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS log_exports_org_idx ON log_exports(org_id, created_at DESC);
 
 -- ── Password reset OTP ─────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS password_reset_challenges (

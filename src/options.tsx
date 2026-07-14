@@ -87,11 +87,11 @@ function OptionsPage() {
 
   const runEnroll = async (kind: "org" | "personal") => {
     if (kind === "org" && !orgCode.trim()) {
-      setErr("Saisissez un code organisation (ex. DEMO-OPSGATE).")
+      setErr("Code organisation requis.")
       return
     }
     if (kind === "personal" && !personalLicenseKey.trim()) {
-      setErr("Saisissez une clé de licence personnelle.")
+      setErr("Clé de licence requise.")
       return
     }
     setBusy(true)
@@ -112,29 +112,17 @@ function OptionsPage() {
       if (res?.ok) {
         setSettings(res.settings)
         const isPers = res.settings.personalAccount === true
-        const pwdOn =
-          res.settings.managementPasswordHash &&
-          String(res.settings.managementPasswordHash).trim().length > 0
         if (kind === "org" && isPers) {
-          setErr(
-            "Enroll demandé en organisation mais l’API a renvoyé un compte personnel. Vérifiez le code org et redémarrez l’API."
-          )
+          setErr("Échec d’enrôlement — mode organisation indisponible.")
           return
         }
         setMsg(
-          `Enrôlé — ${res.settings.orgName || res.settings.orgId}` +
-            (isPers ? " (personnel)" : " (organisation)") +
-            `, pack ${res.settings.rulesPackVersion}.` +
-            (isPers
-              ? " Events cloud désactivés (privacy). Management via Options."
-              : res.settings.eventReporting
-                ? " Events activés → visibles console DEMO."
-                : " Events off en policy — activez « Collecte events » en console.") +
-            (!isPers && res.settings.managedLockActive
-              ? pwdOn
-                ? " Policies verrouillées ; désinscription protégée."
-                : " Policies verrouillées."
-              : "")
+          isPers
+            ? `Mode personnel activé — ${res.settings.orgName || "PERSONAL"}`
+            : `Enrôlé — ${res.settings.orgName || res.settings.orgId}` +
+                (res.settings.rulesPackVersion
+                  ? ` · pack ${res.settings.rulesPackVersion}`
+                  : "")
         )
       } else {
         setErr(res?.message || res?.error || "enroll_failed")
@@ -154,24 +142,20 @@ function OptionsPage() {
       const res = await chrome.runtime.sendMessage({ type: "SYNC_NOW" })
       if (res?.ok) {
         setSettings(res.settings)
-        const pwdOn =
-          res.settings.managementPasswordHash &&
-          String(res.settings.managementPasswordHash).trim().length > 0
         setMsg(
-          `Sync OK — pack ${res.settings.rulesPackVersion}.` +
-            (pwdOn
-              ? " Mdp de désinscription actif (policy)."
-              : " Aucun mdp de désinscription dans la policy.")
+          `Synchronisation réussie` +
+            (res.settings.rulesPackVersion
+              ? ` · pack ${res.settings.rulesPackVersion}`
+              : "")
         )
       } else {
         if (res?.settings) setSettings(res.settings)
         setErr(
           res?.message ||
             res?.error ||
-            "sync_failed" +
-              (res?.requiresAdminPassword
-                ? " — token invalide : mdp de désinscription requis pour sortir."
-                : "")
+            (res?.requiresAdminPassword
+              ? "Session invalide — désinscription requise."
+              : "Échec de la synchronisation")
         )
       }
     } catch (e) {
@@ -196,9 +180,9 @@ function OptionsPage() {
         setAdminUsername("")
         setAdminPassword("")
         setUnenrollPromptOpen(false)
-        setMsg(res.message || "Mode local_only.")
+        setMsg(res.message || "Appareil désenrôlé.")
       } else {
-        setErr(res?.message || res?.error || "exit_failed")
+        setErr(res?.message || res?.error || "Échec de la désinscription")
       }
     } catch (e) {
       setErr(String(e))
@@ -220,7 +204,7 @@ function OptionsPage() {
 
   const onConfirmExitWithPassword = async () => {
     if (!adminUsername.trim() || !adminPassword.trim()) {
-      setErr("Saisissez le nom d'utilisateur et le mot de passe.")
+      setErr("Identifiant et mot de passe requis.")
       return
     }
     await runExitOrg(adminUsername, adminPassword)
@@ -252,13 +236,13 @@ function OptionsPage() {
           marginBottom: 24
         }}>
         <div>
-          <h1 style={{ fontSize: 24, margin: "0 0 4px" }}>OpsGate — Options</h1>
+          <h1 style={{ fontSize: 24, margin: "0 0 4px" }}>OpsGate</h1>
           <p style={{ color: "#64748b", margin: 0, fontSize: 14 }}>
             {hardLock
-              ? "Endpoint protégé (mode org) — policies non modifiables par l’utilisateur."
+              ? "Géré par l’organisation"
               : softLock
-                ? "Enrôlé — en attente du premier sync réussi (verrou policy ensuite)."
-                : "Mode local. Enrolment org active la protection managée."}
+                ? "Enrôlé · synchronisation en cours"
+                : "Mode local"}
           </p>
         </div>
         <button type="button" onClick={closePage} style={btnClose}>
@@ -278,9 +262,8 @@ function OptionsPage() {
             color: "#991b1b",
             lineHeight: 1.45
           }}>
-          <strong style={{ color: "#dc2626" }}>UNLICENSED</strong> — aucune
-          licence siège active pour cet agent. Protection désactivée après la
-          grâce (5 min). Contactez votre admin OpsGate.
+          <strong>Sans licence</strong> — protection inactive. Contactez votre
+          administrateur.
         </div>
       )}
       {settings.licenseStatus === "grace" && (
@@ -295,43 +278,8 @@ function OptionsPage() {
             color: "#92400e",
             lineHeight: 1.45
           }}>
-          <strong>Licence agent manquante — période de grâce</strong> (5 min).
-          L’admin doit assigner un siège licence à cet appareil.
-        </div>
-      )}
-      {isOrgUi && hardLock && settings.licenseStatus !== "unlicensed" && (
-        <div
-          style={{
-            border: "1px solid #fca5a5",
-            background: "#fef2f2",
-            borderRadius: 12,
-            padding: "12px 14px",
-            marginBottom: 16,
-            fontSize: 13,
-            color: "#991b1b",
-            lineHeight: 1.45
-          }}>
-          <strong>Protection endpoint active</strong> (modèle Kaspersky / Check
-          Point) — mode <strong>organisation</strong>.
-          <ul style={{ margin: "8px 0 0", paddingLeft: 18 }}>
-            <li>Policies non modifiables par l’utilisateur</li>
-            <li>
-              Désinscription :{" "}
-              {exitPasswordRequired
-                ? "username + mot de passe admin"
-                : "libre (aucun mdp dans la policy)"}
-            </li>
-            <li>
-              Hors ligne : dernière policy reste appliquée (pas de contournement
-              via token mort)
-            </li>
-            <li>
-              Events console :{" "}
-              {settings.eventReporting === false
-                ? "désactivés (policy)"
-                : "activés"}
-            </li>
-          </ul>
+          <strong>Période de grâce</strong> — licence siège manquante. Contactez
+          votre administrateur.
         </div>
       )}
 
@@ -344,15 +292,6 @@ function OptionsPage() {
           background: locked ? "#f8fafc" : "#fff"
         }}>
         <h2 style={{ fontSize: 15, marginTop: 0 }}>Organisation</h2>
-        <p style={{ fontSize: 13, color: "#64748b", marginTop: 0 }}>
-          Mode : <strong>{settings.mode}</strong>
-          {settings.orgName ? ` · ${settings.orgName}` : null}
-          {settings.rulesPackVersion
-            ? ` · pack ${settings.rulesPackVersion}`
-            : " · règles embarquées"}
-          {hardLock ? " · 🔒 policy lock" : null}
-          {exitPasswordRequired ? " · 🔑 mdp sortie" : null}
-        </p>
 
         {!enrolled ? (
           <>
@@ -372,7 +311,7 @@ function OptionsPage() {
               placeholder="http://127.0.0.1:8787"
             />
             <label style={{ ...labelStyle, marginTop: 14 }}>
-              Label appareil (commun)
+              Nom de l’appareil
             </label>
             <input
               value={deviceLabel}
@@ -381,7 +320,6 @@ function OptionsPage() {
               placeholder="mon-pc"
             />
 
-            {/* ── Parcours organisation (events console) ── */}
             <div
               style={{
                 marginTop: 18,
@@ -391,13 +329,11 @@ function OptionsPage() {
                 background: "#f8fafc"
               }}>
               <strong style={{ fontSize: 14, color: "#0f172a" }}>
-                Organisation (équipe)
+                Organisation
               </strong>
-              <p style={{ fontSize: 12, color: "#64748b", margin: "6px 0 10px" }}>
-                Enrôlement <code>DEMO-OPSGATE</code> → events dans la{" "}
-                <strong>console admin</strong>, policy & packs partagés.
-              </p>
-              <label style={labelStyle}>Code organisation</label>
+              <label style={{ ...labelStyle, marginTop: 10 }}>
+                Code organisation
+              </label>
               <input
                 value={orgCode}
                 onChange={(e) => setOrgCode(e.target.value)}
@@ -409,11 +345,10 @@ function OptionsPage() {
                 disabled={busy}
                 onClick={() => void runEnroll("org")}
                 style={{ ...btnPrimary, marginTop: 12, width: "100%" }}>
-                {busy ? "Enrolment…" : "Enrôler dans l’organisation"}
+                {busy ? "Enrôlement…" : "Enrôler"}
               </button>
             </div>
 
-            {/* ── Parcours personnel (pas d’events cloud) ── */}
             <div
               style={{
                 marginTop: 12,
@@ -425,11 +360,9 @@ function OptionsPage() {
               <strong style={{ fontSize: 14, color: "#134e4a" }}>
                 Usage personnel
               </strong>
-              <p style={{ fontSize: 12, color: "#0f766e", margin: "6px 0 10px" }}>
-                Org <code>PERSONAL</code> — <strong>pas d’events</strong> vers la
-                console DEMO (privacy). Gestion ici + API locale.
-              </p>
-              <label style={labelStyle}>Clé de licence</label>
+              <label style={{ ...labelStyle, marginTop: 10 }}>
+                Clé de licence
+              </label>
               <input
                 value={personalLicenseKey}
                 onChange={(e) => setPersonalLicenseKey(e.target.value)}
@@ -448,7 +381,7 @@ function OptionsPage() {
                   borderColor: "#5eead4",
                   color: "#0f766e"
                 }}>
-                {busy ? "Enrolment…" : "Activer le mode personnel"}
+                {busy ? "Activation…" : "Activer"}
               </button>
             </div>
           </>
@@ -466,95 +399,52 @@ function OptionsPage() {
                 lineHeight: 1.5
               }}>
               <strong>
-                {isPersonalUi ? "Mode personnel" : "Mode organisation"}
+                {isPersonalUi ? "Personnel" : "Organisation"}
               </strong>
-              <p style={{ margin: "6px 0 0" }}>
-                Org : <code>{settings.orgName || settings.orgId || "—"}</code>
-                {" · "}
-                Events cloud :{" "}
-                <strong>
-                  {isPersonalUi
-                    ? "désactivés (personnel)"
-                    : settings.eventReporting === false
-                      ? "désactivés (policy)"
-                      : "activés"}
-                </strong>
-                {" · "}
-                Pack : <code>{settings.rulesPackVersion || "—"}</code>
-              </p>
-            </div>
-            {isPersonalUi ? (
-              <div
-                style={{
-                  border: "1px solid #99f6e4",
-                  background: "#f0fdfa",
-                  borderRadius: 10,
-                  padding: "12px 14px",
-                  marginBottom: 14,
-                  fontSize: 13,
-                  color: "#134e4a",
-                  lineHeight: 1.5
-                }}>
-                <strong>Abonnement personnel — console minimale</strong>
-                <p style={{ margin: "8px 0 0" }}>
-                  Pas de console web DEMO pour ce mode. Pour remonter des events
-                  admin : désenrôlez puis{" "}
-                  <strong>Enrôler dans l’organisation</strong> (
-                  <code>DEMO-OPSGATE</code>).
-                </p>
-                <ul style={{ margin: "8px 0 0", paddingLeft: 18 }}>
-                  <li>Sites surveillés / scan uploads (section bas de page)</li>
-                  <li>Sync des règles / pack PERSONAL</li>
-                  <li>État licence : {settings.licenseStatus || "licensed"}</li>
-                  <li>
-                    Label appareil :{" "}
-                    <code>{settings.deviceLabel || "—"}</code>
-                  </li>
-                </ul>
+              <div style={{ marginTop: 6 }}>
+                {settings.orgName || settings.orgId || "—"}
+                {settings.rulesPackVersion
+                  ? ` · pack ${settings.rulesPackVersion}`
+                  : ""}
+                {hardLock ? " · géré" : ""}
               </div>
-            ) : null}
+            </div>
             <div style={{ fontSize: 13, color: "#334155", lineHeight: 1.55 }}>
               <div>
-                Agent : <code>{settings.agentId}</code>
-              </div>
-              <div>
-                Label : <code>{settings.deviceLabel || "—"}</code>
+                Appareil : <code>{settings.deviceLabel || "—"}</code>
               </div>
               <div>
                 Dernière sync :{" "}
                 {settings.lastRulesSyncAt
                   ? new Date(settings.lastRulesSyncAt).toLocaleString("fr-FR")
-                  : "jamais"}
+                  : "—"}
               </div>
               {settings.lastSyncError === "revoked_remote" && (
                 <div style={{ color: "#0f766e", fontWeight: 600 }}>
-                  Cet appareil a été révoqué depuis la console — retour en mode
-                  local (pas de mdp requis).
+                  Appareil révoqué — mode local
                 </div>
               )}
               {settings.lastSyncError &&
                 settings.lastSyncError !== "revoked_remote" && (
-                <div style={{ color: "#b91c1c" }}>
-                  Erreur sync : {settings.lastSyncError}
-                  {hardLock
-                    ? " — protection maintenue avec dernière policy."
-                    : ""}
-                </div>
-              )}
-              {settings.lastEventError && isOrgUi && (
-                <div style={{ color: "#b91c1c" }}>
-                  Erreur events : {settings.lastEventError}
-                </div>
-              )}
+                  <div style={{ color: "#b91c1c" }}>
+                    Erreur de sync
+                  </div>
+                )}
             </div>
 
-            <div style={{ display: "flex", gap: 8, marginTop: 14, flexWrap: "wrap" }}>
+            <div
+              style={{
+                display: "flex",
+                gap: 8,
+                marginTop: 14,
+                flexWrap: "wrap"
+              }}>
               <button
                 type="button"
                 disabled={busy}
                 onClick={onSync}
                 style={btnPrimary}>
-                {busy ? "Sync…" : "Synchroniser la policy"}
+                {busy ? "…" : "Synchroniser"}
               </button>
               <button type="button" onClick={closePage} style={btnGhost}>
                 Fermer
@@ -567,16 +457,9 @@ function OptionsPage() {
                 paddingTop: 16,
                 borderTop: "1px solid #e2e8f0"
               }}>
-              <div style={{ fontWeight: 650, fontSize: 13, marginBottom: 8 }}>
+              <div style={{ fontWeight: 650, fontSize: 13, marginBottom: 10 }}>
                 Désinscription
               </div>
-              <p style={{ fontSize: 12, color: "#64748b", margin: "0 0 10px" }}>
-                {exitPasswordRequired
-                  ? "Username (label ou email admin) + mot de passe requis. Recovery vendor : username « vendor » si offline > 2h."
-                  : softLock
-                    ? "Premier sync pas encore réussi — sortie libre."
-                    : "Aucun mdp de désinscription dans la policy — sortie libre."}
-              </p>
 
               {!unenrollPromptOpen ? (
                 <button
@@ -598,16 +481,21 @@ function OptionsPage() {
                     borderRadius: 10,
                     padding: 14
                   }}>
-                  <div style={{ fontWeight: 650, fontSize: 13, marginBottom: 8 }}>
-                    Confirmer la désinscription
+                  <div
+                    style={{
+                      fontWeight: 650,
+                      fontSize: 13,
+                      marginBottom: 8
+                    }}>
+                    Identifiants administrateur
                   </div>
-                  <label style={labelStyle}>Nom d&apos;utilisateur</label>
+                  <label style={labelStyle}>Identifiant</label>
                   <input
                     type="text"
                     value={adminUsername}
                     onChange={(e) => setAdminUsername(e.target.value)}
                     style={inputStyle}
-                    placeholder="Administrator ou email admin"
+                    placeholder="Email ou label admin"
                     autoComplete="username"
                     autoFocus
                   />
@@ -646,7 +534,7 @@ function OptionsPage() {
                         ...btnPrimary,
                         background: "#b91c1c"
                       }}>
-                      {busy ? "…" : "Confirmer et désenrôler"}
+                      {busy ? "…" : "Confirmer"}
                     </button>
                     <button
                       type="button"
@@ -705,7 +593,7 @@ function OptionsPage() {
                 padding: "3px 8px",
                 borderRadius: 999
               }}>
-              Verrouillé
+              Géré
             </span>
           )}
         </div>
@@ -718,12 +606,7 @@ function OptionsPage() {
               void persistLocal({ ...settings, enabled: e.target.checked })
             }
           />
-          <div>
-            <div style={{ fontWeight: 650 }}>Extension active</div>
-            <div style={{ fontSize: 13, color: "#64748b" }}>
-              Désactivation interdite en mode géré
-            </div>
-          </div>
+          <div style={{ fontWeight: 650 }}>Extension active</div>
         </label>
         <label
           style={{
@@ -742,19 +625,16 @@ function OptionsPage() {
               void persistLocal({ ...settings, scanUploads: e.target.checked })
             }
           />
-          <div>
-            <div style={{ fontWeight: 650 }}>Scanner les uploads</div>
-            <div style={{ fontSize: 13, color: "#64748b" }}>Master on/off</div>
-          </div>
+          <div style={{ fontWeight: 650 }}>Analyser les fichiers joints</div>
         </label>
         {(
           [
-            ["scanConfigs", "Fichiers de configuration", "conf, json, xml, ps1, log…"],
-            ["scanDatabases", "Fichiers base de données", "sql scanné ; .db = confirm"],
-            ["scanImages", "Images (OCR)", "stub — log + confirm en V1"],
-            ["warnMedia", "Audio / vidéo", "toujours warning + log"]
+            ["scanConfigs", "Configurations"],
+            ["scanDatabases", "Bases de données"],
+            ["scanImages", "Images"],
+            ["warnMedia", "Audio / vidéo"]
           ] as const
-        ).map(([key, title, sub]) => (
+        ).map(([key, title]) => (
           <label
             key={key}
             style={{
@@ -770,7 +650,8 @@ function OptionsPage() {
                   ? settings.scanImages === true
                   : key === "warnMedia"
                     ? settings.warnMedia !== false
-                    : (settings as Record<string, unknown>)[key] !== false
+                    : (settings as unknown as Record<string, unknown>)[key] !==
+                      false
               }
               disabled={locked || settings.scanUploads === false}
               onChange={(e) =>
@@ -780,10 +661,7 @@ function OptionsPage() {
                 })
               }
             />
-            <div>
-              <div style={{ fontWeight: 650 }}>{title}</div>
-              <div style={{ fontSize: 13, color: "#64748b" }}>{sub}</div>
-            </div>
+            <div style={{ fontWeight: 650 }}>{title}</div>
           </label>
         ))}
       </section>
@@ -825,7 +703,7 @@ function OptionsPage() {
 
       <div style={{ marginTop: 20, textAlign: "center" }}>
         <button type="button" onClick={closePage} style={btnPrimary}>
-          Fermer cette page
+          Fermer
         </button>
       </div>
     </div>

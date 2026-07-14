@@ -156,10 +156,11 @@ export function canUseVendorRecovery(settings: OpsGateSettings): boolean {
   if (!settings.managedLockActive && !settings.requireUnenrollPassword) {
     return false
   }
-  if (!settings.recoveryPasswordHash?.trim()) return false
+  const hasPool = (settings.recoveryCodes || []).some((c) => c.hash?.trim())
+  const hasLegacy = !!settings.recoveryPasswordHash?.trim()
+  if (!hasPool && !hasLegacy) return false
   const last = settings.lastRulesSyncAt || 0
   if (!last) {
-    // jamais synchronisé avec succès mais lock ? rare
     return !!settings.lastSyncError
   }
   const age = Date.now() - last
@@ -174,12 +175,12 @@ export type ExitCredential =
       email?: string
       hash: string
     }
-  | { kind: "recovery"; hash: string }
+  | { kind: "recovery"; hash: string; codeId?: string }
 
 /**
  * Credentials de sortie :
  * - toujours les admins unenroll
- * - recovery vendor seulement si offline > 2h
+ * - recovery one-time + legacy vendor si offline > 2h
  */
 export function exitCredentials(settings: OpsGateSettings): ExitCredential[] {
   const list: ExitCredential[] = []
@@ -203,14 +204,22 @@ export function exitCredentials(settings: OpsGateSettings): ExitCredential[] {
       hash: settings.managementPasswordHash.trim()
     })
   }
-  if (
-    canUseVendorRecovery(settings) &&
-    settings.recoveryPasswordHash?.trim()
-  ) {
-    list.push({
-      kind: "recovery",
-      hash: settings.recoveryPasswordHash.trim()
-    })
+  if (canUseVendorRecovery(settings)) {
+    for (const rc of settings.recoveryCodes || []) {
+      if (rc.hash?.trim()) {
+        list.push({
+          kind: "recovery",
+          hash: rc.hash.trim(),
+          codeId: rc.id
+        })
+      }
+    }
+    if (settings.recoveryPasswordHash?.trim()) {
+      list.push({
+        kind: "recovery",
+        hash: settings.recoveryPasswordHash.trim()
+      })
+    }
   }
   return list
 }

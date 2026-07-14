@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 280 56" fill="none" role="img" aria-label="OpsGate">
+  <defs>
+    <linearGradient id="ll-bg" x1="4" y1="2" x2="48" y2="52" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0A1128"/>
+      <stop offset="1" stop-color="#111C44"/>
+    </linearGradient>
+    <linearGradient id="ll-neon" x1="12" y1="10" x2="44" y2="48" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#5EF0DF"/>
+      <stop offset="1" stop-color="#2BD9C5"/>
+    </linearGradient>
+  </defs>
+  <rect x="0" y="0" width="56" height="56" rx="14" fill="url(#ll-bg)"/>
+  <path d="M13 43V23.5C13 16.5 18.7 10.8 25.7 10.8h4.6C37.3 10.8 43 16.5 43 23.5V43"
+        stroke="url(#ll-neon)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M16.2 42.5V25.8c0-3.6 1.8-5.9 4.3-6.7L24.8 40"
+        stroke="url(#ll-neon)" stroke-width="2.1" stroke-linecap="round" opacity="0.92"/>
+  <path d="M39.8 42.5V25.8c0-3.6-1.8-5.9-4.3-6.7L31.2 40"
+        stroke="url(#ll-neon)" stroke-width="2.1" stroke-linecap="round" opacity="0.92"/>
+  <path d="M28 21.2l6.2 2.6v4.5c0 3.6-2.4 5.8-6.2 7.3-3.8-1.5-6.2-3.7-6.2-7.3v-4.5L28 21.2z"
+        fill="url(#ll-neon)" fill-opacity="0.16" stroke="url(#ll-neon)" stroke-width="2.1" stroke-linejoin="round"/>
+  <text x="72" y="36"
+        font-family="Inter, Segoe UI, system-ui, sans-serif"
+        font-size="28" font-weight="700" letter-spacing="-0.04em"
+        fill="#F8FAFC">OpsGate</text>
+</svg>
