@@ -1055,10 +1055,34 @@ textarea.input {
 .shell-nav {
   background: var(--navy);
   border-radius: var(--radius);
-  padding: 10px 8px 14px;
+  padding: 10px 8px 16px;
   position: sticky;
   top: 12px;
-  min-height: 280px;
+  min-height: 360px;
+  box-shadow: var(--shadow);
+}
+
+.shell-nav-brand {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px 14px;
+  margin-bottom: 6px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.shell-nav-brand strong {
+  color: #fff;
+  font-size: 0.95rem;
+  letter-spacing: -0.02em;
+}
+
+.shell-nav-brand span {
+  color: #94a3b8;
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
 }
 
 .shell-nav-item,
@@ -1075,12 +1099,17 @@ textarea.input {
   font-weight: 600;
   cursor: pointer;
   margin-bottom: 2px;
+  transition: background 0.12s ease, color 0.12s ease;
 }
 
 .shell-nav-sub {
-  padding-left: 22px;
-  font-size: 0.78rem;
+  padding: 7px 12px 7px 22px;
+  font-size: 0.76rem;
+  font-weight: 550;
   color: #94a3b8;
+  border-left: 2px solid transparent;
+  margin-left: 10px;
+  width: calc(100% - 10px);
 }
 
 .shell-nav-item:hover,
@@ -1095,96 +1124,15 @@ textarea.input {
   color: #2bd9c5;
 }
 
-.shell-main {
-  min-width: 0;
-}
-
-/* Layout dashboard type Kaspersky (sidebar + main) */
-.dash-layout {
-  display: grid;
-  grid-template-columns: 180px minmax(0, 1fr);
-  gap: 16px;
-  align-items: start;
-}
-
-@media (max-width: 900px) {
-  .dash-layout {
-    grid-template-columns: 1fr;
-  }
-}
-
-.dash-sidebar {
-  background: var(--navy);
+.shell-nav-item.open:not(.active) {
   color: #e2e8f0;
-  border-radius: var(--radius);
-  padding: 12px 8px 16px;
-  min-height: 320px;
-  position: sticky;
-  top: 12px;
 }
 
-.dash-sidebar-brand {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 8px 12px 14px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-  margin-bottom: 8px;
+.shell-nav-sub.active {
+  border-left-color: #2bd9c5;
 }
 
-.dash-sidebar-brand strong {
-  color: #fff;
-  font-size: 0.9rem;
-}
-
-.dash-sidebar-brand .muted {
-  color: #94a3b8;
-  font-size: 0.7rem;
-}
-
-.dash-side-item {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  width: 100%;
-  text-align: left;
-  border: none;
-  background: transparent;
-  color: #cbd5e1;
-  padding: 10px 12px;
-  border-radius: 8px;
-  font-size: 0.8rem;
-  font-weight: 600;
-  cursor: pointer;
-  margin-bottom: 2px;
-}
-
-.dash-side-item:hover {
-  background: rgba(255, 255, 255, 0.06);
-  color: #fff;
-}
-
-.dash-side-item.active {
-  background: rgba(43, 217, 197, 0.18);
-  color: #2bd9c5;
-}
-
-.dash-side-badge {
-  background: #ef4444;
-  color: #fff;
-  font-size: 0.65rem;
-  font-weight: 800;
-  padding: 1px 6px;
-  border-radius: 999px;
-  min-width: 1.2rem;
-  text-align: center;
-}
-
-.dash-side-badge.warn {
-  background: #f59e0b;
-}
-
-.dash-main {
+.shell-main {
   min-width: 0;
 }
 

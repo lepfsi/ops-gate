@@ -89,6 +89,10 @@ export default function App() {
   const [sessionAdmin, setSessionAdmin] = useState<AdminRow | null>(null)
   const [authChecking, setAuthChecking] = useState(true)
   const [tab, setTab] = useState<Tab>("summary")
+  /** Sous-section tableau de bord (une seule nav latérale) */
+  const [dashSection, setDashSection] = useState<
+    "overview" | "licenses" | "connectivity" | "activity" | "rules"
+  >("overview")
   const [apiBase, setApiBaseState] = useState(getApiBase())
   const [health, setHealth] = useState<string>("…")
   const [error, setError] = useState<string | null>(null)
@@ -414,12 +418,43 @@ export default function App() {
 
       <div className="shell-body">
       <nav className="shell-nav" aria-label="Navigation principale">
+        <div className="shell-nav-brand">
+          <strong>OpsGate</strong>
+          <span>Console</span>
+        </div>
         <button
           type="button"
-          className={`shell-nav-item ${tab === "summary" ? "active" : ""}`}
-          onClick={() => setTab("summary")}>
+          className={`shell-nav-item ${tab === "summary" && dashSection === "overview" ? "active" : tab === "summary" ? "open" : ""}`}
+          onClick={() => {
+            setTab("summary")
+            setDashSection("overview")
+          }}>
           Tableau de bord
         </button>
+        {tab === "summary" && (
+          <>
+            {(
+              [
+                ["overview", "Vue d’ensemble"],
+                ["licenses", "Licences"],
+                ["connectivity", "Connexion"],
+                ["activity", "Activité"],
+                ["rules", "Règles / menaces"]
+              ] as const
+            ).map(([id, label]) => (
+              <button
+                key={id}
+                type="button"
+                className={`shell-nav-sub ${dashSection === id ? "active" : ""}`}
+                onClick={() => {
+                  setTab("summary")
+                  setDashSection(id)
+                }}>
+                {label}
+              </button>
+            ))}
+          </>
+        )}
         <button
           type="button"
           className={`shell-nav-item ${tab === "policy" ? "active" : ""}`}
@@ -449,7 +484,7 @@ export default function App() {
             type="button"
             className={`shell-nav-sub ${tab === "moving" ? "active" : ""}`}
             onClick={() => setTab("moving")}>
-            ↳ Règles auto
+            Règles auto
           </button>
         )}
         <button
@@ -481,6 +516,8 @@ export default function App() {
         <SummaryView
           summary={summary}
           busy={busy}
+          dashSection={dashSection}
+          setDashSection={setDashSection}
           onRefresh={() => void loadTab("summary")}
           onForceSync={async () => {
             setBusy(true)
@@ -706,6 +743,8 @@ function ForcePasswordModal({ onDone }: { onDone: () => void }) {
 function SummaryView({
   summary,
   busy,
+  dashSection,
+  setDashSection,
   onRefresh,
   onForceSync,
   onMerged,
@@ -715,6 +754,10 @@ function SummaryView({
 }: {
   summary: Summary | null
   busy?: boolean
+  dashSection: "overview" | "licenses" | "connectivity" | "activity" | "rules"
+  setDashSection: (
+    s: "overview" | "licenses" | "connectivity" | "activity" | "rules"
+  ) => void
   onRefresh: () => void
   onForceSync: () => void
   onMerged?: () => void
@@ -727,9 +770,6 @@ function SummaryView({
   const [drillBusy, setDrillBusy] = useState(false)
   /** Panneau contextuel : unlicensed | grace | offline | decision | duplicates */
   const [panel, setPanel] = useState<string | null>(null)
-  const [dashSection, setDashSection] = useState<
-    "overview" | "licenses" | "connectivity" | "activity" | "rules"
-  >("overview")
 
   if (!summary) {
     return (
@@ -896,41 +936,7 @@ function SummaryView({
   }
 
   return (
-    <div className="dash-layout">
-      <aside className="dash-sidebar" aria-label="Navigation tableau de bord">
-        <div className="dash-sidebar-brand">
-          <strong>OpsGate</strong>
-          <span className="muted">Monitoring</span>
-        </div>
-        {(
-          [
-            ["overview", "Vue d’ensemble"],
-            ["licenses", "Licences"],
-            ["connectivity", "Connexion"],
-            ["activity", "Activité"],
-            ["rules", "Règles / menaces"]
-          ] as const
-        ).map(([id, label]) => (
-          <button
-            key={id}
-            type="button"
-            className={`dash-side-item ${dashSection === id ? "active" : ""}`}
-            onClick={() => {
-              setDashSection(id)
-              setPanel(null)
-            }}>
-            {label}
-            {id === "licenses" && lic.unlicensed > 0 ? (
-              <span className="dash-side-badge">{lic.unlicensed}</span>
-            ) : null}
-            {id === "connectivity" && conn.offline_long > 0 ? (
-              <span className="dash-side-badge warn">{conn.offline_long}</span>
-            ) : null}
-          </button>
-        ))}
-      </aside>
-
-      <div className="dash-main">
+    <>
       <div className="hero-card card">
         <div className="hero-copy">
           <p className="hero-kicker">Monitoring &amp; rapports · Tableau de bord</p>
@@ -1412,8 +1418,7 @@ function SummaryView({
           ))}
         </div>
       </div>
-      </div>
-    </div>
+    </>
   )
 }
 
