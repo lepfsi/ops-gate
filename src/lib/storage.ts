@@ -52,25 +52,40 @@ async function maybeReport(entry: JournalEntry) {
     if (settings.mode === "local_only" || !settings.agentToken) return
     // Mode personnel : pas d’events cloud (privacy)
     if (settings.personalAccount === true) return
-    // Org : n’envoyer que si reporting explicitement coupé
-    // (undefined/true = envoyer — évite un flag sticky false hors sync)
+    // Org enrollée : envoyer sauf si policy a coupé explicitement le reporting.
+    // Ne pas bloquer sur licence/security — une décision utilisateur doit remonter.
     if (settings.eventReporting === false) return
 
     // cancel → severity low (spec console)
     const severity =
-      entry.decision === "cancel" ? "low" : entry.highestSeverity
+      entry.decision === "cancel"
+        ? "low"
+        : entry.highestSeverity || "medium"
+    // source API : prompt | file | system (legacy "text" accepté côté store)
+    const source =
+      entry.source === "file"
+        ? "file"
+        : entry.source === "system"
+          ? "system"
+          : "prompt"
     const payload = {
       schema_version: 1,
       client_event_id: entry.id,
       ts: new Date(entry.timestamp).toISOString(),
-      source: entry.source,
-      hostname: entry.hostname,
-      decision: entry.decision,
-      detection_count: entry.detectionCount,
+      source,
+      hostname: entry.hostname || "unknown",
+      decision: entry.decision, // mask_send | send_anyway | cancel
+      detection_count: entry.detectionCount ?? 0,
       highest_severity: severity,
-      rule_ids: entry.ruleIds?.length ? entry.ruleIds : entry.types || [],
-      types: entry.types,
-      masked: entry.masked,
+      rule_ids: entry.ruleIds?.length
+        ? entry.ruleIds
+        : entry.types?.length
+          ? entry.types
+          : [`decision.${entry.decision}`],
+      types: entry.types?.length
+        ? entry.types
+        : [entry.decision],
+      masked: !!entry.masked,
       file_names: entry.fileNames ?? null,
       // Identifiant appareil (label enroll) — pas le hostname du site IA
       device_label: settings.deviceLabel || undefined
@@ -78,8 +93,7 @@ async function maybeReport(entry: JournalEntry) {
 
     const ok = await reportEvents([payload])
     if (!ok) {
-      // la queue est gérée dans reportEvents
-      console.warn("[OpsGate] event report failed (queued)")
+      console.warn("[OpsGate] event report failed (queued)", entry.decision)
     }
   } catch (e) {
     console.warn("[OpsGate] event report error", e)

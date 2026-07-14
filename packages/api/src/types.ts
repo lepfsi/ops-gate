@@ -234,7 +234,7 @@ export interface RulesPackPayload {
   published_at?: string
 }
 
-export type EventSource = "prompt" | "file" | "system"
+export type EventSource = "prompt" | "file" | "system" | "text"
 export type EventDecision =
   | "mask_send"
   | "send_anyway"
@@ -287,6 +287,7 @@ export type AdminAuditAction =
   | "admin_delete"
   | "agent_revoke"
   | "pack_publish"
+  | "rule_disable"
   | "pack_activate"
   | "force_sync"
   | "profile_upsert"

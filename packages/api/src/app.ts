@@ -1574,10 +1574,31 @@ export function createApp() {
     if (!_gate.ok) return c.json({ error: _gate.error }, _gate.status)
     const org = await store.getOrg(_gate.orgId)
     if (!org) return c.json({ error: "no_org" }, 404)
-    return c.json({
-      org_id: org.id,
-      events: await store.listEvents(org.id, 100)
-    })
+    const raw = await store.listEvents(org.id, 300)
+    // Normaliser snake_case pour la console (décisions mask_send / send_anyway / cancel)
+    const events = raw.map((e) => ({
+      id: e.id,
+      org_id: e.orgId,
+      agent_id: e.agentId ?? null,
+      client_event_id: e.client_event_id,
+      ts: e.ts,
+      source: e.source,
+      hostname: e.hostname,
+      decision: e.decision,
+      detection_count: e.detection_count,
+      highest_severity: e.highest_severity,
+      rule_ids: e.rule_ids || [],
+      types: e.types || [],
+      masked: e.masked ?? null,
+      file_names: e.file_names ?? null,
+      device_label: e.device_label ?? null,
+      exit_actor: e.exit_actor ?? null,
+      exit_admin_id: e.exit_admin_id ?? null,
+      exit_admin_label: e.exit_admin_label ?? null,
+      schema_version: e.schema_version,
+      received_at: e.receivedAt
+    }))
+    return c.json({ org_id: org.id, events })
   })
 
   v1.get("/org/policy", async (c) => {
@@ -1746,33 +1767,59 @@ export function createApp() {
       }
     }
 
+    const disabledIds = (body.disable_rule_ids || [])
+      .map((s) => String(s).trim())
+      .filter(Boolean)
+
     const result = await store.publishPack({
       orgId: org.id,
       rules: body.rules,
-      disableRuleIds: body.disable_rule_ids,
+      disableRuleIds: disabledIds.length ? disabledIds : undefined,
       notes: body.notes,
       activate: body.activate,
-      publishedBy: "dev-admin"
+      publishedBy: _gate.admin.email || _gate.admin.label || "admin"
     })
 
     if (!result.ok) {
       return c.json({ error: "publish_failed", details: result.errors }, 400)
     }
 
+    const disabledNote =
+      disabledIds.length > 0
+        ? ` — RÈGLES DÉSACTIVÉES (${disabledIds.length}) : ${disabledIds.join(", ")}`
+        : ""
     await store.appendAdminAudit({
       orgId: org.id,
       adminId: _gate.admin.id,
       adminEmail: _gate.admin.email,
       adminLabel: _gate.admin.label,
-      action: "pack_publish",
-      detail: `Pack ${result.pack.version}`
+      action: disabledIds.length > 0 ? "rule_disable" : "pack_publish",
+      detail: `Pack ${result.pack.version} publié${result.pack.active ? " & activé" : ""}${disabledNote}`,
+      meta: {
+        version: result.pack.version,
+        rules_count: result.pack.rules.length,
+        disabled_rule_ids: disabledIds,
+        notes: body.notes || null
+      }
     })
+    // Double trace lisible si désactivation (filtre audit « rule_disable »)
+    if (disabledIds.length > 0) {
+      await store.appendAdminAudit({
+        orgId: org.id,
+        adminId: _gate.admin.id,
+        adminEmail: _gate.admin.email,
+        adminLabel: _gate.admin.label,
+        action: "pack_publish",
+        detail: `Pack ${result.pack.version} (${result.pack.rules.length} règles actives après retrait)`
+      })
+    }
 
     return c.json({
       ok: true,
       version: result.pack.version,
       active: result.pack.active,
       rules_count: result.pack.rules.length,
+      disabled_rule_ids: disabledIds,
       checksum: result.pack.checksum,
       signature: result.pack.signature,
       policy_version: result.policy.version,

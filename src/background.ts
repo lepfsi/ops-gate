@@ -97,7 +97,10 @@ async function handleMessage(message: OpsGateMessage): Promise<unknown> {
     }
 
     case "LOG_DETECTION": {
+      // Journal local + report cloud (mask_send / send_anyway / cancel)
       const entry = await appendJournal(message.entry)
+      // Relancer la file au cas où le POST précédent a échoué
+      void flushPendingEvents()
       return { ok: true, entry }
     }
 
