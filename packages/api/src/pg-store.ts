@@ -353,6 +353,15 @@ export class PgStore implements OpsGateStore {
     for (const q of alters) {
       await this.pool.query(q)
     }
+    // Index anti-doublon : uniquement après ADD COLUMN device_fingerprint
+    await this.pool
+      .query(
+        `CREATE INDEX IF NOT EXISTS agents_org_fp_idx
+         ON agents(org_id, device_fingerprint)`
+      )
+      .catch((e) => {
+        console.warn("[store:postgres] agents_org_fp_idx:", String(e))
+      })
     // Heartbeat manquant sur vieilles sessions → baser sur created_at
     await this.pool
       .query(
