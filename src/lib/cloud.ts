@@ -2,6 +2,7 @@ import type { DetectionRule } from "@opsgate/engine"
 
 import {
   clearCloudState,
+  getOrCreateInstallId,
   getSettings,
   setCachedRulesPack,
   setSettings
@@ -138,6 +139,7 @@ export async function enrollAgent(
       return { ok: false, error: "org_code_required" }
     }
 
+    const fingerprint = await getOrCreateInstallId()
     const res = await fetch(apiUrl(base, "/v1/enroll"), {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -149,7 +151,8 @@ export async function enrollAgent(
         personal_license_key: isPersonal
           ? personalLicenseKey?.trim()
           : undefined,
-        app_version: chrome.runtime.getManifest().version
+        app_version: chrome.runtime.getManifest().version,
+        device_fingerprint: fingerprint
       })
     })
     const body = (await res.json()) as EnrollResponse & {

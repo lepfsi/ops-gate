@@ -163,7 +163,8 @@ function rowAgent(r: pg.QueryResultRow): Agent {
     personalAccount: !!r.personal_account,
     lastConfigEpoch:
       typeof r.last_config_epoch === "number" ? r.last_config_epoch : undefined,
-    groupId: r.group_id ?? undefined
+    groupId: r.group_id ?? undefined,
+    deviceFingerprint: r.device_fingerprint ?? undefined
   }
 }
 
@@ -271,6 +272,16 @@ function rowGroup(r: pg.QueryResultRow): UserGroup {
 }
 
 function rowProfile(r: pg.QueryResultRow): PolicyProfile {
+  let userMessages: PolicyProfile["userMessages"]
+  try {
+    const raw = r.user_messages_json
+    if (raw) {
+      const j = typeof raw === "string" ? JSON.parse(raw) : raw
+      if (j && typeof j === "object") userMessages = j
+    }
+  } catch {
+    /* ignore */
+  }
   return {
     id: r.id,
     orgId: r.org_id,
@@ -283,6 +294,7 @@ function rowProfile(r: pg.QueryResultRow): PolicyProfile {
     protectUnenroll: !!r.protect_unenroll,
     assignedGroupIds: r.assigned_group_ids || [],
     assignedUserIds: r.assigned_user_ids || [],
+    userMessages,
     updatedAt: new Date(r.updated_at).toISOString()
   }
 }
@@ -334,7 +346,9 @@ export class PgStore implements OpsGateStore {
       `ALTER TABLE admin_sessions ADD COLUMN IF NOT EXISTS last_activity_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`,
       // Nouveaux agents : pas de licence tant qu'aucun groupe (sauf assignation manuelle)
       `ALTER TABLE agents ALTER COLUMN license_assigned SET DEFAULT FALSE`,
-      `ALTER TABLE policies ADD COLUMN IF NOT EXISTS user_messages_json TEXT NOT NULL DEFAULT '{}'`
+      `ALTER TABLE policies ADD COLUMN IF NOT EXISTS user_messages_json TEXT NOT NULL DEFAULT '{}'`,
+      `ALTER TABLE policy_profiles ADD COLUMN IF NOT EXISTS user_messages_json TEXT NOT NULL DEFAULT '{}'`,
+      `ALTER TABLE agents ADD COLUMN IF NOT EXISTS device_fingerprint TEXT`
     ]
     for (const q of alters) {
       await this.pool.query(q)
@@ -1243,6 +1257,7 @@ export class PgStore implements OpsGateStore {
       protectUnenroll?: boolean
       assignedGroupIds?: string[]
       assignedUserIds?: string[]
+      userMessages?: Partial<import("./types").PolicyUserMessages>
     }
   ) {
     const org = await this.getOrg(orgId)
@@ -1256,6 +1271,10 @@ export class PgStore implements OpsGateStore {
       )
       if (!rows[0]) return undefined
       const prev = rowProfile(rows[0])
+      const nextMsgs =
+        input.userMessages !== undefined
+          ? { ...(prev.userMessages || {}), ...input.userMessages }
+          : prev.userMessages
       const next = {
         name: input.name,
         department: input.department ?? prev.department,
@@ -1272,13 +1291,15 @@ export class PgStore implements OpsGateStore {
             ? input.protectUnenroll
             : prev.protectUnenroll,
         assignedGroupIds: input.assignedGroupIds ?? prev.assignedGroupIds,
-        assignedUserIds: input.assignedUserIds ?? prev.assignedUserIds
+        assignedUserIds: input.assignedUserIds ?? prev.assignedUserIds,
+        userMessages: nextMsgs
       }
       const { rows: updated } = await this.pool.query(
         `UPDATE policy_profiles SET
           name=$3, department=$4, default_action=$5, enabled_hosts=$6::jsonb,
           scan_uploads=$7, event_reporting=$8, protect_unenroll=$9,
-          assigned_group_ids=$10::jsonb, assigned_user_ids=$11::jsonb, updated_at=$12
+          assigned_group_ids=$10::jsonb, assigned_user_ids=$11::jsonb,
+          user_messages_json=$12, updated_at=$13
          WHERE org_id=$1 AND id=$2 RETURNING *`,
         [
           orgId,
@@ -1292,6 +1313,7 @@ export class PgStore implements OpsGateStore {
           next.protectUnenroll,
           JSON.stringify(next.assignedGroupIds),
           JSON.stringify(next.assignedUserIds),
+          JSON.stringify(next.userMessages || {}),
           now
         ]
       )
@@ -1303,8 +1325,8 @@ export class PgStore implements OpsGateStore {
 
     const id = newId("prof")
     const { rows } = await this.pool.query(
-      `INSERT INTO policy_profiles (id, org_id, name, department, default_action, enabled_hosts, scan_uploads, event_reporting, protect_unenroll, assigned_group_ids, assigned_user_ids, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7,$8,$9,$10::jsonb,$11::jsonb,$12) RETURNING *`,
+      `INSERT INTO policy_profiles (id, org_id, name, department, default_action, enabled_hosts, scan_uploads, event_reporting, protect_unenroll, assigned_group_ids, assigned_user_ids, user_messages_json, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7,$8,$9,$10::jsonb,$11::jsonb,$12,$13) RETURNING *`,
       [
         id,
         orgId,
@@ -1317,6 +1339,7 @@ export class PgStore implements OpsGateStore {
         !!input.protectUnenroll,
         JSON.stringify(input.assignedGroupIds || []),
         JSON.stringify(input.assignedUserIds || []),
+        JSON.stringify(input.userMessages || {}),
         now
       ]
     )
@@ -1455,14 +1478,19 @@ export class PgStore implements OpsGateStore {
           enabledHosts: profile.enabledHosts,
           scanUploads: profile.scanUploads,
           eventReporting: profile.eventReporting,
-          protectUnenroll: profile.protectUnenroll
+          protectUnenroll: profile.protectUnenroll,
+          userMessages: {
+            ...(policy.userMessages || {}),
+            ...(profile.userMessages || {})
+          }
         }
       : {
           defaultAction: policy.defaultAction,
           enabledHosts: policy.enabledHosts,
           scanUploads: policy.scanUploads,
           eventReporting: policy.eventReporting,
-          protectUnenroll: policy.protectUnenroll
+          protectUnenroll: policy.protectUnenroll,
+          userMessages: policy.userMessages || {}
         }
 
     const unenroll = await this.listUnenrollAdmins(orgId)
@@ -1827,10 +1855,12 @@ export class PgStore implements OpsGateStore {
     appVersion?: string
     userId?: string
     personalLicenseKey?: string
+    deviceFingerprint?: string
   }): Promise<Agent & { replaced?: boolean }> {
     const now = new Date().toISOString()
     const tokenHash = hashToken(input.token)
     const label = (input.deviceLabel || "").trim()
+    const fp = (input.deviceFingerprint || "").trim()
     const org = await this.getOrg(input.orgId)
     const personal = !!org?.isPersonal
 
@@ -1841,67 +1871,82 @@ export class PgStore implements OpsGateStore {
       assignLicense = isValidPersonalLicenseKey(input.personalLicenseKey)
     }
 
+    const rebind = async (existingId: string) => {
+      const { rows } = await this.pool.query(
+        `UPDATE agents SET
+           token_hash = $2,
+           app_version = COALESCE($3, app_version),
+           device_label = COALESCE(NULLIF($4, ''), device_label),
+           host_name = COALESCE($5, host_name),
+           user_id = COALESCE($6, user_id),
+           last_seen_at = $7,
+           personal_account = $8,
+           device_fingerprint = COALESCE(NULLIF($11, ''), device_fingerprint),
+           license_assigned = CASE
+             WHEN $9 THEN $10
+             ELSE license_assigned
+           END,
+           unlicensed_since = CASE
+             WHEN $9 AND $10 THEN NULL
+             WHEN $9 AND NOT $10 THEN COALESCE(unlicensed_since, $7::timestamptz)
+             ELSE unlicensed_since
+           END
+         WHERE id = $1
+         RETURNING *`,
+        [
+          existingId,
+          tokenHash,
+          input.appVersion ?? null,
+          label || null,
+          input.hostName ?? null,
+          input.userId ?? null,
+          now,
+          personal,
+          personal,
+          assignLicense,
+          fp || null
+        ]
+      )
+      const agent = { ...rowAgent(rows[0]), replaced: true as const }
+      await this.pushSystemEvent(input.orgId, agent.id, "enroll", {
+        types: ["enroll", "re_enroll"],
+        device_label: agent.deviceLabel,
+        rule_ids: ["system.enroll"]
+      })
+      await this.applyMovingRules(input.orgId, agent.id)
+      const refreshed = (await this.listAgents(input.orgId)).find(
+        (a) => a.id === agent.id
+      )
+      return { ...(refreshed || agent), replaced: true as const }
+    }
+
+    // 1) Fingerprint stable (même install extension, label peut changer)
+    if (fp) {
+      const { rows: byFp } = await this.pool.query(
+        `SELECT id FROM agents WHERE org_id = $1 AND device_fingerprint = $2 LIMIT 1`,
+        [input.orgId, fp]
+      )
+      if (byFp[0]) return rebind(byFp[0].id)
+    }
+
+    // 2) Même label
     if (label) {
       const { rows: existing } = await this.pool.query(
-        `SELECT * FROM agents
+        `SELECT id FROM agents
          WHERE org_id = $1 AND lower(trim(device_label)) = lower(trim($2))
          LIMIT 1`,
         [input.orgId, label]
       )
-      if (existing[0]) {
-        const { rows } = await this.pool.query(
-          `UPDATE agents SET
-             token_hash = $2,
-             app_version = COALESCE($3, app_version),
-             device_label = $4,
-             host_name = COALESCE($5, host_name),
-             user_id = COALESCE($6, user_id),
-             last_seen_at = $7,
-             personal_account = $8,
-             license_assigned = CASE
-               WHEN $9 THEN $10
-               ELSE license_assigned
-             END,
-             unlicensed_since = CASE
-               WHEN $9 AND $10 THEN NULL
-               WHEN $9 AND NOT $10 THEN COALESCE(unlicensed_since, $7::timestamptz)
-               ELSE unlicensed_since
-             END
-           WHERE id = $1
-           RETURNING *`,
-          [
-            existing[0].id,
-            tokenHash,
-            input.appVersion ?? null,
-            label,
-            input.hostName ?? null,
-            input.userId ?? null,
-            now,
-            personal,
-            personal,
-            assignLicense
-          ]
-        )
-        const agent = { ...rowAgent(rows[0]), replaced: true as const }
-        await this.pushSystemEvent(input.orgId, agent.id, "enroll", {
-          types: ["enroll", "re_enroll"],
-          device_label: agent.deviceLabel,
-          rule_ids: ["system.enroll"]
-        })
-        await this.applyMovingRules(input.orgId, agent.id)
-        const refreshed = (await this.listAgents(input.orgId)).find(
-          (a) => a.id === agent.id
-        )
-        return { ...(refreshed || agent), replaced: true as const }
-      }
+      if (existing[0]) return rebind(existing[0].id)
     }
 
     const agentId = newId("agt")
     const { rows } = await this.pool.query(
       `INSERT INTO agents (
          id, org_id, device_label, host_name, enrolled_at, token_hash, app_version,
-         last_seen_at, user_id, license_assigned, unlicensed_since, personal_account
-       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$5,$8,$9,$10,$11) RETURNING *`,
+         last_seen_at, user_id, license_assigned, unlicensed_since, personal_account,
+         device_fingerprint
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$5,$8,$9,$10,$11,$12) RETURNING *`,
       [
         agentId,
         input.orgId,
@@ -1913,7 +1958,8 @@ export class PgStore implements OpsGateStore {
         input.userId ?? null,
         personal ? assignLicense : false,
         personal && assignLicense ? null : now,
-        personal
+        personal,
+        fp || null
       ]
     )
     const agent = { ...rowAgent(rows[0]), replaced: false as const }
@@ -2568,6 +2614,54 @@ export class PgStore implements OpsGateStore {
     const groups = await this.listGroups(orgId)
     const users = await this.listUsers(orgId)
 
+    const {
+      briefAgent,
+      connectivityBuckets,
+      findDuplicateFingerprints,
+      OFFLINE_LONG_MS
+    } = await import("./summary-helpers")
+    const licenseStats = await this.getLicenseStats(orgId)
+    const agents_unlicensed: import("./store-types").SummaryAgentBrief[] = []
+    const agents_grace: import("./store-types").SummaryAgentBrief[] = []
+    const agents_offline_long: import("./store-types").SummaryAgentBrief[] = []
+    const allBriefs: import("./store-types").SummaryAgentBrief[] = []
+    let licensedN = 0
+    let graceN = 0
+    let unlicensedN = 0
+    for (const a of agents) {
+      const lic = await this.isAgentLicensed(orgId, a.id)
+      const b = briefAgent(a, lic)
+      allBriefs.push(b)
+      if (b.license_status === "licensed") licensedN++
+      else if (b.license_status === "grace") {
+        graceN++
+        agents_grace.push(b)
+      } else {
+        unlicensedN++
+        agents_unlicensed.push(b)
+      }
+      if (b.offline_for_ms > OFFLINE_LONG_MS) agents_offline_long.push(b)
+    }
+    agents_offline_long.sort((a, b) => b.offline_for_ms - a.offline_for_ms)
+
+    const { rows: dayRows } = await this.pool.query(
+      `SELECT to_char(date_trunc('day', ts AT TIME ZONE 'UTC'), 'YYYY-MM-DD') AS day,
+              COUNT(*)::int AS n
+       FROM detection_events
+       WHERE org_id = $1 AND ts >= NOW() - INTERVAL '14 days'
+       GROUP BY 1 ORDER BY 1 ASC`,
+      [orgId]
+    )
+    const dayMap = new Map<string, number>()
+    for (let i = 13; i >= 0; i--) {
+      const d = new Date()
+      d.setUTCDate(d.getUTCDate() - i)
+      dayMap.set(d.toISOString().slice(0, 10), 0)
+    }
+    for (const r of dayRows) {
+      if (dayMap.has(r.day)) dayMap.set(r.day, r.n)
+    }
+
     return {
       org_id: orgId,
       agents: agents.length,
@@ -2584,7 +2678,24 @@ export class PgStore implements OpsGateStore {
       packs_published: packCount[0]?.n || 0,
       admins_count: admins.length,
       groups_count: groups.length,
-      users_count: users.length
+      users_count: users.length,
+      licenses: {
+        licensed: licensedN,
+        grace: graceN,
+        unlicensed: unlicensedN,
+        seats: licenseStats.seats,
+        seats_used: licenseStats.seats_used,
+        seats_available: licenseStats.seats_available
+      },
+      connectivity: connectivityBuckets(agents),
+      events_by_day: [...dayMap.entries()].map(([day, count]) => ({
+        day,
+        count
+      })),
+      agents_unlicensed,
+      agents_grace,
+      agents_offline_long,
+      duplicate_fingerprints: findDuplicateFingerprints(allBriefs)
     }
   }
 }

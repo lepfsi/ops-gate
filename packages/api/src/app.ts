@@ -105,6 +105,8 @@ export function createApp() {
       app_version?: string
       /** Clé licence personnelle (ex: OPS-PERSONAL-DEMO-2026) */
       personal_license_key?: string
+      /** Empreinte stable extension (anti-doublon re-enroll) */
+      device_fingerprint?: string
     }
     try {
       body = await c.req.json()
@@ -141,7 +143,8 @@ export function createApp() {
       deviceLabel: body.device_label,
       hostName: body.host_name,
       appVersion: body.app_version,
-      personalLicenseKey: body.personal_license_key
+      personalLicenseKey: body.personal_license_key,
+      deviceFingerprint: body.device_fingerprint
     })
 
     if (org.isPersonal && !agent.licenseAssigned) {
@@ -306,7 +309,7 @@ export function createApp() {
         rules_pack_version: pack.version,
         protect_unenroll: effective.protectUnenroll,
         /** Messages UX (merge defaults côté agent) */
-        user_messages: policy.userMessages || {},
+        user_messages: effective.userMessages || policy.userMessages || {},
         require_unenroll_password: requireUnenroll,
         /** Admins avec droit unenroll (hashes) */
         admin_credentials: requireUnenroll ? admins : [],
@@ -589,7 +592,8 @@ export function createApp() {
           licensed,
           license_assigned: a.licenseAssigned,
           license_status,
-          unlicensed_since: a.unlicensedSince || null
+          unlicensed_since: a.unlicensedSince || null,
+          device_fingerprint: a.deviceFingerprint || null
         }
       })
     )
@@ -1134,6 +1138,7 @@ export function createApp() {
       protect_unenroll?: boolean
       assigned_group_ids?: string[]
       assigned_user_ids?: string[]
+      user_messages?: Partial<import("./types").PolicyUserMessages>
     }
     try {
       body = await c.req.json()
@@ -1150,7 +1155,8 @@ export function createApp() {
       eventReporting: body.event_reporting,
       protectUnenroll: body.protect_unenroll,
       assignedGroupIds: body.assigned_group_ids,
-      assignedUserIds: body.assigned_user_ids
+      assignedUserIds: body.assigned_user_ids,
+      userMessages: body.user_messages
     })
     return c.json({ ok: true, profile })
   })
@@ -1170,6 +1176,7 @@ export function createApp() {
       protect_unenroll?: boolean
       assigned_group_ids?: string[]
       assigned_user_ids?: string[]
+      user_messages?: Partial<import("./types").PolicyUserMessages>
     }
     try {
       body = await c.req.json()
@@ -1198,6 +1205,10 @@ export function createApp() {
         body.protect_unenroll !== undefined
           ? body.protect_unenroll
           : existing.protectUnenroll,
+      userMessages:
+        body.user_messages !== undefined
+          ? body.user_messages
+          : existing.userMessages,
       assignedGroupIds: body.assigned_group_ids ?? existing.assignedGroupIds,
       assignedUserIds: body.assigned_user_ids ?? existing.assignedUserIds
     })

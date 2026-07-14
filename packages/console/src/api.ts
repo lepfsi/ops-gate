@@ -62,6 +62,17 @@ async function request<T>(
   return data as T
 }
 
+export type SummaryAgentBrief = {
+  id: string
+  device_label?: string
+  host_name?: string | null
+  last_seen_at: string
+  license_status: "licensed" | "grace" | "unlicensed"
+  offline_for_ms: number
+  group_id?: string | null
+  device_fingerprint?: string | null
+}
+
 export type Summary = {
   org_id: string
   agents: number
@@ -77,6 +88,29 @@ export type Summary = {
   admins_count?: number
   groups_count?: number
   users_count?: number
+  licenses?: {
+    licensed: number
+    grace: number
+    unlicensed: number
+    seats: number
+    seats_used: number
+    seats_available: number | null
+  }
+  connectivity?: {
+    online: number
+    stale: number
+    offline_long: number
+    offline_long_ms: number
+    online_ms: number
+  }
+  events_by_day?: { day: string; count: number }[]
+  agents_unlicensed?: SummaryAgentBrief[]
+  agents_grace?: SummaryAgentBrief[]
+  agents_offline_long?: SummaryAgentBrief[]
+  duplicate_fingerprints?: Array<{
+    fingerprint: string
+    agents: SummaryAgentBrief[]
+  }>
 }
 
 export type PackListItem = {
@@ -105,6 +139,7 @@ export type AgentRow = {
   license_assigned?: boolean
   license_status?: "licensed" | "grace" | "unlicensed"
   unlicensed_since?: string | null
+  device_fingerprint?: string | null
 }
 
 export type EventRow = {
@@ -172,6 +207,7 @@ export type ProfileRow = {
   protectUnenroll?: boolean
   assignedGroupIds?: string[]
   assignedUserIds?: string[]
+  userMessages?: PolicyUserMessages
   updatedAt: string
 }
 
@@ -466,6 +502,7 @@ export const api = {
     event_reporting?: boolean
     protect_unenroll?: boolean
     assigned_group_ids?: string[]
+    user_messages?: PolicyUserMessages
   }) =>
     request<{ ok: boolean; profile: ProfileRow }>("/v1/org/profiles", {
       method: "POST",
@@ -481,6 +518,7 @@ export const api = {
       enabled_hosts?: string[]
       scan_uploads?: boolean
       event_reporting?: boolean
+      user_messages?: PolicyUserMessages
       protect_unenroll?: boolean
       assigned_group_ids?: string[]
     }

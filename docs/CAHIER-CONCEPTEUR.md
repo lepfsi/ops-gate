@@ -271,7 +271,11 @@ Sync agent : `user_messages` + `default_action` dans `/v1/agents/me/config`.
 
 **Principe UX :** toujours indiquer que c’est une **décision d’administrateur / politique org**, pas une erreur technique.
 
-Dashboard console : widgets type Kaspersky SOC (statut, barres décisions, top règles, panneau contextuel) — charte DailyOps (`docs/kaspersky-3.png` en référence).
+Messages aussi sur **profils département** (override de la policy org) : merge `policy.userMessages` + `profile.userMessages` dans le config agent.
+
+Dashboard console : sidebar type Kaspersky + widgets licences (OK / grace / **UNLICENSED** cliquable), hors-ligne long (`last_seen` > 2 h, liste au clic), timeline 14 j, top règles — charte DailyOps (`docs/kaspersky-3.png`).
+
+**Anti-doublon agents :** `device_fingerprint` = `opsGateInstallId` local extension (survit unenroll). Re-enroll avec même fingerprint → même agent (même si le label change). Doublons historiques (labels différents sans fingerprint) visibles dashboard → révoquer manuellement.
 
 ---
 
