@@ -115,6 +115,16 @@ function rowOrg(r: pg.QueryResultRow): Organization {
 }
 
 function rowPolicy(r: pg.QueryResultRow): Policy {
+  let userMessages: Policy["userMessages"]
+  try {
+    const raw = r.user_messages_json
+    if (raw) {
+      const j = typeof raw === "string" ? JSON.parse(raw) : raw
+      if (j && typeof j === "object") userMessages = j
+    }
+  } catch {
+    /* ignore */
+  }
   return {
     id: r.id,
     orgId: r.org_id,
@@ -128,6 +138,7 @@ function rowPolicy(r: pg.QueryResultRow): Policy {
     protectUnenroll: !!r.protect_unenroll,
     configEpoch:
       typeof r.config_epoch === "number" ? r.config_epoch : r.version || 1,
+    userMessages,
     updatedAt: new Date(r.updated_at).toISOString()
   }
 }
@@ -322,7 +333,8 @@ export class PgStore implements OpsGateStore {
       `ALTER TABLE moving_rules ADD COLUMN IF NOT EXISTS conditions_json TEXT NOT NULL DEFAULT '[]'`,
       `ALTER TABLE admin_sessions ADD COLUMN IF NOT EXISTS last_activity_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`,
       // Nouveaux agents : pas de licence tant qu'aucun groupe (sauf assignation manuelle)
-      `ALTER TABLE agents ALTER COLUMN license_assigned SET DEFAULT FALSE`
+      `ALTER TABLE agents ALTER COLUMN license_assigned SET DEFAULT FALSE`,
+      `ALTER TABLE policies ADD COLUMN IF NOT EXISTS user_messages_json TEXT NOT NULL DEFAULT '{}'`
     ]
     for (const q of alters) {
       await this.pool.query(q)
@@ -716,6 +728,7 @@ export class PgStore implements OpsGateStore {
         | "managementPasswordHash"
         | "protectUnenroll"
         | "configEpoch"
+        | "userMessages"
       >
     >
   ) {
@@ -725,9 +738,14 @@ export class PgStore implements OpsGateStore {
       typeof patch.configEpoch === "number"
         ? patch.configEpoch
         : (current.configEpoch || 1) + 1
+    const nextUserMessages =
+      patch.userMessages !== undefined
+        ? { ...(current.userMessages || {}), ...patch.userMessages }
+        : current.userMessages
     const next = {
       ...current,
       ...patch,
+      userMessages: nextUserMessages,
       version: current.version + 1,
       configEpoch: nextConfigEpoch,
       updatedAt: new Date().toISOString()
@@ -743,7 +761,8 @@ export class PgStore implements OpsGateStore {
         management_password_hash = $8,
         updated_at = $9,
         config_epoch = $10,
-        protect_unenroll = $11
+        protect_unenroll = $11,
+        user_messages_json = $12
        WHERE org_id = $1`,
       [
         orgId,
@@ -756,7 +775,8 @@ export class PgStore implements OpsGateStore {
         next.managementPasswordHash,
         next.updatedAt,
         next.configEpoch,
-        !!next.protectUnenroll
+        !!next.protectUnenroll,
+        JSON.stringify(next.userMessages || {})
       ]
     )
     return next

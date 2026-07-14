@@ -305,6 +305,8 @@ export function createApp() {
         event_reporting: effective.eventReporting,
         rules_pack_version: pack.version,
         protect_unenroll: effective.protectUnenroll,
+        /** Messages UX (merge defaults côté agent) */
+        user_messages: policy.userMessages || {},
         require_unenroll_password: requireUnenroll,
         /** Admins avec droit unenroll (hashes) */
         admin_credentials: requireUnenroll ? admins : [],
@@ -1621,6 +1623,7 @@ export function createApp() {
       scan_uploads?: boolean
       event_reporting?: boolean
       protect_unenroll?: boolean
+      user_messages?: Partial<import("./types").PolicyUserMessages>
       /** Mot de passe admin en clair — stocké en hash uniquement (legacy / admin1) */
       management_password?: string
     }
@@ -1640,6 +1643,8 @@ export function createApp() {
       patch.eventReporting = body.event_reporting
     if (body.protect_unenroll !== undefined)
       patch.protectUnenroll = body.protect_unenroll
+    if (body.user_messages !== undefined)
+      patch.userMessages = body.user_messages
     // string non vide ≥6 → active le mdp ; string vide → retire le mdp (sortie libre)
     if (typeof body.management_password === "string") {
       if (body.management_password.length === 0) {

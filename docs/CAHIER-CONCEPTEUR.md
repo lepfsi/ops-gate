@@ -257,7 +257,25 @@ Voir `docs/V2-BACKLOG.md` et `docs/architecture/PLATFORM-v2.md` :
 
 ---
 
-## 10. Multi-navigateur (état & plan)
+## 10. Messages utilisateur (banner)
+
+| Mode policy (`defaultAction`) | Comportement banner | Message clé |
+|------------------------------|---------------------|-------------|
+| `warn` / `mask_recommend` | Masquer / Envoyer quand même / Annuler | `alertTitle` + `adminNotice` |
+| `mask_force` | Masquer ou Annuler seulement | `maskForceTitle` |
+| `block` | Pas d’envoi — bouton « Compris » | `blockTitle` + `blockBody` |
+
+Defaults : `DEFAULT_USER_MESSAGES` (`packages/api/src/types.ts` + `src/types`).  
+Personnalisation console → Policy → « Personnaliser les messages utilisateur ».  
+Sync agent : `user_messages` + `default_action` dans `/v1/agents/me/config`.
+
+**Principe UX :** toujours indiquer que c’est une **décision d’administrateur / politique org**, pas une erreur technique.
+
+Dashboard console : widgets type Kaspersky SOC (statut, barres décisions, top règles, panneau contextuel) — charte DailyOps (`docs/kaspersky-3.png` en référence).
+
+---
+
+## 11. Multi-navigateur (état & plan)
 
 | Navigateur | Support V1 | Comment |
 |------------|------------|---------|

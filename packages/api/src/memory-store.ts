@@ -376,6 +376,7 @@ export class MemoryStore implements OpsGateStore {
         | "managementPasswordHash"
         | "protectUnenroll"
         | "configEpoch"
+        | "userMessages"
       >
     >
   ) {
@@ -384,6 +385,10 @@ export class MemoryStore implements OpsGateStore {
     const next: Policy = {
       ...policy,
       ...patch,
+      userMessages:
+        patch.userMessages !== undefined
+          ? { ...(policy.userMessages || {}), ...patch.userMessages }
+          : policy.userMessages,
       version: policy.version + 1,
       configEpoch:
         typeof patch.configEpoch === "number"
