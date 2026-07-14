@@ -664,6 +664,11 @@ function SummaryView({
   const [drill, setDrill] = useState<string | null>(null)
   const [drillEvents, setDrillEvents] = useState<EventRow[]>([])
   const [drillBusy, setDrillBusy] = useState(false)
+  /** Panneau contextuel : unlicensed | grace | offline | decision | duplicates */
+  const [panel, setPanel] = useState<string | null>(null)
+  const [dashSection, setDashSection] = useState<
+    "overview" | "licenses" | "connectivity" | "activity" | "rules"
+  >("overview")
 
   if (!summary) {
     return (
@@ -679,9 +684,25 @@ function SummaryView({
   }
 
   const decisions = summary.by_decision || {}
+  const lic = summary.licenses || {
+    licensed: 0,
+    grace: 0,
+    unlicensed: 0,
+    seats: 0,
+    seats_used: 0,
+    seats_available: null as number | null
+  }
+  const conn = summary.connectivity || {
+    online: 0,
+    stale: 0,
+    offline_long: 0,
+    offline_long_ms: 2 * 60 * 60 * 1000,
+    online_ms: 15 * 60 * 1000
+  }
 
   const openDecision = async (k: string) => {
     setDrill(k)
+    setPanel("decision")
     setDrillBusy(true)
     try {
       const r = await api.eventsByDecision(k)
@@ -697,6 +718,14 @@ function SummaryView({
     }
   }
 
+  const formatOffline = (ms: number) => {
+    const h = Math.floor(ms / 3600000)
+    const m = Math.floor((ms % 3600000) / 60000)
+    if (h >= 48) return `${Math.floor(h / 24)} j`
+    if (h >= 1) return `${h} h ${m} min`
+    return `${m} min`
+  }
+
   const maskN = decisions.mask_send || 0
   const riskN = decisions.send_anyway || 0
   const cancelN = decisions.cancel || 0
@@ -705,17 +734,110 @@ function SummaryView({
     1,
     ...(summary.top_rules || []).map((r) => r.count)
   )
+  const maxDay = Math.max(
+    1,
+    ...(summary.events_by_day || []).map((d) => d.count)
+  )
+  const dups = summary.duplicate_fingerprints || []
+
+  const renderAgentList = (
+    list: import("./api").SummaryAgentBrief[] | undefined,
+    empty: string
+  ) => {
+    if (!list?.length) return <div className="empty">{empty}</div>
+    return (
+      <div className="table-wrap">
+        <table className="table">
+          <thead>
+            <tr>
+              <th>Label</th>
+              <th>Host</th>
+              <th>Dernier sync</th>
+              <th>Hors ligne</th>
+              <th>Licence</th>
+            </tr>
+          </thead>
+          <tbody>
+            {list.map((a) => (
+              <tr key={a.id}>
+                <td>
+                  <strong>{a.device_label || "—"}</strong>
+                  <div className="mono muted" style={{ fontSize: 10 }}>
+                    {a.id.slice(0, 16)}…
+                  </div>
+                </td>
+                <td className="muted">{a.host_name || "—"}</td>
+                <td className="muted" style={{ fontSize: 12 }}>
+                  {a.last_seen_at
+                    ? new Date(a.last_seen_at).toLocaleString("fr-FR")
+                    : "—"}
+                </td>
+                <td>{formatOffline(a.offline_for_ms)}</td>
+                <td>
+                  <span
+                    className={`badge ${
+                      a.license_status === "unlicensed"
+                        ? "high"
+                        : a.license_status === "grace"
+                          ? "medium"
+                          : "active"
+                    }`}>
+                    {a.license_status === "unlicensed"
+                      ? "UNLICENSED"
+                      : a.license_status}
+                  </span>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    )
+  }
 
   return (
-    <>
+    <div className="dash-layout">
+      <aside className="dash-sidebar" aria-label="Navigation tableau de bord">
+        <div className="dash-sidebar-brand">
+          <strong>OpsGate</strong>
+          <span className="muted">Monitoring</span>
+        </div>
+        {(
+          [
+            ["overview", "Vue d’ensemble"],
+            ["licenses", "Licences"],
+            ["connectivity", "Connexion"],
+            ["activity", "Activité"],
+            ["rules", "Règles / menaces"]
+          ] as const
+        ).map(([id, label]) => (
+          <button
+            key={id}
+            type="button"
+            className={`dash-side-item ${dashSection === id ? "active" : ""}`}
+            onClick={() => {
+              setDashSection(id)
+              setPanel(null)
+            }}>
+            {label}
+            {id === "licenses" && lic.unlicensed > 0 ? (
+              <span className="dash-side-badge">{lic.unlicensed}</span>
+            ) : null}
+            {id === "connectivity" && conn.offline_long > 0 ? (
+              <span className="dash-side-badge warn">{conn.offline_long}</span>
+            ) : null}
+          </button>
+        ))}
+      </aside>
+
+      <div className="dash-main">
       <div className="hero-card card">
         <div className="hero-copy">
           <p className="hero-kicker">Monitoring &amp; rapports · Tableau de bord</p>
           <h2>Statut de protection OpsGate</h2>
           <p className="muted">
-            Vue inspirée console SOC (widgets contextuels) — charte DailyOps navy /
-            teal. Force-sync pour pousser policy &amp; messages utilisateur aux agents
-            (≤&nbsp;2&nbsp;min).
+            Widgets SOC (licences, hors-ligne, timeline) — charte DailyOps. Clic
+            sur un statut pour lister les appareils.
           </p>
         </div>
         <div className="row" style={{ gap: 8 }}>
@@ -736,14 +858,100 @@ function SummaryView({
         </div>
       </div>
 
-      {/* Rangée widgets type Kaspersky */}
+      {/* Licences + connexion — toujours visibles en overview / sections */}
+      {(dashSection === "overview" || dashSection === "licenses") && (
       <div className="dash-grid">
         <div className="card dash-widget">
           <div className="dash-widget-head">
-            <h2>Statut de protection</h2>
+            <h2>Licences</h2>
             <span className="muted" style={{ fontSize: 11 }}>
-              Agents &amp; pack
+              Sièges {lic.seats_used}
+              {lic.seats > 0 ? ` / ${lic.seats}` : " · illimité"}
             </span>
+          </div>
+          <div className="dash-status-row">
+            <div
+              className="dash-donut"
+              aria-hidden
+              style={{
+                background: `conic-gradient(
+                  var(--accent) 0 ${lic.licensed ? (lic.licensed / Math.max(1, summary.agents)) * 100 : 0}%,
+                  #fbbf24 ${lic.licensed ? (lic.licensed / Math.max(1, summary.agents)) * 100 : 0}% ${(lic.licensed + lic.grace) / Math.max(1, summary.agents) * 100}%,
+                  #ef4444 ${(lic.licensed + lic.grace) / Math.max(1, summary.agents) * 100}% 100%
+                )`
+              }}>
+              <div className="dash-donut-inner">
+                <span className="dash-donut-num">{lic.unlicensed}</span>
+                <span className="dash-donut-lbl">unlic.</span>
+              </div>
+            </div>
+            <ul className="dash-status-list">
+              <li>
+                <button
+                  type="button"
+                  className="dash-link-row"
+                  onClick={() => setPanel("licensed")}>
+                  <span className="dash-dot ok" /> Licensed{" "}
+                  <strong>{lic.licensed}</strong>
+                </button>
+              </li>
+              <li>
+                <button
+                  type="button"
+                  className="dash-link-row"
+                  onClick={() => setPanel("grace")}>
+                  <span className="dash-dot warn" /> Grace{" "}
+                  <strong>{lic.grace}</strong>
+                </button>
+              </li>
+              <li>
+                <button
+                  type="button"
+                  className="dash-link-row crit-text"
+                  onClick={() => setPanel("unlicensed")}>
+                  <span className="dash-dot crit" />{" "}
+                  <strong>UNLICENSED {lic.unlicensed}</strong>
+                </button>
+              </li>
+            </ul>
+          </div>
+        </div>
+
+        <div className="card dash-widget">
+          <div className="dash-widget-head">
+            <h2>Connexion / sync</h2>
+            <span className="muted" style={{ fontSize: 11 }}>
+              Hors-ligne long &gt; {Math.round(conn.offline_long_ms / 3600000)} h
+            </span>
+          </div>
+          <ul className="dash-status-list">
+            <li>
+              <span className="dash-dot ok" /> Online (&lt;{" "}
+              {Math.round(conn.online_ms / 60000)} min){" "}
+              <strong>{conn.online}</strong>
+            </li>
+            <li>
+              <span className="dash-dot warn" /> Stale{" "}
+              <strong>{conn.stale}</strong>
+            </li>
+            <li>
+              <button
+                type="button"
+                className="dash-link-row crit-text"
+                onClick={() => setPanel("offline")}>
+                <span className="dash-dot crit" /> Not connected long time{" "}
+                <strong>{conn.offline_long}</strong>
+              </button>
+            </li>
+          </ul>
+          <p className="muted" style={{ fontSize: 11, marginBottom: 0 }}>
+            Basé sur <code>last_seen</code> (poll config ~2 min). Clic pour lister.
+          </p>
+        </div>
+
+        <div className="card dash-widget">
+          <div className="dash-widget-head">
+            <h2>Statut protection</h2>
           </div>
           <div className="dash-status-row">
             <div className="dash-donut" aria-hidden>
@@ -754,11 +962,11 @@ function SummaryView({
             </div>
             <ul className="dash-status-list">
               <li>
-                <span className="dash-dot ok" /> Agents enrôlés{" "}
+                <span className="dash-dot ok" /> Enrôlés{" "}
                 <strong>{summary.agents}</strong>
               </li>
               <li>
-                <span className="dash-dot warn" /> Events total{" "}
+                <span className="dash-dot warn" /> Events{" "}
                 <strong>{summary.events_total}</strong>
               </li>
               <li>
@@ -766,23 +974,24 @@ function SummaryView({
                 <strong>{riskN}</strong>
               </li>
               <li className="muted" style={{ fontSize: 12 }}>
-                Pack actif :{" "}
+                Pack{" "}
                 <strong className="mono">
                   {summary.active_rules_pack?.version || "—"}
                 </strong>
-                {summary.active_rules_pack
-                  ? ` · ${summary.active_rules_pack.rules_count} règles`
-                  : ""}
               </li>
             </ul>
           </div>
         </div>
+      </div>
+      )}
 
+      {(dashSection === "overview" || dashSection === "activity") && (
+      <div className="dash-grid">
         <div className="card dash-widget">
           <div className="dash-widget-head">
             <h2>Activité des décisions</h2>
             <span className="muted" style={{ fontSize: 11 }}>
-              Clic = détail contextuel
+              Clic = détail
             </span>
           </div>
           <div className="dash-bars">
@@ -811,18 +1020,41 @@ function SummaryView({
               </button>
             ))}
           </div>
-          <div className="dash-mini-stats">
-            <span>
-              Packs publiés <strong>{summary.packs_published}</strong>
-            </span>
-            {typeof summary.admins_count === "number" ? (
-              <span>
-                Admins <strong>{summary.admins_count}</strong>
-              </span>
-            ) : null}
-          </div>
         </div>
 
+        <div className="card dash-widget" style={{ gridColumn: "span 2" }}>
+          <div className="dash-widget-head">
+            <h2>Events (14 jours)</h2>
+            <span className="muted" style={{ fontSize: 11 }}>
+              Timeline
+            </span>
+          </div>
+          <div className="dash-timeline">
+            {(summary.events_by_day || []).map((d) => (
+              <div key={d.day} className="dash-tl-col" title={`${d.day}: ${d.count}`}>
+                <div className="dash-tl-bar-wrap">
+                  <div
+                    className="dash-tl-bar"
+                    style={{
+                      height: `${Math.max(4, (d.count / maxDay) * 100)}%`
+                    }}
+                  />
+                </div>
+                <span className="dash-tl-lbl">
+                  {d.day.slice(8)}
+                </span>
+              </div>
+            ))}
+            {!(summary.events_by_day || []).length && (
+              <p className="muted">Pas encore de série temporelle</p>
+            )}
+          </div>
+        </div>
+      </div>
+      )}
+
+      {(dashSection === "overview" || dashSection === "rules") && (
+      <div className="dash-grid">
         <div className="card dash-widget">
           <div className="dash-widget-head">
             <h2>Menaces / règles les + fréquentes</h2>
@@ -851,7 +1083,104 @@ function SummaryView({
             </div>
           )}
         </div>
+        {dups.length > 0 && (
+          <div className="card dash-widget">
+            <div className="dash-widget-head">
+              <h2>Doublons potentiels</h2>
+              <button
+                type="button"
+                className="btn secondary btn-sm"
+                onClick={() => setPanel("duplicates")}>
+                Voir
+              </button>
+            </div>
+            <p className="muted" style={{ fontSize: 12 }}>
+              {dups.length} fingerprint(s) avec plusieurs agents — révoquez les
+              entrées obsolètes dans Agents.
+            </p>
+          </div>
+        )}
       </div>
+      )}
+
+      {/* Panneaux contextuels cliquables */}
+      {panel === "unlicensed" && (
+        <div className="card dash-context-panel">
+          <h3 style={{ marginTop: 0 }}>
+            Agents UNLICENSED{" "}
+            <button
+              type="button"
+              className="btn secondary btn-sm"
+              onClick={() => setPanel(null)}>
+              Fermer
+            </button>
+          </h3>
+          <p className="muted">
+            Pas de siège / pas de groupe — protection inactive après grace.
+          </p>
+          {renderAgentList(
+            summary.agents_unlicensed,
+            "Aucun agent unlicensed"
+          )}
+        </div>
+      )}
+      {panel === "grace" && (
+        <div className="card dash-context-panel">
+          <h3 style={{ marginTop: 0 }}>
+            Agents en grace (5 min){" "}
+            <button
+              type="button"
+              className="btn secondary btn-sm"
+              onClick={() => setPanel(null)}>
+              Fermer
+            </button>
+          </h3>
+          {renderAgentList(summary.agents_grace, "Aucun agent en grace")}
+        </div>
+      )}
+      {panel === "offline" && (
+        <div className="card dash-context-panel">
+          <h3 style={{ marginTop: 0 }}>
+            Not connected for long time (&gt;{" "}
+            {Math.round(conn.offline_long_ms / 3600000)} h){" "}
+            <button
+              type="button"
+              className="btn secondary btn-sm"
+              onClick={() => setPanel(null)}>
+              Fermer
+            </button>
+          </h3>
+          <p className="muted">
+            Dernier sync trop ancien — PC éteint, extension désinstallée, ou API
+            non joignable. Révoquez si obsolète.
+          </p>
+          {renderAgentList(
+            summary.agents_offline_long,
+            "Tous les agents ont synchronisé récemment"
+          )}
+        </div>
+      )}
+      {panel === "duplicates" && (
+        <div className="card dash-context-panel">
+          <h3 style={{ marginTop: 0 }}>
+            Doublons (même fingerprint){" "}
+            <button
+              type="button"
+              className="btn secondary btn-sm"
+              onClick={() => setPanel(null)}>
+              Fermer
+            </button>
+          </h3>
+          {dups.map((d) => (
+            <div key={d.fingerprint} style={{ marginBottom: 16 }}>
+              <code className="mono" style={{ fontSize: 11 }}>
+                {d.fingerprint.slice(0, 24)}…
+              </code>
+              {renderAgentList(d.agents, "")}
+            </div>
+          ))}
+        </div>
+      )}
 
       <div className="card">
         <h2>Décisions utilisateur (panneau contextuel)</h2>
@@ -942,7 +1271,8 @@ function SummaryView({
           </div>
         )}
       </div>
-    </>
+      </div>
+    </div>
   )
 }
 
@@ -1277,6 +1607,10 @@ function PolicyView({
   const [profProtect, setProfProtect] = useState(false)
   const [profAction, setProfAction] = useState("mask_recommend")
   const [profGroups, setProfGroups] = useState<string[]>([])
+  const [profMsgNotice, setProfMsgNotice] = useState("")
+  const [profMsgBlockTitle, setProfMsgBlockTitle] = useState("")
+  const [profMsgBlockBody, setProfMsgBlockBody] = useState("")
+  const [showProfMsgs, setShowProfMsgs] = useState(false)
   const [editId, setEditId] = useState<string | null>(null)
 
   useEffect(() => {
@@ -1602,6 +1936,10 @@ function PolicyView({
                         setProfProtect(!!p.protectUnenroll)
                         setProfAction(p.defaultAction || "mask_recommend")
                         setProfGroups([...(p.assignedGroupIds || [])])
+                        setProfMsgNotice(p.userMessages?.adminNotice || "")
+                        setProfMsgBlockTitle(p.userMessages?.blockTitle || "")
+                        setProfMsgBlockBody(p.userMessages?.blockBody || "")
+                        setShowProfMsgs(!!p.userMessages)
                       }}>
                       Modifier
                     </button>{" "}
@@ -1691,6 +2029,52 @@ function PolicyView({
             <option value="block">block</option>
           </select>
         </div>
+        <button
+          type="button"
+          className="btn secondary btn-sm"
+          style={{ marginTop: 10 }}
+          onClick={() => setShowProfMsgs((v) => !v)}>
+          {showProfMsgs
+            ? "Masquer messages banner (profil)"
+            : "Messages banner (override policy org)"}
+        </button>
+        {showProfMsgs && (
+          <div
+            className="form-stack"
+            style={{
+              marginTop: 10,
+              maxWidth: 560,
+              padding: 12,
+              background: "var(--surface-2)",
+              borderRadius: 8,
+              border: "1px solid var(--line)"
+            }}>
+            <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>
+              Ces messages remplacent ceux de la policy org pour les agents de ce
+              profil.
+            </p>
+            <label className="field-label">Mention admin</label>
+            <textarea
+              className="input"
+              rows={2}
+              value={profMsgNotice}
+              onChange={(e) => setProfMsgNotice(e.target.value)}
+            />
+            <label className="field-label">Blocage — titre</label>
+            <input
+              className="input"
+              value={profMsgBlockTitle}
+              onChange={(e) => setProfMsgBlockTitle(e.target.value)}
+            />
+            <label className="field-label">Blocage — corps</label>
+            <textarea
+              className="input"
+              rows={2}
+              value={profMsgBlockBody}
+              onChange={(e) => setProfMsgBlockBody(e.target.value)}
+            />
+          </div>
+        )}
         <div style={{ marginTop: 10 }}>
           <div className="field-label">Groupes soumis à cette policy</div>
           <div className="row" style={{ flexWrap: "wrap", gap: 8 }}>
@@ -1727,6 +2111,13 @@ function PolicyView({
               setBusy(true)
               setError(null)
               try {
+                const user_messages: import("./api").PolicyUserMessages = {}
+                if (profMsgNotice.trim())
+                  user_messages.adminNotice = profMsgNotice.trim()
+                if (profMsgBlockTitle.trim())
+                  user_messages.blockTitle = profMsgBlockTitle.trim()
+                if (profMsgBlockBody.trim())
+                  user_messages.blockBody = profMsgBlockBody.trim()
                 const body = {
                   name: profName.trim(),
                   department: profDept || undefined,
@@ -1738,7 +2129,8 @@ function PolicyView({
                   event_reporting: profEvents,
                   protect_unenroll: profProtect,
                   default_action: profAction,
-                  assigned_group_ids: profGroups
+                  assigned_group_ids: profGroups,
+                  user_messages
                 }
                 if (editId) {
                   await api.updateProfile(editId, body)
@@ -1749,6 +2141,10 @@ function PolicyView({
                 }
                 setProfName("")
                 setProfGroups([])
+                setProfMsgNotice("")
+                setProfMsgBlockTitle("")
+                setProfMsgBlockBody("")
+                setShowProfMsgs(false)
                 setEditId(null)
                 onReload()
               } catch (e) {

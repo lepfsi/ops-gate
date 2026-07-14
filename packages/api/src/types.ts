@@ -209,6 +209,8 @@ export interface PolicyProfile {
   assignedGroupIds: string[]
   /** Users soumis directement (hors groupe) */
   assignedUserIds: string[]
+  /** Messages banner (override policy org si définis) */
+  userMessages?: Partial<PolicyUserMessages>
   updatedAt: string
 }
 
@@ -272,6 +274,11 @@ export interface Agent {
   unlicensedSince?: string
   /** Compte personnel (org PERSONAL) — mini policies self-service */
   personalAccount?: boolean
+  /**
+   * Empreinte stable de l’installation extension (anti-doublon).
+   * Même PC / rebuild → même fingerprint → ré-enroll du même agent.
+   */
+  deviceFingerprint?: string
 }
 
 export interface PasswordResetChallenge {

@@ -39,6 +39,18 @@ export type AppendEventsResult = {
   rejected: { index: number; reason: string }[]
 }
 
+/** Agent minimal pour drill-down dashboard */
+export type SummaryAgentBrief = {
+  id: string
+  device_label?: string
+  host_name?: string | null
+  last_seen_at: string
+  license_status: "licensed" | "grace" | "unlicensed"
+  offline_for_ms: number
+  group_id?: string | null
+  device_fingerprint?: string | null
+}
+
 export type OrgSummary = {
   org_id: string
   agents: number
@@ -54,6 +66,35 @@ export type OrgSummary = {
   admins_count?: number
   groups_count?: number
   users_count?: number
+  /** Licences (sièges) */
+  licenses?: {
+    licensed: number
+    grace: number
+    unlicensed: number
+    seats: number
+    seats_used: number
+    seats_available: number | null
+  }
+  /** Connexion / sync (last_seen) */
+  connectivity?: {
+    online: number
+    stale: number
+    offline_long: number
+    /** ms sans sync pour « hors ligne long » (défaut 2h) */
+    offline_long_ms: number
+    online_ms: number
+  }
+  /** Events par jour (14 j) pour graphique temporel */
+  events_by_day?: { day: string; count: number }[]
+  /** Listes cliquables dashboard */
+  agents_unlicensed?: SummaryAgentBrief[]
+  agents_grace?: SummaryAgentBrief[]
+  agents_offline_long?: SummaryAgentBrief[]
+  /** Doublons potentiels (même fingerprint, labels différents) */
+  duplicate_fingerprints?: Array<{
+    fingerprint: string
+    agents: SummaryAgentBrief[]
+  }>
 }
 
 export type EffectivePolicyBundle = {
@@ -65,6 +106,7 @@ export type EffectivePolicyBundle = {
     scanUploads: boolean
     eventReporting: boolean
     protectUnenroll: boolean
+    userMessages?: Partial<import("./types").PolicyUserMessages>
   }
   /** Admins actifs (hash) pour l'agent — username = label ou email */
   admins: Array<{
@@ -175,6 +217,7 @@ export interface OpsGateStore {
   upsertProfile(
     orgId: string,
     input: {
+      userMessages?: Partial<import("./types").PolicyUserMessages>
       id?: string
       name: string
       department?: string
@@ -264,6 +307,8 @@ export interface OpsGateStore {
     userId?: string
     /** Clé licence personnelle (PERSONAL) */
     personalLicenseKey?: string
+    /** Empreinte installation (anti-doublon) */
+    deviceFingerprint?: string
   }): Promise<Agent & { replaced?: boolean }>
   resolveAgentByToken(token: string): Promise<Agent | undefined>
   revokeAgentByToken(token: string): Promise<boolean>

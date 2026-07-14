@@ -780,6 +780,7 @@ export class MemoryStore implements OpsGateStore {
       protectUnenroll?: boolean
       assignedGroupIds?: string[]
       assignedUserIds?: string[]
+      userMessages?: Partial<import("./types").PolicyUserMessages>
     }
   ) {
     if (!this.orgs.has(orgId)) return undefined
@@ -807,6 +808,10 @@ export class MemoryStore implements OpsGateStore {
             : prev.protectUnenroll,
         assignedGroupIds: input.assignedGroupIds ?? prev.assignedGroupIds,
         assignedUserIds: input.assignedUserIds ?? prev.assignedUserIds,
+        userMessages:
+          input.userMessages !== undefined
+            ? { ...(prev.userMessages || {}), ...input.userMessages }
+            : prev.userMessages,
         updatedAt: now
       }
       list[idx] = next
@@ -832,6 +837,7 @@ export class MemoryStore implements OpsGateStore {
       protectUnenroll: !!input.protectUnenroll,
       assignedGroupIds: input.assignedGroupIds || [],
       assignedUserIds: input.assignedUserIds || [],
+      userMessages: input.userMessages,
       updatedAt: now
     }
     list.push(created)
@@ -963,14 +969,19 @@ export class MemoryStore implements OpsGateStore {
           enabledHosts: profile.enabledHosts,
           scanUploads: profile.scanUploads,
           eventReporting: profile.eventReporting,
-          protectUnenroll: profile.protectUnenroll
+          protectUnenroll: profile.protectUnenroll,
+          userMessages: {
+            ...(policy.userMessages || {}),
+            ...(profile.userMessages || {})
+          }
         }
       : {
           defaultAction: policy.defaultAction,
           enabledHosts: policy.enabledHosts,
           scanUploads: policy.scanUploads,
           eventReporting: policy.eventReporting,
-          protectUnenroll: policy.protectUnenroll
+          protectUnenroll: policy.protectUnenroll,
+          userMessages: policy.userMessages || {}
         }
 
     const unenrollAdmins = await this.listUnenrollAdmins(orgId)
@@ -1293,10 +1304,12 @@ export class MemoryStore implements OpsGateStore {
     appVersion?: string
     userId?: string
     personalLicenseKey?: string
+    deviceFingerprint?: string
   }): Promise<Agent & { replaced?: boolean }> {
     const now = new Date().toISOString()
     const tokenHash = hashToken(input.token)
     const labelKey = (input.deviceLabel || "").trim().toLowerCase()
+    const fp = (input.deviceFingerprint || "").trim()
     const org = this.orgs.get(input.orgId)
     const personal = !!org?.isPersonal
 
@@ -1309,46 +1322,61 @@ export class MemoryStore implements OpsGateStore {
       assignLicense = isValidPersonalLicenseKey(input.personalLicenseKey)
     }
 
+    const rebind = async (existing: import("./types").Agent) => {
+      this.agentsByTokenHash.delete(existing.tokenHash)
+      const replaced: Agent & { replaced?: boolean } = {
+        ...existing,
+        tokenHash,
+        appVersion: input.appVersion ?? existing.appVersion,
+        lastSeenAt: now,
+        deviceLabel: input.deviceLabel || existing.deviceLabel,
+        hostName: input.hostName ?? existing.hostName,
+        userId: input.userId ?? existing.userId,
+        personalAccount: personal,
+        deviceFingerprint: fp || existing.deviceFingerprint,
+        licenseAssigned: personal
+          ? assignLicense
+          : existing.licenseAssigned === true,
+        unlicensedSince: personal
+          ? assignLicense
+            ? undefined
+            : now
+          : existing.licenseAssigned
+            ? existing.unlicensedSince
+            : existing.unlicensedSince || now,
+        replaced: true
+      }
+      this.agents.set(existing.id, replaced)
+      this.agentsByTokenHash.set(tokenHash, existing.id)
+      this.pushSystemEvent(input.orgId, existing.id, "enroll", {
+        types: ["enroll", "re_enroll"],
+        device_label: replaced.deviceLabel,
+        rule_ids: ["system.enroll"]
+      })
+      await this.applyMovingRules(input.orgId, existing.id)
+      return { ...this.agents.get(existing.id)!, replaced: true as const }
+    }
+
+    // 1) Même empreinte d’installation → même agent (même si label change)
+    if (fp) {
+      for (const existing of this.agents.values()) {
+        if (
+          existing.orgId === input.orgId &&
+          (existing.deviceFingerprint || "").trim() === fp
+        ) {
+          return rebind(existing)
+        }
+      }
+    }
+
+    // 2) Même label (compat)
     if (labelKey) {
       for (const existing of this.agents.values()) {
         if (
           existing.orgId === input.orgId &&
           (existing.deviceLabel || "").trim().toLowerCase() === labelKey
         ) {
-          this.agentsByTokenHash.delete(existing.tokenHash)
-          const replaced: Agent & { replaced?: boolean } = {
-            ...existing,
-            tokenHash,
-            appVersion: input.appVersion ?? existing.appVersion,
-            lastSeenAt: now,
-            deviceLabel: input.deviceLabel || existing.deviceLabel,
-            hostName: input.hostName ?? existing.hostName,
-            userId: input.userId ?? existing.userId,
-            personalAccount: personal,
-            // re-enroll : conserve licence/groupe existants ; personal = clé
-            licenseAssigned: personal
-              ? assignLicense
-              : existing.licenseAssigned === true,
-            unlicensedSince:
-              personal
-                ? assignLicense
-                  ? undefined
-                  : now
-                : existing.licenseAssigned
-                  ? existing.unlicensedSince
-                  : existing.unlicensedSince || now,
-            replaced: true
-          }
-          this.agents.set(existing.id, replaced)
-          this.agentsByTokenHash.set(tokenHash, existing.id)
-          this.pushSystemEvent(input.orgId, existing.id, "enroll", {
-            types: ["enroll", "re_enroll"],
-            device_label: replaced.deviceLabel,
-            rule_ids: ["system.enroll"]
-          })
-          await this.applyMovingRules(input.orgId, existing.id)
-          const final = this.agents.get(existing.id)!
-          return { ...final, replaced: true }
+          return rebind(existing)
         }
       }
     }
@@ -1366,6 +1394,7 @@ export class MemoryStore implements OpsGateStore {
       licenseAssigned: personal ? assignLicense : false,
       personalAccount: personal,
       unlicensedSince: personal && assignLicense ? undefined : now,
+      deviceFingerprint: fp || undefined,
       replaced: false
     }
     this.agents.set(agent.id, agent)
@@ -1511,6 +1540,13 @@ export class MemoryStore implements OpsGateStore {
   }
 
   async summary(orgId: string): Promise<OrgSummary> {
+    const {
+      briefAgent,
+      connectivityBuckets,
+      eventsByDayFrom,
+      findDuplicateFingerprints,
+      OFFLINE_LONG_MS
+    } = await import("./summary-helpers")
     const events = this.events.filter((e) => e.orgId === orgId)
     const byDecision: Record<string, number> = {}
     const byRule: Record<string, number> = {}
@@ -1529,9 +1565,33 @@ export class MemoryStore implements OpsGateStore {
       .slice(0, 5)
     const active = await this.getActivePack(orgId)
     const packs = this.packs.get(orgId) || []
+    const agents = [...this.agents.values()].filter((a) => a.orgId === orgId)
+    const licenseStats = await this.getLicenseStats(orgId)
+    const agents_unlicensed: import("./store-types").SummaryAgentBrief[] = []
+    const agents_grace: import("./store-types").SummaryAgentBrief[] = []
+    const agents_offline_long: import("./store-types").SummaryAgentBrief[] = []
+    const allBriefs: import("./store-types").SummaryAgentBrief[] = []
+    let licensedN = 0
+    let graceN = 0
+    let unlicensedN = 0
+    for (const a of agents) {
+      const lic = await this.isAgentLicensed(orgId, a.id)
+      const b = briefAgent(a, lic)
+      allBriefs.push(b)
+      if (b.license_status === "licensed") licensedN++
+      else if (b.license_status === "grace") {
+        graceN++
+        agents_grace.push(b)
+      } else {
+        unlicensedN++
+        agents_unlicensed.push(b)
+      }
+      if (b.offline_for_ms > OFFLINE_LONG_MS) agents_offline_long.push(b)
+    }
+    agents_offline_long.sort((a, b) => b.offline_for_ms - a.offline_for_ms)
     return {
       org_id: orgId,
-      agents: [...this.agents.values()].filter((a) => a.orgId === orgId).length,
+      agents: agents.length,
       events_total: events.length,
       by_decision: byDecision,
       top_rules,
@@ -1545,7 +1605,21 @@ export class MemoryStore implements OpsGateStore {
       packs_published: packs.length,
       admins_count: (this.admins.get(orgId) || []).length,
       groups_count: (this.groups.get(orgId) || []).length,
-      users_count: (this.users.get(orgId) || []).length
+      users_count: (this.users.get(orgId) || []).length,
+      licenses: {
+        licensed: licensedN,
+        grace: graceN,
+        unlicensed: unlicensedN,
+        seats: licenseStats.seats,
+        seats_used: licenseStats.seats_used,
+        seats_available: licenseStats.seats_available
+      },
+      connectivity: connectivityBuckets(agents),
+      events_by_day: eventsByDayFrom(events, 14),
+      agents_unlicensed,
+      agents_grace,
+      agents_offline_long,
+      duplicate_fingerprints: findDuplicateFingerprints(allBriefs)
     }
   }
 

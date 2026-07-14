@@ -5,6 +5,25 @@ import { DEFAULT_SETTINGS } from "~types"
 
 const SETTINGS_KEY = "opsGateSettings"
 const RULES_KEY = "opsGateRulesPack"
+/** Empreinte stable d’installation (survit unenroll / rebuild API) */
+const INSTALL_ID_KEY = "opsGateInstallId"
+
+/**
+ * ID stable local à l’installation de l’extension.
+ * Utilisé comme device_fingerprint côté control plane pour éviter les doublons
+ * quand le label change après rebuild.
+ */
+export async function getOrCreateInstallId(): Promise<string> {
+  const data = await chrome.storage.local.get(INSTALL_ID_KEY)
+  const existing = data[INSTALL_ID_KEY] as string | undefined
+  if (existing && existing.length >= 8) return existing
+  const id =
+    typeof crypto !== "undefined" && "randomUUID" in crypto
+      ? `ogf_${crypto.randomUUID()}`
+      : `ogf_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 12)}`
+  await chrome.storage.local.set({ [INSTALL_ID_KEY]: id })
+  return id
+}
 
 export async function getSettings(): Promise<OpsGateSettings> {
   const data = await chrome.storage.local.get(SETTINGS_KEY)

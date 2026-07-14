@@ -47,6 +47,7 @@ CREATE TABLE IF NOT EXISTS policy_profiles (
   protect_unenroll BOOLEAN NOT NULL DEFAULT FALSE,
   assigned_group_ids JSONB NOT NULL DEFAULT '[]',
   assigned_user_ids JSONB NOT NULL DEFAULT '[]',
+  user_messages_json TEXT NOT NULL DEFAULT '{}',
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -129,10 +130,13 @@ CREATE TABLE IF NOT EXISTS agents (
   unlicensed_since TIMESTAMPTZ,
   personal_account BOOLEAN NOT NULL DEFAULT FALSE,
   last_config_epoch INT,
-  group_id TEXT
+  group_id TEXT,
+  /** Empreinte installation extension (anti-doublon re-enroll) */
+  device_fingerprint TEXT
 );
 
 CREATE INDEX IF NOT EXISTS agents_org_idx ON agents(org_id);
+CREATE INDEX IF NOT EXISTS agents_org_fp_idx ON agents(org_id, device_fingerprint);
 
 -- ── Rule packs ─────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS rule_packs (
