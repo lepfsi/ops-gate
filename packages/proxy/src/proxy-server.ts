@@ -9,6 +9,7 @@ import type { ProxyConfig } from "./config.js"
 import { log } from "./log.js"
 import { mitmConnect } from "./mitm.js"
 import { createStreamObserver } from "./observe.js"
+import { generatePac } from "./pac.js"
 
 function parseHostPort(
   hostHeader: string,
@@ -142,7 +143,8 @@ function handleHttp(
 
 export function startProxyServer(cfg: ProxyConfig): http.Server {
   const server = http.createServer((req, res) => {
-    if (req.url === "/opsgate-proxy/health" || req.url === "/healthz") {
+    const urlPath = (req.url || "").split("?")[0]
+    if (urlPath === "/opsgate-proxy/health" || urlPath === "/healthz") {
       res.writeHead(200, { "content-type": "application/json" })
       res.end(
         JSON.stringify({
@@ -155,6 +157,26 @@ export function startProxyServer(cfg: ProxyConfig): http.Server {
           listen: `${cfg.host}:${cfg.port}`
         })
       )
+      return
+    }
+    // PAC servi en HTTP (Chrome Windows ignore souvent file:///)
+    if (
+      urlPath === "/opsgate-proxy.pac" ||
+      urlPath === "/opsgate-proxy/pac" ||
+      urlPath === "/proxy.pac"
+    ) {
+      const pacHost = cfg.host === "0.0.0.0" ? "127.0.0.1" : cfg.host
+      const body = generatePac({
+        proxyHost: pacHost,
+        proxyPort: cfg.port,
+        allowlist: cfg.allowlist
+      })
+      res.writeHead(200, {
+        "content-type": "application/x-ns-proxy-autoconfig",
+        "cache-control": "no-store"
+      })
+      res.end(body)
+      log("info", "pac_served", { path: urlPath })
       return
     }
     handleHttp(req, res, cfg)
@@ -205,6 +227,28 @@ export function startProxyServer(cfg: ProxyConfig): http.Server {
     } catch {
       /* ignore */
     }
+  })
+
+  server.on("error", (err: NodeJS.ErrnoException) => {
+    if (err.code === "EADDRINUSE") {
+      log("error", "listen_eaddrinuse", {
+        host: cfg.host,
+        port: cfg.port,
+        hint:
+          "Port already in use. Free it (PowerShell): Get-NetTCPConnection -LocalPort " +
+          cfg.port +
+          " | % { Stop-Process -Id $_.OwningProcess -Force }  — or set OPSGATE_PROXY_PORT=8889"
+      })
+      console.error(
+        `\n[OpsGate] Port ${cfg.host}:${cfg.port} déjà utilisé (EADDRINUSE).\n` +
+          `  Libérer : Get-NetTCPConnection -LocalPort ${cfg.port} | % { Stop-Process -Id $_.OwningProcess -Force }\n` +
+          `  Ou autre port : $env:OPSGATE_PROXY_PORT=8889; pnpm proxy:dev\n`
+      )
+      process.exitCode = 1
+      return
+    }
+    log("error", "listen_error", { error: String(err.message || err) })
+    throw err
   })
 
   server.listen(cfg.port, cfg.host, () => {

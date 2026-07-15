@@ -16,8 +16,13 @@ export type ProxyConfig = {
 
 export const DEFAULT_ALLOWLIST = [
   "chatgpt.com",
+  "www.chatgpt.com",
   "chat.openai.com",
+  "openai.com",
+  "ab.chatgpt.com",
+  "cdn.oaistatic.com",
   "claude.ai",
+  "www.claude.ai",
   "gemini.google.com",
   "grok.com",
   "www.grok.com",
