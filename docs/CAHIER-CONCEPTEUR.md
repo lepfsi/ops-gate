@@ -1,4 +1,4 @@
-# OpsGate — Cahier de description (concepteur)
+# OpsGate  -  Cahier de description (concepteur)
 
 Document de conception pour l’équipe produit / design / architecture.  
 Chaque fonctionnalité listée indique **ce qu’elle fait**, **où elle vit dans le code**, et les **dépendances** éventuelles.
@@ -33,7 +33,7 @@ Console
 
 ---
 
-## 2. Extension — fonctionnalités
+## 2. Extension  -  fonctionnalités
 
 ### 2.1 Content script sites IA
 
@@ -100,7 +100,7 @@ Catégories :
 
 ---
 
-## 3. Engine — détection
+## 3. Engine  -  détection
 
 | | |
 |--|--|
@@ -123,7 +123,7 @@ Catégories :
 | **Console** | idle `IDLE_MS` dans `packages/console/src/App.tsx` |
 
 Multi-admin (comptes **différents**) : oui, en parallèle.  
-Même compte : non — le 2ᵉ technicien attend déconnexion ou expiration.
+Même compte : non  -  le 2ᵉ technicien attend déconnexion ou expiration.
 
 ### 4.2 Org / tenant
 
@@ -144,23 +144,32 @@ Même compte : non — le 2ᵉ technicien attend déconnexion ou expiration.
 
 | | |
 |--|--|
-| **Description** | Policy org + profils départementaux (hosts, scan, event reporting, protect unenroll). |
-| **Code** | policy/profile endpoints ; `HostPicker` console pour hosts IA |
+| **Description** | Policy org + profils departementaux (hosts, scan, event reporting, protect unenroll). Horaires optionnels par policy/profil (`work_schedule_json`) pour alertes offline non globalisees. |
+| **Code** | policy/profile endpoints ; `HostPicker.tsx` ; `workSchedule` dans stores + `connectivityBuckets(..., scheduleOf)` |
 
 ### 4.5 Rule packs
 
 | | |
 |--|--|
-| **Description** | Publish / active pack signé ; agents vérifient checksum. |
-| **Code** | packs routes ; `rules-pack.ts` |
+| **Description** | Versions de signatures poussees aux agents (sans rebuild). Prune auto + delete des versions non actives. |
+| **Code** | packs routes ; `rules-pack.ts` ; `deletePack` / `prunePacks` |
+| **Doc** | `docs/RULE-PACKS.md` |
 
-### 4.6 Events (télémétrie DLP)
+### 4.5b Recovery one-time
+
+| | |
+|--|--|
+| **Description** | Pool de codes (hashes) pour unenroll offline ; secret env legacy en transition. |
+| **Code** | table `recovery_codes` ; API recovery-codes ; agent match + consume |
+| **UI** | Admins (principal), masquer utilises |
+
+### 4.6 Events (telemetrie DLP)
 
 | | |
 |--|--|
 | **Description** | Metadata-only (pas de contenu brut). Sources text/file/system. |
 | **Code** | POST events agent ; list console `/v1/org/events` |
-| **UI filtres** | `EventsView` — décision, sévérité, source, recherche label |
+| **UI filtres** | decision, severite, source, label, **dates du/au** |
 
 ### 4.7 Audit admin (principal only)
 
@@ -188,7 +197,7 @@ Ex. Direction : prio 10, label starts_with `DIR` → groupe Direction, même si 
 
 ---
 
-## 5. Console — onglets
+## 5. Console  -  onglets
 
 | Tab | Fonction | Composant principal |
 |-----|----------|---------------------|
@@ -224,7 +233,7 @@ Tables clés : `organizations`, `policies`, `policy_profiles`, `org_admins`, `ad
 
 ## 7. Sécurité (résumé concepteur)
 
-- Events : metadata only (privacy) — `docs/PRIVACY.md`
+- Events : metadata only (privacy)  -  `docs/PRIVACY.md`
 - Packs : signature ed25519 + checksum
 - Unenroll protégé par mdp admin (sauf free label policy / revoke remote)
 - Session admin unique par compte
@@ -263,7 +272,7 @@ Voir `docs/V2-BACKLOG.md` et `docs/architecture/PLATFORM-v2.md` :
 |------------------------------|---------------------|-------------|
 | `warn` / `mask_recommend` | Masquer / Envoyer quand même / Annuler | `alertTitle` + `adminNotice` |
 | `mask_force` | Masquer ou Annuler seulement | `maskForceTitle` |
-| `block` | Pas d’envoi — bouton « Compris » | `blockTitle` + `blockBody` |
+| `block` | Pas d’envoi  -  bouton « Compris » | `blockTitle` + `blockBody` |
 
 Defaults : `DEFAULT_USER_MESSAGES` (`packages/api/src/types.ts` + `src/types`).  
 Personnalisation console → Policy → « Personnaliser les messages utilisateur ».  
@@ -273,7 +282,7 @@ Sync agent : `user_messages` + `default_action` dans `/v1/agents/me/config`.
 
 Messages aussi sur **profils département** (override de la policy org) : merge `policy.userMessages` + `profile.userMessages` dans le config agent.
 
-Dashboard console : sidebar type Kaspersky + widgets licences (OK / grace / **UNLICENSED** cliquable), hors-ligne long (`last_seen` > 2 h, liste au clic), timeline 14 j, top règles — charte DailyOps (`docs/kaspersky-3.png`).
+Dashboard console : sidebar type Kaspersky + widgets licences (OK / grace / **UNLICENSED** cliquable), hors-ligne long (`last_seen` > 2 h, liste au clic), timeline 14 j, top règles  -  charte DailyOps (`docs/kaspersky-3.png`).
 
 **Anti-doublon agents :** `device_fingerprint` = `opsGateInstallId` local extension (survit unenroll). Re-enroll avec même fingerprint → même agent (même si le label change). Doublons historiques (labels différents sans fingerprint) visibles dashboard → révoquer manuellement.
 

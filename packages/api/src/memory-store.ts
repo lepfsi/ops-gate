@@ -448,6 +448,7 @@ export class MemoryStore implements OpsGateStore {
         | "protectUnenroll"
         | "configEpoch"
         | "userMessages"
+        | "workSchedule"
       >
     >
   ) {
@@ -460,6 +461,10 @@ export class MemoryStore implements OpsGateStore {
         patch.userMessages !== undefined
           ? { ...(policy.userMessages || {}), ...patch.userMessages }
           : policy.userMessages,
+      workSchedule:
+        patch.workSchedule !== undefined
+          ? patch.workSchedule
+          : policy.workSchedule,
       version: policy.version + 1,
       configEpoch:
         typeof patch.configEpoch === "number"
@@ -852,6 +857,7 @@ export class MemoryStore implements OpsGateStore {
       assignedGroupIds?: string[]
       assignedUserIds?: string[]
       userMessages?: Partial<import("./types").PolicyUserMessages>
+      workSchedule?: import("./types").WorkSchedule | null
     }
   ) {
     if (!this.orgs.has(orgId)) return undefined
@@ -883,6 +889,10 @@ export class MemoryStore implements OpsGateStore {
           input.userMessages !== undefined
             ? { ...(prev.userMessages || {}), ...input.userMessages }
             : prev.userMessages,
+        workSchedule:
+          input.workSchedule !== undefined
+            ? input.workSchedule
+            : prev.workSchedule,
         updatedAt: now
       }
       list[idx] = next
@@ -909,6 +919,7 @@ export class MemoryStore implements OpsGateStore {
       assignedGroupIds: input.assignedGroupIds || [],
       assignedUserIds: input.assignedUserIds || [],
       userMessages: input.userMessages,
+      workSchedule: input.workSchedule ?? null,
       updatedAt: now
     }
     list.push(created)
@@ -1044,7 +1055,13 @@ export class MemoryStore implements OpsGateStore {
           userMessages: {
             ...(policy.userMessages || {}),
             ...(profile.userMessages || {})
-          }
+          },
+          workSchedule:
+            profile.workSchedule?.enabled
+              ? profile.workSchedule
+              : policy.workSchedule?.enabled
+                ? policy.workSchedule
+                : profile.workSchedule || policy.workSchedule || null
         }
       : {
           defaultAction: policy.defaultAction,
@@ -1052,7 +1069,8 @@ export class MemoryStore implements OpsGateStore {
           scanUploads: policy.scanUploads,
           eventReporting: policy.eventReporting,
           protectUnenroll: policy.protectUnenroll,
-          userMessages: policy.userMessages || {}
+          userMessages: policy.userMessages || {},
+          workSchedule: policy.workSchedule || null
         }
 
     const unenrollAdmins = await this.listUnenrollAdmins(orgId)
@@ -1313,7 +1331,40 @@ export class MemoryStore implements OpsGateStore {
       this.policies.set(input.orgId, nextPolicy)
     }
 
+    if (activate) {
+      await this.prunePacks(input.orgId, 12)
+    }
     return { ok: true, pack, policy: nextPolicy }
+  }
+
+  async deletePack(orgId: string, version: string) {
+    const list = this.packs.get(orgId) || []
+    const pack = list.find((p) => p.version === version)
+    if (!pack) return { ok: false, error: "not_found" }
+    if (pack.active) return { ok: false, error: "cannot_delete_active" }
+    this.packs.set(
+      orgId,
+      list.filter((p) => p.version !== version)
+    )
+    return { ok: true }
+  }
+
+  async prunePacks(orgId: string, keep = 12) {
+    const n = Math.max(3, Math.min(50, keep))
+    const list = this.packs.get(orgId) || []
+    const inactive = list
+      .filter((p) => !p.active)
+      .sort(
+        (a, b) =>
+          new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime()
+      )
+    const drop = new Set(inactive.slice(n).map((p) => p.version))
+    if (!drop.size) return { deleted: 0 }
+    this.packs.set(
+      orgId,
+      list.filter((p) => p.active || !drop.has(p.version))
+    )
+    return { deleted: drop.size }
   }
 
   async activatePack(
@@ -1759,7 +1810,20 @@ export class MemoryStore implements OpsGateStore {
     for (const a of agents) {
       licMap.set(a.id, await this.isAgentLicensed(orgId, a.id))
     }
-    const conn = connectivityBuckets(agents, mon, (a) => !!licMap.get(a.id))
+    const scheduleMap = new Map<
+      string,
+      import("./types").WorkSchedule | null | undefined
+    >()
+    for (const a of agents) {
+      const eff = await this.getEffectivePolicyForAgent(orgId, a.id)
+      scheduleMap.set(a.id, eff?.effective.workSchedule)
+    }
+    const conn = connectivityBuckets(
+      agents,
+      mon,
+      (a) => !!licMap.get(a.id),
+      (a) => scheduleMap.get(a.id)
+    )
     const offlineThreshold = conn.offline_long_ms
     for (const a of agents) {
       const lic = !!licMap.get(a.id)

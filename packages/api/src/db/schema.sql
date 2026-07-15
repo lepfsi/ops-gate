@@ -32,6 +32,8 @@ CREATE TABLE IF NOT EXISTS policies (
   config_epoch INT NOT NULL DEFAULT 1,
   /** Messages end-user banner (JSON partial PolicyUserMessages) */
   user_messages_json TEXT NOT NULL DEFAULT '{}',
+  /** Horaires optionnels (JSON WorkSchedule) */
+  work_schedule_json TEXT NOT NULL DEFAULT '{}',
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   UNIQUE (org_id)
 );
@@ -50,6 +52,7 @@ CREATE TABLE IF NOT EXISTS policy_profiles (
   assigned_group_ids JSONB NOT NULL DEFAULT '[]',
   assigned_user_ids JSONB NOT NULL DEFAULT '[]',
   user_messages_json TEXT NOT NULL DEFAULT '{}',
+  work_schedule_json TEXT NOT NULL DEFAULT '{}',
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 

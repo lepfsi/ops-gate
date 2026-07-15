@@ -138,7 +138,7 @@ export type MonitoringSettings = {
     workEnd: string
     breaks?: Array<{ start: string; end: string }>
   }
-  /** Rétention detection events (jours) — définie par l’entreprise */
+  /** Rétention detection events (jours)  -  définie par l’entreprise */
   logRetentionDays?: number
   weeklyExportEnabled?: boolean
   lastWeeklyExportAt?: string | null
@@ -210,6 +210,15 @@ export type PolicyUserMessages = {
   alertBodyFile?: string
 }
 
+export type WorkScheduleDoc = {
+  enabled: boolean
+  timezone: string
+  workDays: number[]
+  workStart: string
+  workEnd: string
+  breaks?: Array<{ start: string; end: string }>
+}
+
 export type PolicyDoc = {
   id: string
   orgId: string
@@ -223,6 +232,7 @@ export type PolicyDoc = {
   rulesPackVersion: string
   managementPasswordHash: string
   userMessages?: PolicyUserMessages
+  workSchedule?: WorkScheduleDoc | null
   updatedAt: string
 }
 
@@ -239,6 +249,7 @@ export type ProfileRow = {
   assignedGroupIds?: string[]
   assignedUserIds?: string[]
   userMessages?: PolicyUserMessages
+  workSchedule?: WorkScheduleDoc | null
   updatedAt: string
 }
 
@@ -503,6 +514,7 @@ export const api = {
     protect_unenroll?: boolean
     management_password?: string
     user_messages?: PolicyUserMessages
+    work_schedule?: WorkScheduleDoc | null
   }) =>
     request<{ ok: boolean; policy: unknown }>("/v1/org/policy", {
       method: "PATCH",
@@ -531,6 +543,7 @@ export const api = {
     protect_unenroll?: boolean
     assigned_group_ids?: string[]
     user_messages?: PolicyUserMessages
+    work_schedule?: WorkScheduleDoc | null
   }) =>
     request<{ ok: boolean; profile: ProfileRow }>("/v1/org/profiles", {
       method: "POST",
@@ -549,6 +562,7 @@ export const api = {
       user_messages?: PolicyUserMessages
       protect_unenroll?: boolean
       assigned_group_ids?: string[]
+      work_schedule?: WorkScheduleDoc | null
     }
   ) =>
     request<{ ok: boolean; profile: ProfileRow }>(
@@ -773,6 +787,12 @@ export const api = {
     request<{ ok: boolean; version: string }>(
       `/v1/org/rules/packs/${encodeURIComponent(version)}/activate`,
       { method: "POST" }
+    ),
+
+  deletePack: (version: string) =>
+    request<{ ok: boolean; version: string }>(
+      `/v1/org/rules/packs/${encodeURIComponent(version)}`,
+      { method: "DELETE" }
     ),
 
   monitoring: () =>

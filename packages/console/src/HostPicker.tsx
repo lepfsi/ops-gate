@@ -1,4 +1,4 @@
-/** HostPicker — sites IA en chips groupées (UI compacte, pas un brouillon textarea) */
+/** HostPicker  -  sites IA en chips groupées (UI compacte, pas un brouillon textarea) */
 import { useMemo, useState } from "react"
 
 const AI_HOST_PRESETS = [
@@ -199,7 +199,7 @@ export function HostPicker({
           ))}
         </div>
       ) : (
-        <p className="host-empty muted">Aucun site — ouvrez « Gérer les sites ».</p>
+        <p className="host-empty muted">Aucun site  -  ouvrez « Gérer les sites ».</p>
       )}
 
       {open && (
