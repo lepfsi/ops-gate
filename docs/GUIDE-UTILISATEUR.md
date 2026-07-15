@@ -1,4 +1,4 @@
-# OpsGate  -  Guide utilisateur (V1)
+# OpsGate — Guide utilisateur (V1)
 
 **Public** : administrateurs console, pilotes, support  
 **Version produit** : 1.2  
@@ -18,7 +18,7 @@ Pour l’installation technique locale (Docker, ports), voir aussi [`GUIDE-STACK
 | **Console** | Administration : dashboard, policy, agents, packs, événements, audit |
 | **Postgres** | Stockage durable (recommandé en pilote / prod) |
 
-Sans **Postgres** (`DATABASE_URL` non défini), l’API utilise un store **mémoire** : **toutes les données sont perdues au redémarrage**.
+Sans **Postgres**, l’API utilise un store **mémoire** : **toutes les données sont perdues au redémarrage**.
 
 ---
 
@@ -31,7 +31,9 @@ Sans **Postgres** (`DATABASE_URL` non défini), l’API utilise un store **mémo
 
 **Mode avancé (login)** : le champ URL API est masqué par défaut ; l’activer uniquement pour pointer une autre instance.
 
-Session unique par compte : une seconde connexion propose « Forcer la déconnexion ».
+**Session unique** : une seconde connexion propose « Forcer la déconnexion ».
+
+**Mauvais mot de passe** : le message indique combien d’essais restent. Après trop d’échecs, le compte est **verrouillé** — un administrateur principal le débloque dans *Admins & groupes*.
 
 ---
 
@@ -51,7 +53,7 @@ Après un sync réussi :
 
 ### Personnel
 
-Clé de licence personnelle → mode personnel (pas de télémétrie org vers la console DEMO).
+Clé de licence personnelle → mode personnel (pas de télémétrie org vers la console).
 
 ### Désinscription
 
@@ -60,7 +62,18 @@ Recovery concepteur : réservé au principal / support (voir §8).
 
 ---
 
-## 4. Policy
+## 4. Tableau de bord
+
+Vue d’ensemble de la flotte : licences, agents connectés, décisions, menaces fréquentes.
+
+- Cliquez un indicateur pour voir le détail (liste d’agents ou logs).
+- **Étendre** : les graphiques remplissent l’écran de contenu (la barre du haut et le menu de gauche restent visibles).
+- **Réduire** : retour à la vue normale.
+- **Force sync** : pousse la configuration aux agents en ligne (effet sous ~2 min).
+
+---
+
+## 5. Policy
 
 ### Policy org par défaut
 
@@ -77,20 +90,23 @@ Enregistrer puis **Synchroniser** (ou attendre le poll ≤ 2 min).
 
 1. Créer un profil (ex. Finance).  
 2. Assigner via **groupes** (ou agent).  
-3. Les agents du groupe héritent du profil.
+3. Les agents du groupe héritent du profil.  
+4. Vous pouvez **désactiver** un profil sans le supprimer.
 
 ---
 
-## 5. Licences
+## 6. Licences
 
 - Un **siège** = un agent protégé.  
-- Sans siège : période de **grâce**, puis protection inactive (**unlicensed**).  
+- Sans siège : période de **grâce** (24 h), puis protection inactive (**unlicensed**).  
 - L’assignation à un **groupe** (ou manuelle) active en général le siège.  
+- Essai : **30 jours** à la création de l’organisation.  
+- Licence full : clé du type `OPS-XXXX-XXXX-XXXX-XXXX` (Paramètres → Licences).  
 - Dashboard : listes Licensed / Grace / UNLICENSED.
 
 ---
 
-## 6. Packs de règles
+## 7. Packs de règles
 
 Un **pack** est le jeu de signatures de détection poussé aux agents sans rebuilder l’extension.
 
@@ -99,36 +115,49 @@ Un **pack** est le jeu de signatures de détection poussé aux agents sans rebui
 
 ---
 
-## 7. Événements (logs) & export
+## 8. Admins, recovery & paramètres
+
+### Admins & groupes
+
+- Plusieurs administrateurs ; un ou plusieurs **principals** (accès complet).  
+- **Modifier** un compte · **Nouveau mdp** · **Déverrouiller** · supprimer (selon droits).  
+- **Groupes** pour lier agents et profils policy.
+
+### Recovery concepteur
+
+| Phase | Pratique |
+|-------|----------|
+| Actuel | Secret fort `OPSGATE_VENDOR_RECOVERY` ; délai offline ≥ 2 h |
+| Recommandé V1.x | **Pool de codes one-time** (bas de page *Admins & groupes*, principal uniquement) |
+
+### Paramètres utiles
+
+- **Langue** FR / EN (Paramètres → Général) — s’applique à toute la console.  
+- **Rétention des logs** (défaut 90 jours) et types de journaux.  
+- **Seuil d’échecs de login** (verrouillage compte).  
+- **Monitoring** : seuils online / hors-ligne ; planning heures de travail.
+
+---
+
+## 9. Événements (logs) & export
 
 Décisions typiques : `mask_send`, `send_anyway`, `cancel`, enroll / unenroll.
 
 ### Rétention
 
-- Définie par l’**entreprise** (Monitoring → jours de rétention).  
+- Définie par l’**entreprise** (Paramètres → logs).  
 - Au-delà : **purge automatique**.  
-- **Exporter** la semaine ou tout l’historique avant purge (CSV).  
-- Archive auto fin de semaine si activée (listes téléchargeables avec jours restants).
+- **Exporter** la semaine, tout, ou une période (CSV / JSON).  
+- Archive auto fin de semaine si activée.
 
 ### Audit admin
 
 Journal des actions console (policy, profils, admins, packs…).  
-Réservé au **principal**. Export CSV disponible (symétrie events).
+Réservé au **principal**. Export disponible.
 
 ---
 
-## 8. Recovery concepteur
-
-| Phase | Pratique |
-|-------|----------|
-| Actuel | Secret fort `OPSGATE_VENDOR_RECOVERY` ; délai offline ≥ 2 h |
-| Recommandé V1.x | **Pool de codes one-time** (voir [`RECOVERY-CONCEPTEUR.md`](./RECOVERY-CONCEPTEUR.md)) |
-
-**OTP Administrator principal** et **Recovery** : bas de page **Admins & groupes** (principal uniquement).
-
----
-
-## 9. Monitoring & horaires
+## 10. Monitoring & horaires
 
 - Seuils **online** / **not connected long time**  
 - **Planning** (fuseau, jours, pauses) pour ne pas alerter hors heures  
@@ -138,22 +167,22 @@ Fuseaux : Europe, Cameroun (`Africa/Douala`), Madagascar (`Africa/Antananarivo`)
 
 ---
 
-## 10. Règles d’affectation
+## 11. Règles d’affectation
 
 Règles auto (label / hostname → groupe), conditions en **AND**, priorité ordonnée.  
 Appliquées à l’enroll et via « Ré-évaluer ».
 
 ---
 
-## 11. Données & base  -  pourquoi tout peut « disparaître »
+## 12. Données & base — pourquoi tout peut « disparaître »
 
 | Cause | Effet | Prévention |
 |-------|--------|------------|
-| API **sans** `DATABASE_URL` | Store **mémoire** → vide au restart | Toujours démarrer Postgres + exporter `DATABASE_URL` |
+| API **sans** base Postgres | Store **mémoire** → vide au restart | Toujours démarrer Postgres |
 | `docker compose down -v` | Volume Postgres **détruit** | Ne pas utiliser `-v` en pilote |
 | Nouveau volume / autre machine | DB « vide » + re-seed DEMO | Vérifier le volume Docker |
-| Rétention logs courte | Events anciens **purgés** | Ajuster Monitoring ; exporter avant |
-| Redémarrage API memory | Perte agents, events, admins custom | Passer à Postgres |
+| Rétention logs courte | Events anciens **purgés** | Ajuster la rétention ; exporter avant |
+| Redémarrage API en mémoire | Perte agents, events, admins | Passer à Postgres |
 
 Le seed `DEMO-OPSGATE` ne s’exécute **que si** l’org n’existe pas encore : il **ne réécrit pas** une org déjà présente.
 
@@ -170,15 +199,16 @@ Vérifier le log API : `store=postgres` (et non `memory`).
 
 ---
 
-## 12. Raccourcis console (V1)
+## 13. Raccourcis console (V1)
 
 | Action | Détail |
 |--------|--------|
 | `/` | Focus recherche / filtre événements (onglet Événements) |
+| Thème | Clair / sombre sur le bandeau d’état |
 
 ---
 
-## 13. Support & docs liées
+## 14. Support & docs liées
 
 | Document | Contenu |
 |----------|---------|
@@ -187,6 +217,8 @@ Vérifier le log API : `store=postgres` (et non `memory`).
 | [`RULE-PACKS.md`](./RULE-PACKS.md) | Packs de règles |
 | [`RUNBOOK-OPS.md`](./RUNBOOK-OPS.md) | Exploitation |
 | [`PRIVACY.md`](./PRIVACY.md) | Modes & privacy |
+
+Contact support : **contact@dailyops.tech** (indiquer le code organisation et la version).
 
 ---
 

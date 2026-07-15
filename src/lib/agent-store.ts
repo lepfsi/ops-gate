@@ -224,7 +224,7 @@ export function exitCredentials(settings: OpsGateSettings): ExitCredential[] {
   return list
 }
 
-/** Protection active si licencié ou en grace 5 min */
+/** Protection active si licencié ou en grace 24 h */
 export function isSecurityActive(settings: OpsGateSettings): boolean {
   if (settings.securityActive === false) return false
   if (settings.licensed !== false && settings.licenseStatus !== "unlicensed") {

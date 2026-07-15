@@ -53,6 +53,8 @@ CREATE TABLE IF NOT EXISTS policy_profiles (
   assigned_user_ids JSONB NOT NULL DEFAULT '[]',
   user_messages_json TEXT NOT NULL DEFAULT '{}',
   work_schedule_json TEXT NOT NULL DEFAULT '{}',
+  enabled BOOLEAN NOT NULL DEFAULT TRUE,
+  priority INT NOT NULL DEFAULT 100,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 

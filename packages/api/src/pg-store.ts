@@ -257,6 +257,8 @@ function rowAdmin(r: pg.QueryResultRow): OrgAdmin {
     permissions: (r.permissions || []) as AdminPermission[],
     active: r.active !== false,
     mustChangePassword: !!r.must_change_password,
+    failedLoginCount: Number(r.failed_login_count) || 0,
+    lockedAt: r.locked_at ? new Date(r.locked_at).toISOString() : null,
     createdAt: new Date(r.created_at).toISOString(),
     updatedAt: new Date(r.updated_at).toISOString()
   }
@@ -309,6 +311,11 @@ function rowProfile(r: pg.QueryResultRow): PolicyProfile {
     scanUploads: r.scan_uploads !== false,
     eventReporting: r.event_reporting !== false,
     protectUnenroll: !!r.protect_unenroll,
+    enabled: r.enabled !== false && r.enabled !== 0,
+    priority:
+      typeof r.priority === "number"
+        ? r.priority
+        : Number(r.priority) || 100,
     assignedGroupIds: r.assigned_group_ids || [],
     assignedUserIds: r.assigned_user_ids || [],
     userMessages,
@@ -368,7 +375,23 @@ export class PgStore implements OpsGateStore {
       `ALTER TABLE policy_profiles ADD COLUMN IF NOT EXISTS user_messages_json TEXT NOT NULL DEFAULT '{}'`,
       `ALTER TABLE policies ADD COLUMN IF NOT EXISTS work_schedule_json TEXT NOT NULL DEFAULT '{}'`,
       `ALTER TABLE policy_profiles ADD COLUMN IF NOT EXISTS work_schedule_json TEXT NOT NULL DEFAULT '{}'`,
+      `ALTER TABLE policy_profiles ADD COLUMN IF NOT EXISTS enabled BOOLEAN NOT NULL DEFAULT TRUE`,
+      `ALTER TABLE policy_profiles ADD COLUMN IF NOT EXISTS priority INT NOT NULL DEFAULT 100`,
       `ALTER TABLE agents ADD COLUMN IF NOT EXISTS device_fingerprint TEXT`,
+      `ALTER TABLE org_admins ADD COLUMN IF NOT EXISTS failed_login_count INT NOT NULL DEFAULT 0`,
+      `ALTER TABLE org_admins ADD COLUMN IF NOT EXISTS locked_at TIMESTAMPTZ`,
+      `CREATE TABLE IF NOT EXISTS issued_licenses (
+        id TEXT PRIMARY KEY,
+        license_key TEXT NOT NULL UNIQUE,
+        org_code TEXT NOT NULL,
+        company_name TEXT NOT NULL,
+        address TEXT NOT NULL DEFAULT '',
+        contact_email TEXT NOT NULL DEFAULT '',
+        seats INT NOT NULL DEFAULT 0,
+        expires_at TIMESTAMPTZ NOT NULL,
+        issued_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        revoked_at TIMESTAMPTZ
+      )`,
       `ALTER TABLE organizations ADD COLUMN IF NOT EXISTS monitoring_json TEXT NOT NULL DEFAULT '{}'`,
       `CREATE TABLE IF NOT EXISTS log_exports (
         id TEXT PRIMARY KEY,
@@ -502,9 +525,11 @@ export class PgStore implements OpsGateStore {
     )
     if (rows.length > 0) {
       await this.ensurePrincipalAdmin(rows[0].id)
+      await this.ensureDefaultPack(rows[0].id)
       await this.ensurePersonalOrg()
       // PERSONAL ne doit pas avoir d'admin console (même email que DEMO → login ambigu)
       await this.scrubPersonalConsoleAdmins()
+      await this.ensureSampleOrg()
       console.log("[store:postgres] demo org already present")
       return
     }
@@ -672,6 +697,128 @@ export class PgStore implements OpsGateStore {
 
     await this.ensurePersonalOrg()
     await this.scrubPersonalConsoleAdmins()
+    await this.ensureSampleOrg()
+  }
+
+  /**
+   * Clé Sample fixe (papier / tests)  -  toujours upsertée au démarrage.
+   * Alphabet sans 0/O/1/I : OPS-SMPL-ENTR-PRSE-TEST
+   */
+  static readonly SAMPLE_LICENSE_KEY = "OPS-SMPL-ENTR-PRSE-TEST"
+
+  /** Tenant d'exemple SAMPLE-OPSGATE (tests licence / multi-tenant) */
+  private async ensureSampleOrg() {
+    try {
+      const { rows } = await this.pool.query(
+        `SELECT id FROM organizations WHERE org_code = $1`,
+        ["SAMPLE-OPSGATE"]
+      )
+      let orgId = rows[0]?.id as string | undefined
+      if (!orgId) {
+        orgId = newId("org")
+        const now = new Date().toISOString()
+        const policyId = newId("pol")
+        const adminId = newId("adm")
+        const email = "admin@sample.local"
+        const hash = hashManagementPassword(PRINCIPAL_DEFAULT_PASSWORD)
+        const mon = JSON.stringify({
+          licenseDisplay: {
+            companyName: "",
+            address: "",
+            contactEmail: "",
+            expiresAt: null,
+            mode: "trial",
+            seats: 0,
+            activatedAt: null,
+            licenseKeyFingerprint: null
+          }
+        })
+        await this.pool.query(
+          `INSERT INTO organizations (id, name, slug, org_code, mode_default, event_payload_policy, primary_email, is_personal, license_seats, monitoring_json, created_at)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,false,0,$8,$9)`,
+          [
+            orgId,
+            "Sample Enterprise",
+            "sample",
+            "SAMPLE-OPSGATE",
+            "org_managed",
+            "metadata_only",
+            email,
+            mon,
+            now
+          ]
+        )
+        await this.pool.query(
+          `INSERT INTO policies (id, org_id, version, default_action, enabled_hosts, scan_uploads, event_reporting, rules_pack_version, management_password_hash, protect_unenroll, config_epoch, updated_at)
+           VALUES ($1,$2,1,$3,$4::jsonb,true,true,$5,$6,true,1,$7)`,
+          [
+            policyId,
+            orgId,
+            "mask_recommend",
+            JSON.stringify(DEFAULT_HOSTS),
+            "1.0.0",
+            hash,
+            now
+          ]
+        )
+        await this.pool.query(
+          `INSERT INTO org_admins (id, org_id, label, email, password_hash, is_principal, permissions, active, must_change_password, created_at, updated_at)
+           VALUES ($1,$2,$3,$4,$5,true,$6::jsonb,true,false,$7,$7)`,
+          [
+            adminId,
+            orgId,
+            "Sample Admin",
+            email,
+            hash,
+            JSON.stringify(ALL_ADMIN_PERMISSIONS),
+            now
+          ]
+        )
+        await this.ensureDefaultPack(orgId)
+        console.log(
+          `[store:postgres] Seeded SAMPLE-OPSGATE principal=${email} (trial 30j)`
+        )
+      } else {
+        await this.ensureDefaultPack(orgId)
+      }
+      await this.ensureSampleLicense()
+    } catch (e) {
+      console.warn("[store:postgres] ensureSampleOrg skipped:", e)
+    }
+  }
+
+  /** Garantit la clé Sample en base (évite license_not_found) */
+  private async ensureSampleLicense() {
+    const key = PgStore.SAMPLE_LICENSE_KEY
+    const exp = new Date()
+    exp.setFullYear(exp.getFullYear() + 1)
+    const expiresAt = exp.toISOString()
+    const issuedAt = new Date().toISOString()
+    const id = newId("lic")
+    await this.pool.query(
+      `INSERT INTO issued_licenses (id, license_key, org_code, company_name, address, contact_email, seats, expires_at, issued_at, revoked_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,NULL)
+       ON CONFLICT (license_key) DO UPDATE SET
+         org_code = EXCLUDED.org_code,
+         company_name = EXCLUDED.company_name,
+         address = EXCLUDED.address,
+         contact_email = EXCLUDED.contact_email,
+         seats = EXCLUDED.seats,
+         expires_at = EXCLUDED.expires_at,
+         revoked_at = NULL`,
+      [
+        id,
+        key,
+        "SAMPLE-OPSGATE",
+        "Sample Enterprise",
+        "42 Avenue Sample, 75008 Paris",
+        "licence@sample.enterprise",
+        50,
+        expiresAt,
+        issuedAt
+      ]
+    )
+    console.log(`[store:postgres] SAMPLE license ready: ${key}`)
   }
 
   private async ensurePrincipalAdmin(orgId: string) {
@@ -787,6 +934,160 @@ export class PgStore implements OpsGateStore {
       [id]
     )
     return rows[0] ? rowOrg(rows[0]) : undefined
+  }
+
+  async setOrgLicenseSeats(orgId: string, seats: number) {
+    const n = Math.max(0, Math.floor(seats) || 0)
+    await this.pool.query(
+      `UPDATE organizations SET license_seats = $2 WHERE id = $1`,
+      [orgId, n]
+    )
+    return this.getOrg(orgId)
+  }
+
+  async ensureDefaultPack(
+    orgId: string
+  ): Promise<StoredRulePack | undefined> {
+    const { rows: activeRows } = await this.pool.query(
+      `SELECT * FROM rule_packs WHERE org_id = $1 AND active = TRUE LIMIT 1`,
+      [orgId]
+    )
+    if (activeRows[0]) return rowPack(activeRows[0])
+    const { rows: anyRows } = await this.pool.query(
+      `SELECT * FROM rule_packs WHERE org_id = $1 ORDER BY published_at DESC LIMIT 1`,
+      [orgId]
+    )
+    if (anyRows[0]) {
+      await this.pool.query(
+        `UPDATE rule_packs SET active = TRUE WHERE org_id = $1 AND version = $2`,
+        [orgId, anyRows[0].version]
+      )
+      return rowPack({ ...anyRows[0], active: true })
+    }
+    const org = await this.getOrg(orgId)
+    if (!org) return undefined
+    const global = buildGlobalRulesPack("1.0.0")
+    const pack = materializePack({
+      orgId,
+      version: global.version,
+      rules: global.rules,
+      notes: global.notes || "default-pack-auto",
+      publishedBy: "system-ensure",
+      active: true
+    })
+    await this.pool.query(
+      `UPDATE rule_packs SET active = FALSE WHERE org_id = $1`,
+      [orgId]
+    )
+    await this.pool.query(
+      `INSERT INTO rule_packs (org_id, version, pack_id, schema_version, min_engine_version, checksum, signature, rules, notes, published_at, published_by, active)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10,$11,true)
+       ON CONFLICT (org_id, version) DO UPDATE SET
+         active = TRUE,
+         checksum = EXCLUDED.checksum,
+         signature = EXCLUDED.signature,
+         rules = EXCLUDED.rules`,
+      [
+        orgId,
+        pack.version,
+        pack.packId,
+        pack.schemaVersion,
+        pack.minEngineVersion ?? null,
+        pack.checksum,
+        pack.signature,
+        JSON.stringify(pack.rules),
+        pack.notes ?? null,
+        pack.publishedAt,
+        pack.publishedBy
+      ]
+    )
+    const policy = await this.getPolicy(orgId)
+    if (policy) {
+      await this.pool.query(
+        `UPDATE policies SET rules_pack_version = $2 WHERE org_id = $1`,
+        [orgId, pack.version]
+      )
+    }
+    console.log(
+      `[store:postgres] ensureDefaultPack org=${orgId.slice(0, 12)}… version=${pack.version}`
+    )
+    return pack
+  }
+
+  async issueShortLicense(input: {
+    orgCode: string
+    companyName: string
+    address: string
+    contactEmail: string
+    seats: number
+    expiresAt: string
+  }) {
+    const {
+      generateShortLicenseKey,
+      buildPayloadFromInput
+    } = await import("./license-keys")
+    const payload = buildPayloadFromInput(input)
+    let key = generateShortLicenseKey()
+    for (let i = 0; i < 5; i++) {
+      const { rows } = await this.pool.query(
+        `SELECT 1 FROM issued_licenses WHERE license_key = $1`,
+        [key]
+      )
+      if (!rows[0]) break
+      key = generateShortLicenseKey()
+    }
+    const id = newId("lic")
+    await this.pool.query(
+      `INSERT INTO issued_licenses (id, license_key, org_code, company_name, address, contact_email, seats, expires_at, issued_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+      [
+        id,
+        key,
+        payload.orgCode,
+        payload.companyName,
+        payload.address,
+        payload.contactEmail,
+        payload.seats,
+        payload.expiresAt,
+        payload.issuedAt
+      ]
+    )
+    return { licenseKey: key, payload }
+  }
+
+  async lookupIssuedLicense(licenseKey: string) {
+    const { normalizeLicenseKey } = await import("./license-keys")
+    const key = normalizeLicenseKey(licenseKey)
+    const { rows } = await this.pool.query(
+      `SELECT * FROM issued_licenses WHERE license_key = $1`,
+      [key]
+    )
+    if (!rows[0]) return undefined
+    const r = rows[0]
+    return {
+      id: r.id as string,
+      licenseKey: r.license_key as string,
+      v: 1 as const,
+      orgCode: r.org_code as string,
+      companyName: r.company_name as string,
+      address: (r.address as string) || "",
+      contactEmail: (r.contact_email as string) || "",
+      seats: Number(r.seats) || 0,
+      expiresAt: new Date(r.expires_at).toISOString(),
+      issuedAt: new Date(r.issued_at).toISOString(),
+      revokedAt: r.revoked_at ? new Date(r.revoked_at).toISOString() : null
+    }
+  }
+
+  async revokeIssuedLicense(licenseKey: string) {
+    const { normalizeLicenseKey } = await import("./license-keys")
+    const key = normalizeLicenseKey(licenseKey)
+    const { rowCount } = await this.pool.query(
+      `UPDATE issued_licenses SET revoked_at = NOW()
+       WHERE license_key = $1 AND revoked_at IS NULL`,
+      [key]
+    )
+    return (rowCount || 0) > 0
   }
 
   async updateOrgMonitoring(
@@ -983,6 +1284,7 @@ export class PgStore implements OpsGateStore {
       isPrincipal?: boolean
       permissions?: AdminPermission[]
       mustChangePassword?: boolean
+      unlock?: boolean
     }
   ) {
     const org = await this.getOrg(orgId)
@@ -1015,16 +1317,25 @@ export class PgStore implements OpsGateStore {
         passwordHash = hashManagementPassword(input.password)
         if (input.mustChangePassword === undefined) mustChange = false
       }
-      const permissions = prev.isPrincipal
+      const isPrincipal =
+        input.isPrincipal !== undefined ? !!input.isPrincipal : prev.isPrincipal
+      const permissions = isPrincipal
         ? ALL_ADMIN_PERMISSIONS
         : input.permissions ?? prev.permissions
       const active = input.active !== undefined ? input.active : prev.active
       const label = input.label.trim() || prev.label
+      let failedLoginCount = prev.failedLoginCount ?? 0
+      let lockedAt = prev.lockedAt ?? null
+      if (input.unlock) {
+        failedLoginCount = 0
+        lockedAt = null
+      }
 
       const { rows: updated } = await this.pool.query(
         `UPDATE org_admins SET
           label=$3, email=$4, password_hash=$5, permissions=$6::jsonb,
-          active=$7, must_change_password=$8, updated_at=$9
+          active=$7, must_change_password=$8, updated_at=$9,
+          is_principal=$10, failed_login_count=$11, locked_at=$12
          WHERE org_id=$1 AND id=$2 RETURNING *`,
         [
           orgId,
@@ -1035,10 +1346,13 @@ export class PgStore implements OpsGateStore {
           JSON.stringify(permissions),
           active,
           !!mustChange,
-          now
+          now,
+          isPrincipal,
+          failedLoginCount,
+          lockedAt
         ]
       )
-      if (prev.isPrincipal) {
+      if (isPrincipal && input.password) {
         await this.pool.query(
           `UPDATE policies SET management_password_hash = $2 WHERE org_id = $1`,
           [orgId, passwordHash]
@@ -1048,7 +1362,6 @@ export class PgStore implements OpsGateStore {
       return rowAdmin(updated[0])
     }
 
-    if (input.isPrincipal) return undefined
     if (!input.password || input.password.length < 6) return undefined
     const exists = await this.pool.query(
       `SELECT id FROM org_admins WHERE org_id = $1 AND email = $2`,
@@ -1056,22 +1369,26 @@ export class PgStore implements OpsGateStore {
     )
     if (exists.rows.length > 0) return undefined
 
-    let permissions = input.permissions?.length
-      ? input.permissions
-      : (["console_access"] as AdminPermission[])
-    if (!permissions.includes("console_access")) {
+    const asPrincipal = !!input.isPrincipal
+    let permissions = asPrincipal
+      ? ALL_ADMIN_PERMISSIONS
+      : input.permissions?.length
+        ? input.permissions
+        : (["console_access"] as AdminPermission[])
+    if (!asPrincipal && !permissions.includes("console_access")) {
       permissions = ["console_access", ...permissions]
     }
     const id = newId("adm")
     const { rows } = await this.pool.query(
-      `INSERT INTO org_admins (id, org_id, label, email, password_hash, is_principal, permissions, active, must_change_password, created_at, updated_at)
-       VALUES ($1,$2,$3,$4,$5,false,$6::jsonb,$7,false,$8,$8) RETURNING *`,
+      `INSERT INTO org_admins (id, org_id, label, email, password_hash, is_principal, permissions, active, must_change_password, created_at, updated_at, failed_login_count, locked_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,false,$9,$9,0,NULL) RETURNING *`,
       [
         id,
         orgId,
         input.label.trim() || `admin`,
         email,
         hashManagementPassword(input.password),
+        asPrincipal,
         JSON.stringify(permissions),
         input.active !== false,
         now
@@ -1081,17 +1398,76 @@ export class PgStore implements OpsGateStore {
     return rowAdmin(rows[0])
   }
 
+  async recordAdminLoginFailure(adminId: string, threshold: number) {
+    const thr = Math.max(3, Math.min(50, Math.floor(threshold) || 5))
+    const { rows } = await this.pool.query(
+      `UPDATE org_admins SET
+         failed_login_count = failed_login_count + 1,
+         locked_at = CASE
+           WHEN failed_login_count + 1 >= $2 THEN COALESCE(locked_at, NOW())
+           ELSE locked_at
+         END,
+         updated_at = NOW()
+       WHERE id = $1
+       RETURNING *`,
+      [adminId, thr]
+    )
+    if (!rows[0]) return { locked: false, count: 0 }
+    const a = rowAdmin(rows[0])
+    return {
+      locked: !!a.lockedAt,
+      count: a.failedLoginCount || 0,
+      admin: a
+    }
+  }
+
+  async clearAdminLoginFailures(adminId: string) {
+    await this.pool.query(
+      `UPDATE org_admins SET failed_login_count = 0, locked_at = NULL, updated_at = NOW()
+       WHERE id = $1`,
+      [adminId]
+    )
+  }
+
+  async unlockAdmin(orgId: string, adminId: string) {
+    const { rows } = await this.pool.query(
+      `UPDATE org_admins SET failed_login_count = 0, locked_at = NULL, updated_at = NOW()
+       WHERE org_id = $1 AND id = $2 RETURNING *`,
+      [orgId, adminId]
+    )
+    return rows[0] ? rowAdmin(rows[0]) : undefined
+  }
+
+  async findAdminsByEmail(email: string) {
+    const emailNorm = email.trim().toLowerCase()
+    const { rows } = await this.pool.query(
+      `SELECT a.* FROM org_admins a
+       INNER JOIN organizations o ON o.id = a.org_id
+       WHERE lower(a.email) = $1 AND a.active = TRUE AND o.is_personal = FALSE
+       ORDER BY a.is_principal DESC, a.created_at ASC`,
+      [emailNorm]
+    )
+    return rows.map(rowAdmin)
+  }
+
   async deleteAdmin(orgId: string, adminId: string) {
     const { rows } = await this.pool.query(
       `SELECT * FROM org_admins WHERE org_id = $1 AND id = $2`,
       [orgId, adminId]
     )
-    if (!rows[0] || rows[0].is_principal) return false
+    if (!rows[0]) return false
+    if (rows[0].is_principal) {
+      const { rows: principals } = await this.pool.query(
+        `SELECT id FROM org_admins WHERE org_id = $1 AND is_principal = TRUE AND active = TRUE`,
+        [orgId]
+      )
+      if (principals.length <= 1) return false
+    }
     await this.pool.query(`DELETE FROM admin_sessions WHERE admin_id = $1`, [
       adminId
     ])
     const { rowCount } = await this.pool.query(
-      `DELETE FROM org_admins WHERE org_id = $1 AND id = $2 AND is_principal = FALSE`,
+      `DELETE FROM org_admins WHERE org_id = $1 AND id = $2`,
       [orgId, adminId]
     )
     if ((rowCount ?? 0) > 0) await this.forceConfigSync(orgId)
@@ -1125,9 +1501,14 @@ export class PgStore implements OpsGateStore {
     )
     if (!rows[0]) return { ok: false as const, error: "invalid_credentials" }
     const admin = rowAdmin(rows[0])
+    if (admin.lockedAt) {
+      return { ok: false as const, error: "account_locked" }
+    }
     if (!admin.isPrincipal && !admin.permissions.includes("console_access")) {
       return { ok: false as const, error: "no_console_access" }
     }
+    // Succès : reset compteur échecs
+    await this.clearAdminLoginFailures(admin.id)
     // Purge : expirées OU idle serveur (last_activity / created)
     const idleSec = Math.floor(PgStore.SESSION_IDLE_MS / 1000)
     await this.pool.query(
@@ -1373,7 +1754,9 @@ export class PgStore implements OpsGateStore {
 
   async listProfiles(orgId: string) {
     const { rows } = await this.pool.query(
-      `SELECT * FROM policy_profiles WHERE org_id = $1 ORDER BY updated_at ASC`,
+      `SELECT * FROM policy_profiles
+       WHERE org_id = $1
+       ORDER BY COALESCE(priority, 100) ASC, name ASC`,
       [orgId]
     )
     return rows.map(rowProfile)
@@ -1390,6 +1773,8 @@ export class PgStore implements OpsGateStore {
       scanUploads?: boolean
       eventReporting?: boolean
       protectUnenroll?: boolean
+      enabled?: boolean
+      priority?: number
       assignedGroupIds?: string[]
       assignedUserIds?: string[]
       userMessages?: Partial<import("./types").PolicyUserMessages>
@@ -1426,6 +1811,12 @@ export class PgStore implements OpsGateStore {
           input.protectUnenroll !== undefined
             ? input.protectUnenroll
             : prev.protectUnenroll,
+        enabled:
+          input.enabled !== undefined ? input.enabled : prev.enabled !== false,
+        priority:
+          input.priority !== undefined
+            ? Math.max(1, Math.floor(input.priority) || 100)
+            : prev.priority ?? 100,
         assignedGroupIds: input.assignedGroupIds ?? prev.assignedGroupIds,
         assignedUserIds: input.assignedUserIds ?? prev.assignedUserIds,
         userMessages: nextMsgs,
@@ -1439,7 +1830,8 @@ export class PgStore implements OpsGateStore {
           name=$3, department=$4, default_action=$5, enabled_hosts=$6::jsonb,
           scan_uploads=$7, event_reporting=$8, protect_unenroll=$9,
           assigned_group_ids=$10::jsonb, assigned_user_ids=$11::jsonb,
-          user_messages_json=$12, work_schedule_json=$13, updated_at=$14
+          user_messages_json=$12, work_schedule_json=$13, updated_at=$14,
+          enabled=$15, priority=$16
          WHERE org_id=$1 AND id=$2 RETURNING *`,
         [
           orgId,
@@ -1455,7 +1847,9 @@ export class PgStore implements OpsGateStore {
           JSON.stringify(next.assignedUserIds),
           JSON.stringify(next.userMessages || {}),
           JSON.stringify(next.workSchedule || {}),
-          now
+          now,
+          next.enabled,
+          next.priority
         ]
       )
       const profile = rowProfile(updated[0])
@@ -1465,9 +1859,14 @@ export class PgStore implements OpsGateStore {
     }
 
     const id = newId("prof")
+    const en = input.enabled !== false
+    const prio =
+      input.priority !== undefined
+        ? Math.max(1, Math.floor(input.priority) || 100)
+        : 100
     const { rows } = await this.pool.query(
-      `INSERT INTO policy_profiles (id, org_id, name, department, default_action, enabled_hosts, scan_uploads, event_reporting, protect_unenroll, assigned_group_ids, assigned_user_ids, user_messages_json, work_schedule_json, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7,$8,$9,$10::jsonb,$11::jsonb,$12,$13,$14) RETURNING *`,
+      `INSERT INTO policy_profiles (id, org_id, name, department, default_action, enabled_hosts, scan_uploads, event_reporting, protect_unenroll, assigned_group_ids, assigned_user_ids, user_messages_json, work_schedule_json, updated_at, enabled, priority)
+       VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7,$8,$9,$10::jsonb,$11::jsonb,$12,$13,$14,$15,$16) RETURNING *`,
       [
         id,
         orgId,
@@ -1482,7 +1881,9 @@ export class PgStore implements OpsGateStore {
         JSON.stringify(input.assignedUserIds || []),
         JSON.stringify(input.userMessages || {}),
         JSON.stringify(input.workSchedule || {}),
-        now
+        now,
+        en,
+        prio
       ]
     )
     const profile = rowProfile(rows[0])
@@ -1575,7 +1976,12 @@ export class PgStore implements OpsGateStore {
     agent: Agent | undefined
   ): Promise<PolicyProfile | null> {
     if (!agent) return null
-    const list = await this.listProfiles(orgId)
+    const list = (await this.listProfiles(orgId)).filter(
+      (p) => p.enabled !== false
+    )
+    // Priorité firewall : plus petit priority d'abord
+    const byPrio = (a: PolicyProfile, b: PolicyProfile) =>
+      (a.priority ?? 100) - (b.priority ?? 100)
     if (agent.policyProfileId) {
       return list.find((p) => p.id === agent.policyProfileId) || null
     }
@@ -1583,21 +1989,25 @@ export class PgStore implements OpsGateStore {
       const users = await this.listUsers(orgId)
       const user = users.find((u) => u.id === agent.userId)
       if (user) {
-        const byUser = list.find((p) =>
-          (p.assignedUserIds || []).includes(user.id)
-        )
+        const byUser = list
+          .filter((p) => (p.assignedUserIds || []).includes(user.id))
+          .sort(byPrio)[0]
         if (byUser) return byUser
         const groups = await this.listGroups(orgId)
+        const candidates: PolicyProfile[] = []
         for (const gid of user.groupIds || []) {
-          const byGroup = list.find((p) =>
-            (p.assignedGroupIds || []).includes(gid)
-          )
-          if (byGroup) return byGroup
+          for (const p of list) {
+            if ((p.assignedGroupIds || []).includes(gid)) candidates.push(p)
+          }
           const g = groups.find((x) => x.id === gid)
           if (g?.policyProfileId) {
             const p = list.find((x) => x.id === g.policyProfileId)
-            if (p) return p
+            if (p) candidates.push(p)
           }
+        }
+        if (candidates.length) {
+          candidates.sort(byPrio)
+          return candidates[0]
         }
       }
     }
@@ -1691,7 +2101,7 @@ export class PgStore implements OpsGateStore {
     let licensed_agents = 0
     let unlicensed_agents = 0
     let grace_agents = 0
-    const graceMs = 5 * 60 * 1000
+    const { LICENSE_GRACE_MS: graceMs } = await import("./summary-helpers")
     for (const a of agents) {
       if (a.licenseAssigned === true) {
         licensed_agents++
@@ -1837,7 +2247,7 @@ export class PgStore implements OpsGateStore {
     return rows[0] ? rowPack(rows[0]) : undefined
   }
 
-  async getActivePack(orgId: string) {
+  async getActivePack(orgId: string): Promise<StoredRulePack | undefined> {
     const { rows } = await this.pool.query(
       `SELECT * FROM rule_packs WHERE org_id = $1 AND active = TRUE LIMIT 1`,
       [orgId]
@@ -1847,7 +2257,14 @@ export class PgStore implements OpsGateStore {
       `SELECT * FROM rule_packs WHERE org_id = $1 ORDER BY published_at DESC LIMIT 1`,
       [orgId]
     )
-    return all[0] ? rowPack(all[0]) : undefined
+    if (all[0]) {
+      await this.pool.query(
+        `UPDATE rule_packs SET active = TRUE WHERE org_id = $1 AND version = $2`,
+        [orgId, all[0].version]
+      )
+      return rowPack({ ...all[0], active: true })
+    }
+    return this.ensureDefaultPack(orgId)
   }
 
   async getActivePackPayload(
@@ -1867,10 +2284,19 @@ export class PgStore implements OpsGateStore {
       if (!v.ok) return { ok: false, errors: v.errors }
       rules = input.rules
     } else {
-      const active = await this.getActivePack(input.orgId)
-      if (!active) return { ok: false, errors: ["no_active_pack_to_clone"] }
-      const disable = new Set(input.disableRuleIds || [])
-      rules = active.rules.filter((r) => !disable.has(r.id))
+      let active = await this.getActivePack(input.orgId)
+      if (!active) {
+        active = await this.ensureDefaultPack(input.orgId)
+      }
+      if (!active) {
+        const global = buildGlobalRulesPack("1.0.0")
+        rules = global.rules
+      } else {
+        const disable = new Set(input.disableRuleIds || [])
+        rules = active.rules.filter(
+          (r: DetectionRule) => !disable.has(r.id)
+        )
+      }
       const v = validateRules(rules)
       if (!v.ok) return { ok: false, errors: v.errors }
     }
@@ -2506,8 +2932,12 @@ export class PgStore implements OpsGateStore {
   }
 
   async listRecoveryCodes(orgId: string) {
+    // Actifs (pool valide) + consommés (audit). Les invalidés non utilisés sont purgés.
     const { rows } = await this.pool.query(
-      `SELECT * FROM recovery_codes WHERE org_id = $1 ORDER BY created_at DESC`,
+      `SELECT * FROM recovery_codes
+       WHERE org_id = $1
+         AND (consumed_at IS NOT NULL OR (active = TRUE AND consumed_at IS NULL))
+       ORDER BY created_at DESC`,
       [orgId]
     )
     return rows.map(
@@ -2564,10 +2994,9 @@ export class PgStore implements OpsGateStore {
   }
 
   async revokeRecoveryPool(orgId: string) {
+    // Invalider le pool = effacer TOUS les codes (actifs + utilisés).
     const { rowCount } = await this.pool.query(
-      `UPDATE recovery_codes
-       SET active = FALSE, consumed_at = COALESCE(consumed_at, NOW())
-       WHERE org_id = $1 AND active = TRUE AND consumed_at IS NULL`,
+      `DELETE FROM recovery_codes WHERE org_id = $1`,
       [orgId]
     )
     return { revoked: rowCount || 0 }

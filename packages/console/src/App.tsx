@@ -24,7 +24,9 @@ import {
   type Summary,
   type UserRow
 } from "./api"
+import { BrandMark } from "./BrandMark"
 import { AI_HOST_PRESETS, HostPicker } from "./HostPicker"
+import { getStoredLang, makeT, setStoredLang, type Lang } from "./i18n"
 
 type Tab =
   | "summary"
@@ -36,6 +38,8 @@ type Tab =
   | "audit"
   | "moving"
   | "settings"
+  | "support"
+  | "help"
 
 const IDLE_MS = 5 * 60 * 1000
 
@@ -50,13 +54,40 @@ const ALL_PERMS: AdminPermission[] = [
 export default function App() {
   const [sessionAdmin, setSessionAdmin] = useState<AdminRow | null>(null)
   const [authChecking, setAuthChecking] = useState(true)
-  const [tab, setTab] = useState<Tab>("summary")
+  const [tab, setTab] = useState<Tab>(() => {
+    try {
+      const t = sessionStorage.getItem("opsgate_console_tab") as Tab | null
+      if (
+        t &&
+        [
+          "summary",
+          "policy",
+          "people",
+          "packs",
+          "agents",
+          "events",
+          "audit",
+          "moving",
+          "settings",
+          "support",
+          "help"
+        ].includes(t)
+      ) {
+        return t
+      }
+    } catch {
+      /* ignore */
+    }
+    return "summary"
+  })
   /** Sous-section tableau de bord (une seule nav latérale) */
   const [dashSection, setDashSection] = useState<
     "overview" | "licenses" | "connectivity" | "activity" | "rules"
   >("overview")
   /** Sous-liens dashboard dépliés / repliés */
   const [dashNavOpen, setDashNavOpen] = useState(true)
+  /** Dashboard plein écran : topbar + nav masquées ; Échap pour sortir */
+  const [dashExpanded, setDashExpanded] = useState(false)
   const [apiBase, setApiBaseState] = useState(getApiBase())
   const [health, setHealth] = useState<string>("…")
   const [error, setErrorRaw] = useState<string | null>(null)
@@ -69,7 +100,66 @@ export default function App() {
       return "light"
     }
   })
+  const [lang, setLang] = useState<Lang>(() => getStoredLang())
+  const t = useMemo(() => makeT(lang), [lang])
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(() => {
+    try {
+      document.documentElement.lang = lang
+    } catch {
+      /* ignore */
+    }
+  }, [lang])
+
+  /** Plein écran dashboard : API Fullscreen + CSS (navs masquées) */
+  useEffect(() => {
+    const root = document.documentElement
+    if (dashExpanded) {
+      root.classList.add("dash-fs-active")
+      document.body.classList.add("dash-fs-active")
+      if (!document.fullscreenElement) {
+        const req =
+          root.requestFullscreen?.bind(root) ||
+          // @ts-expect-error webkit prefix
+          root.webkitRequestFullscreen?.bind(root)
+        if (req) void Promise.resolve(req()).catch(() => {})
+      }
+    } else {
+      root.classList.remove("dash-fs-active")
+      document.body.classList.remove("dash-fs-active")
+      if (document.fullscreenElement) {
+        void document.exitFullscreen().catch(() => {})
+      }
+    }
+    return () => {
+      root.classList.remove("dash-fs-active")
+      document.body.classList.remove("dash-fs-active")
+    }
+  }, [dashExpanded])
+
+  useEffect(() => {
+    const exitFs = () => setDashExpanded(false)
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" || e.key === "Esc") {
+        exitFs()
+      }
+    }
+    const onFsChange = () => {
+      // Sortie plein écran navigateur (souvent via Échap) → quitter le mode
+      if (!document.fullscreenElement) {
+        setDashExpanded(false)
+      }
+    }
+    document.addEventListener("keydown", onKey)
+    document.addEventListener("fullscreenchange", onFsChange)
+    document.addEventListener("webkitfullscreenchange", onFsChange)
+    return () => {
+      document.removeEventListener("keydown", onKey)
+      document.removeEventListener("fullscreenchange", onFsChange)
+      document.removeEventListener("webkitfullscreenchange", onFsChange)
+    }
+  }, [])
 
   const clearToast = useCallback(() => {
     setErrorRaw(null)
@@ -175,14 +265,29 @@ export default function App() {
   const goTab = useCallback(
     (t: Tab) => {
       setTab(t)
+      try {
+        sessionStorage.setItem("opsgate_console_tab", t)
+      } catch {
+        /* ignore */
+      }
       if (t === "summary") {
         setDashNavOpen(true)
         setDashSection("overview")
+      } else {
+        setDashExpanded(false)
       }
       scrollConsoleTop()
     },
     [scrollConsoleTop]
   )
+
+  useEffect(() => {
+    try {
+      sessionStorage.setItem("opsgate_console_tab", tab)
+    } catch {
+      /* ignore */
+    }
+  }, [tab])
 
   const loadTab = useCallback(async (t: Tab) => {
     if (!getToken()) return
@@ -312,6 +417,7 @@ export default function App() {
         setApiBaseState={setApiBaseState}
         onSaveApi={saveApi}
         health={health}
+        t={t}
         onLoggedIn={async (admin) => {
           setSessionAdmin(admin)
           try {
@@ -375,7 +481,10 @@ export default function App() {
   }
 
   return (
-    <div className="app-shell">
+    <div
+      className={`app-shell${
+        dashExpanded ? " app-shell--dash-fullscreen" : ""
+      }`}>
       {forcePwd && (
         <ForcePasswordModal
           onDone={async () => {
@@ -389,11 +498,10 @@ export default function App() {
           }}
         />
       )}
+      {!dashExpanded && (
       <header className="topbar">
         <div className="brand">
-          <div className="brand-mark" aria-hidden>
-            <img src="/brand/icon-48.png" alt="" width={40} height={40} />
-          </div>
+          <BrandMark size={40} />
           <div className="brand-text">
             <h1>OpsGate</h1>
             <p>
@@ -410,7 +518,7 @@ export default function App() {
             placeholder="http://127.0.0.1:8787"
           />
           <button className="btn secondary btn-sm" type="button" onClick={saveApi}>
-            Appliquer
+            {t("top.apply")}
           </button>
           <button
             className="btn secondary btn-sm"
@@ -419,7 +527,7 @@ export default function App() {
               void refreshHealth()
               void loadTab(tab)
             }}>
-            Refresh
+            {t("top.refresh")}
           </button>
           <button
             className="btn secondary btn-sm"
@@ -433,33 +541,11 @@ export default function App() {
               setToken(null)
               setSessionAdmin(null)
             }}>
-            Déconnexion
+            {t("top.logout")}
           </button>
         </div>
       </header>
-
-      <div className="status-strip">
-        <span>
-          <span
-            className={`status-dot ${health.startsWith("API OK") ? "" : "off"}`}
-          />
-          <strong>{health}</strong>
-        </span>
-        {orgCode ? (
-          <span title={orgName || orgCode}>
-            Org · <strong className="mono">{orgCode}</strong>
-          </span>
-        ) : null}
-        {primaryEmail ? <span>Install · {primaryEmail}</span> : null}
-        <span className="badge-v1">V1 · 1.2</span>
-        <button
-          type="button"
-          className="btn secondary btn-sm"
-          title="Clair / sombre"
-          onClick={() => setTheme((t) => (t === "dark" ? "light" : "dark"))}>
-          {theme === "dark" ? "Clair" : "Sombre"}
-        </button>
-      </div>
+      )}
 
       {(error || info) && (
         <div
@@ -477,9 +563,10 @@ export default function App() {
       )}
 
       <div className="shell-body">
+      {!dashExpanded && (
       <nav className="shell-nav" aria-label="Navigation principale">
         <div className="shell-nav-brand">
-          <img src="/brand/icon-48.png" alt="" width={32} height={32} />
+          <BrandMark size={32} />
           <div className="shell-nav-brand-text">
             <strong>OpsGate</strong>
             <span>Console</span>
@@ -500,19 +587,20 @@ export default function App() {
             }
             goTab("summary")
           }}>
-          Tableau de bord {tab === "summary" ? (dashNavOpen ? "▾" : "▸") : ""}
+          {t("nav.dashboard")}{" "}
+          {tab === "summary" ? (dashNavOpen ? "▾" : "▸") : ""}
         </button>
         {tab === "summary" && dashNavOpen && (
           <>
             {(
               [
-                ["overview", "Vue d’ensemble"],
-                ["licenses", "Licences"],
-                ["connectivity", "Connexion"],
-                ["activity", "Activité"],
-                ["rules", "Règles / menaces"]
+                ["overview", "nav.overview"],
+                ["licenses", "nav.licenses"],
+                ["connectivity", "nav.connectivity"],
+                ["activity", "nav.activity"],
+                ["rules", "nav.rules"]
               ] as const
-            ).map(([id, label]) => (
+            ).map(([id, labelKey]) => (
               <button
                 key={id}
                 type="button"
@@ -537,7 +625,7 @@ export default function App() {
                       ?.scrollIntoView({ behavior: "smooth", block: "start" })
                   }, 30)
                 }}>
-                {label}
+                {t(labelKey)}
               </button>
             ))}
           </>
@@ -546,57 +634,105 @@ export default function App() {
           type="button"
           className={`shell-nav-item ${tab === "policy" ? "active" : ""}`}
           onClick={() => goTab("policy")}>
-          Policy
+          {t("nav.policy")}
         </button>
         <button
           type="button"
           className={`shell-nav-item ${tab === "people" ? "active" : ""}`}
           onClick={() => goTab("people")}>
-          Admins &amp; groupes
+          {t("nav.people")}
         </button>
         <button
           type="button"
           className={`shell-nav-item ${tab === "packs" ? "active" : ""}`}
           onClick={() => goTab("packs")}>
-          Packs de règles
+          {t("nav.packs")}
         </button>
         <button
           type="button"
           className={`shell-nav-item ${tab === "agents" || tab === "moving" ? "active" : ""}`}
           onClick={() => goTab("agents")}>
-          Agents
+          {t("nav.agents")}
         </button>
         {(tab === "agents" || tab === "moving") && (
           <button
             type="button"
             className={`shell-nav-sub ${tab === "moving" ? "active" : ""}`}
             onClick={() => goTab("moving")}>
-            Règles auto
+            {t("nav.moving")}
           </button>
         )}
         <button
           type="button"
           className={`shell-nav-item ${tab === "events" ? "active" : ""}`}
           onClick={() => goTab("events")}>
-          Événements
+          {t("nav.events")}
         </button>
         <button
           type="button"
           className={`shell-nav-item ${tab === "audit" ? "active" : ""}`}
           onClick={() => goTab("audit")}>
-          Audit admin
+          {t("nav.audit")}
         </button>
         <button
           type="button"
           className={`shell-nav-item ${tab === "settings" ? "active" : ""}`}
           onClick={() => goTab("settings")}>
-          Monitoring &amp; horaires
+          {t("nav.settings")}
         </button>
+        <div className="shell-nav-foot">
+          <button
+            type="button"
+            className={`shell-nav-item ${tab === "support" ? "active" : ""}`}
+            onClick={() => goTab("support")}>
+            {t("nav.support")}
+          </button>
+          <button
+            type="button"
+            className={`shell-nav-item ${tab === "help" ? "active" : ""}`}
+            onClick={() => goTab("help")}>
+            {t("nav.help")}
+          </button>
+        </div>
       </nav>
+      )}
 
-      <main className="shell-main">
-      {busy && tab !== "packs" && tab !== "policy" && (
-        <p className="muted">Chargement…</p>
+      <main
+        className={`shell-main${
+          tab === "summary" && dashExpanded ? " shell-main--dash-expanded" : ""
+        }`}>
+      {/* Bandeau API : scrolle avec le contenu ; masqué en mode dashboard étendu */}
+      {!(tab === "summary" && dashExpanded) && (
+      <div className="status-strip">
+        <span>
+          <span
+            className={`api-status ${health.startsWith("API OK") ? "ok" : "bad"}`}
+            title={health}>
+            API
+          </span>
+          <strong>
+            {health.startsWith("API OK") ? t("login.apiOk") : health}
+          </strong>
+        </span>
+        {orgCode ? (
+          <span title={orgName || orgCode}>
+            Org · <strong className="mono">{orgCode}</strong>
+          </span>
+        ) : null}
+        {primaryEmail ? <span>Install · {primaryEmail}</span> : null}
+        <span className="meta-tag">V1 1.2</span>
+        <button
+          type="button"
+          className="btn secondary btn-sm"
+          title="Clair / sombre"
+          onClick={() => setTheme((th) => (th === "dark" ? "light" : "dark"))}>
+          {theme === "dark" ? t("top.themeLight") : t("top.themeDark")}
+        </button>
+      </div>
+      )}
+
+      {busy && tab !== "packs" && tab !== "policy" && !dashExpanded && (
+        <p className="muted">{t("common.loading")}</p>
       )}
 
       {tab === "summary" && (
@@ -605,6 +741,9 @@ export default function App() {
           busy={busy}
           dashSection={dashSection}
           setDashSection={setDashSection}
+          dashExpanded={dashExpanded}
+          setDashExpanded={setDashExpanded}
+          t={t}
           onRefresh={() => void loadTab("summary")}
           onForceSync={async () => {
             setBusy(true)
@@ -676,6 +815,7 @@ export default function App() {
           setBusy={setBusy}
           setError={setError}
           setInfo={setInfo}
+          t={t}
         />
       )}
 
@@ -691,6 +831,7 @@ export default function App() {
           setBusy={setBusy}
           setError={setError}
           setInfo={setInfo}
+          t={t}
         />
       )}
 
@@ -787,6 +928,7 @@ export default function App() {
           events={events}
           setError={setError}
           setInfo={setInfo}
+          t={t}
         />
       )}
       {tab === "moving" && (
@@ -802,17 +944,31 @@ export default function App() {
         <AuditView isPrincipal={!!sessionAdmin.is_principal} />
       )}
       {tab === "settings" && (
-        <MonitoringSettingsView
+        <SystemSettingsView
           busy={busy}
           setBusy={setBusy}
           setError={setError}
           setInfo={setInfo}
+          orgCode={orgCode}
+          orgName={orgName}
+          primaryEmail={primaryEmail}
+          lang={lang}
+          setLang={(l) => {
+            setLang(l)
+            setStoredLang(l)
+          }}
+          t={t}
         />
       )}
+      {tab === "support" && <SupportView t={t} />}
+      {tab === "help" && <HelpView t={t} />}
 
       <footer className="console-footer">
-        OpsGate Console <strong>1.2.0</strong> · early customer · privacy by
-        design (events metadata-only)
+        OpsGate Console <strong>1.2.0</strong>
+        {" · "}
+        events metadata-only
+        {" · "}
+        DailyOps.Tech
       </footer>
       </main>
       </div>
@@ -885,6 +1041,8 @@ function SummaryView({
   busy,
   dashSection,
   setDashSection,
+  dashExpanded,
+  setDashExpanded,
   onRefresh,
   onForceSync,
   onMerged,
@@ -892,7 +1050,8 @@ function SummaryView({
   onRevokeAgent,
   setError,
   setInfo,
-  setBusy
+  setBusy,
+  t
 }: {
   summary: Summary | null
   busy?: boolean
@@ -900,6 +1059,8 @@ function SummaryView({
   setDashSection: (
     s: "overview" | "licenses" | "connectivity" | "activity" | "rules"
   ) => void
+  dashExpanded: boolean
+  setDashExpanded: (v: boolean) => void
   onRefresh: () => void
   onForceSync: () => void
   onForceSyncAgent?: (agentId: string, offlineMs: number) => void
@@ -908,6 +1069,7 @@ function SummaryView({
   setError?: (e: string | null) => void
   setInfo?: (i: string | null) => void
   setBusy?: (b: boolean) => void
+  t: (k: string, vars?: Record<string, string | number>) => string
 }) {
   const [drill, setDrill] = useState<string | null>(null)
   const [drillEvents, setDrillEvents] = useState<EventRow[]>([])
@@ -918,10 +1080,10 @@ function SummaryView({
   if (!summary) {
     return (
       <div className="card empty">
-        Pas de données. Lance <code>pnpm api:dev</code> puis Refresh.
+        {t("dash.empty")}
         <div style={{ marginTop: 12 }}>
           <button className="btn secondary" type="button" onClick={onRefresh}>
-            Retry
+            {t("common.retry")}
           </button>
         </div>
       </div>
@@ -1064,10 +1226,10 @@ function SummaryView({
             <tr>
               <th>Label</th>
               <th>Host</th>
-              <th>Dernier sync</th>
-              <th>Hors ligne</th>
-              <th>Licence</th>
-              <th>Actions</th>
+              <th>{t("dash.lastSync")}</th>
+              <th>{t("dash.offlineFor")}</th>
+              <th>{t("dash.license")}</th>
+              <th>{t("common.actions")}</th>
             </tr>
           </thead>
           <tbody>
@@ -1084,7 +1246,7 @@ function SummaryView({
                   <td className="muted">{a.host_name || " - "}</td>
                   <td className="muted" style={{ fontSize: 12 }}>
                     {a.last_seen_at
-                      ? new Date(a.last_seen_at).toLocaleString("fr-FR")
+                      ? new Date(a.last_seen_at).toLocaleString()
                       : " - "}
                   </td>
                   <td>{formatOffline(a.offline_for_ms)}</td>
@@ -1110,8 +1272,8 @@ function SummaryView({
                         disabled={busy || offline}
                         title={
                           offline
-                            ? "Indisponible : agent hors-ligne  -  force sync échouera jusqu’au retour online"
-                            : "Forcer resync policy/pack maintenant"
+                            ? "Offline — force sync unavailable"
+                            : "Force resync policy/pack"
                         }
                         onClick={() =>
                           onForceSyncAgent?.(a.id, a.offline_for_ms)
@@ -1122,9 +1284,9 @@ function SummaryView({
                         type="button"
                         className="btn danger btn-sm"
                         disabled={busy}
-                        title="Révoquer l’enrollment de cet agent"
+                        title={t("dash.revoke")}
                         onClick={() => onRevokeAgent?.(a.id)}>
-                        Révoquer
+                        {t("dash.revoke")}
                       </button>
                     </div>
                   </td>
@@ -1138,105 +1300,151 @@ function SummaryView({
   }
 
   return (
-    <>
+    <div className={dashExpanded ? "dash-fill" : undefined}>
+      {/* Barre compacte en mode étendu ; hero complet sinon */}
+      {dashExpanded ? (
+        <div className="dash-fill-toolbar">
+          <div className="dash-fill-toolbar-title">
+            <strong>{t("dash.status")}</strong>
+            <span className="muted dash-fs-hint">{t("dash.escHint")}</span>
+          </div>
+          <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+            <button
+              className="btn secondary btn-sm"
+              type="button"
+              disabled={busy}
+              onClick={onRefresh}>
+              {t("dash.refresh")}
+            </button>
+            <button
+              className="btn secondary btn-sm"
+              type="button"
+              title={t("dash.escHint")}
+              onClick={() => {
+                setDashExpanded(false)
+                setPanel(null)
+              }}>
+              {t("dash.collapse")}
+            </button>
+            <button
+              className="btn btn-sm"
+              type="button"
+              disabled={busy}
+              onClick={onForceSync}>
+              {t("dash.forceSync")}
+            </button>
+          </div>
+        </div>
+      ) : (
       <div className="hero-card card">
         <div className="hero-copy">
-          <p className="hero-kicker">Tableau de bord</p>
-          <h2>Statut de protection</h2>
+          <p className="hero-kicker">{t("nav.dashboard")}</p>
+          <h2>{t("dash.status")}</h2>
         </div>
-        <div className="row" style={{ gap: 8 }}>
+        <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
           <button
             className="btn secondary"
             type="button"
             disabled={busy}
             onClick={onRefresh}>
-            Actualiser
+            {t("dash.refresh")}
+          </button>
+          <button
+            className="btn secondary"
+            type="button"
+            onClick={() => {
+              setDashExpanded(true)
+              setPanel(null)
+              setDrill(null)
+            }}>
+            {t("dash.expand")}
           </button>
           <button
             className="btn"
             type="button"
             disabled={busy}
             onClick={onForceSync}>
-            Forcer la synchronisation
+            {t("dash.forceSync")}
           </button>
         </div>
       </div>
+      )}
 
-      {/* Panneaux contextuels EN HAUT (pas besoin de scroller en bas) */}
-      <div id="dash-panel">
+      {/* Panneaux contextuels — masqués en mode étendu (graphiques seuls) */}
+      {!dashExpanded && <div id="dash-panel">
       {panel === "online" && (
         <div className="card dash-context-panel">
           <h3 style={{ marginTop: 0 }}>
-            Agents Online{" "}
+            {t("dash.panelOnline")}{" "}
             <button type="button" className="btn secondary btn-sm" onClick={() => setPanel(null)}>
-              Fermer
+              {t("common.close")}
             </button>
           </h3>
-          {renderAgentList(summary.agents_online, "Aucun agent online")}
+          {renderAgentList(summary.agents_online, t("dash.noOnline"))}
         </div>
       )}
       {panel === "stale" && (
         <div className="card dash-context-panel">
           <h3 style={{ marginTop: 0 }}>
-            Agents Stale{" "}
+            {t("dash.panelStale")}{" "}
             <button type="button" className="btn secondary btn-sm" onClick={() => setPanel(null)}>
-              Fermer
+              {t("common.close")}
             </button>
           </h3>
-          {renderAgentList(summary.agents_stale, "Aucun agent stale")}
+          {renderAgentList(summary.agents_stale, t("dash.noStale"))}
         </div>
       )}
       {panel === "licensed" && (
         <div className="card dash-context-panel">
           <h3 style={{ marginTop: 0 }}>
-            Agents Licensed{" "}
+            {t("dash.panelLicensed")}{" "}
             <button type="button" className="btn secondary btn-sm" onClick={() => setPanel(null)}>
-              Fermer
+              {t("common.close")}
             </button>
           </h3>
-          {renderAgentList(summary.agents_licensed, "Aucun agent licensed")}
+          {renderAgentList(summary.agents_licensed, t("dash.noLicensed"))}
         </div>
       )}
       {panel === "unlicensed" && (
         <div className="card dash-context-panel">
           <h3 style={{ marginTop: 0 }}>
-            Agents UNLICENSED{" "}
+            {t("dash.panelUnlicensed")}{" "}
             <button type="button" className="btn secondary btn-sm" onClick={() => setPanel(null)}>
-              Fermer
+              {t("common.close")}
             </button>
           </h3>
-          {renderAgentList(summary.agents_unlicensed, "Aucun agent unlicensed")}
+          {renderAgentList(summary.agents_unlicensed, t("dash.noUnlicensed"))}
         </div>
       )}
       {panel === "grace" && (
         <div className="card dash-context-panel">
           <h3 style={{ marginTop: 0 }}>
-            Agents en grace{" "}
+            {t("dash.panelGrace")}{" "}
             <button type="button" className="btn secondary btn-sm" onClick={() => setPanel(null)}>
-              Fermer
+              {t("common.close")}
             </button>
           </h3>
-          {renderAgentList(summary.agents_grace, "Aucun agent en grace")}
+          {renderAgentList(summary.agents_grace, t("dash.noGrace"))}
         </div>
       )}
       {panel === "offline" && (
         <div className="card dash-context-panel">
           <h3 style={{ marginTop: 0 }}>
-            Not connected long time{" "}
+            {t("dash.panelOffline")}{" "}
             <button type="button" className="btn secondary btn-sm" onClick={() => setPanel(null)}>
-              Fermer
+              {t("common.close")}
             </button>
           </h3>
           {renderAgentList(
             summary.agents_offline_long,
-            "Tous les agents ont synchronisé récemment"
+            t("dash.allSynced")
           )}
         </div>
       )}
       {panel === "decision" && drill && (
         <div className="card dash-context-panel">
           <h3 style={{ fontSize: 14, marginTop: 0 }}>
-            Logs « {decisionLabelFr(drill)} »{" "}
+            {t("dash.logsOf")} « {decisionLabelFr(drill)} »{" "}
             <button
               type="button"
               className="btn secondary btn-sm"
@@ -1244,14 +1452,14 @@ function SummaryView({
                 setPanel(null)
                 setDrill(null)
               }}>
-              Fermer
+              {t("common.close")}
             </button>
           </h3>
           {drillBusy ? (
-            <p className="muted">Chargement…</p>
+            <p className="muted">{t("common.loading")}</p>
           ) : drillEvents.length === 0 ? (
             <div className="empty">
-              Aucun event « {decisionLabelFr(drill)} »
+              {t("dash.noLogOf")} « {decisionLabelFr(drill)} »
             </div>
           ) : (
             <div className="table-wrap">
@@ -1307,9 +1515,9 @@ function SummaryView({
       {panel === "duplicates" && (
         <div className="card dash-context-panel">
           <h3 style={{ marginTop: 0 }}>
-            Doublons{" "}
+            {t("dash.duplicates")}{" "}
             <button type="button" className="btn secondary btn-sm" onClick={() => setPanel(null)}>
-              Fermer
+              {t("common.close")}
             </button>
           </h3>
           {dups.map((d) => (
@@ -1323,7 +1531,7 @@ function SummaryView({
                   className="btn btn-sm"
                   disabled={busy}
                   onClick={() => void mergeDupGroup(d.fingerprint, d.agents)}>
-                  Fusionner (garder le + récent)
+                  {t("dash.mergeKeepRecent")}
                 </button>
               </div>
               {renderAgentList(d.agents, "")}
@@ -1331,17 +1539,18 @@ function SummaryView({
           ))}
         </div>
       )}
-      </div>
+      </div>}
 
-      {/* Charts licences / activité */}
+      {/* Charts licences / activité — toujours visibles ; remplissent l’écran en mode étendu */}
+      <div className={dashExpanded ? "dash-fill-body" : undefined}>
       <div id="dash-charts" />
       <div id="dash-licenses" className="dash-grid">
         <div className="card dash-widget">
           <div className="dash-widget-head">
-            <h2>Licences</h2>
+            <h2>{t("nav.licenses")}</h2>
             <span className="muted" style={{ fontSize: 11 }}>
-              Sièges {lic.seats_used}
-              {lic.seats > 0 ? ` / ${lic.seats}` : " · illimité"}
+              {t("dash.seats")} {lic.seats_used}
+              {lic.seats > 0 ? ` / ${lic.seats}` : ` · ${t("dash.unlimited")}`}
             </span>
           </div>
           <div className="dash-status-row">
@@ -1357,7 +1566,7 @@ function SummaryView({
               }}>
               <div className="dash-donut-inner">
                 <span className="dash-donut-num">{lic.unlicensed}</span>
-                <span className="dash-donut-lbl">unlic.</span>
+                <span className="dash-donut-lbl">{t("dash.unlicShort")}</span>
               </div>
             </div>
             <ul className="dash-status-list">
@@ -1366,7 +1575,7 @@ function SummaryView({
                   type="button"
                   className="dash-link-row"
                   onClick={() => openPanel("licensed")}>
-                  <span className="dash-dot ok" /> Licensed{" "}
+                  <span className="dash-dot ok" /> {t("dash.licensed")}{" "}
                   <strong>{lic.licensed}</strong>
                 </button>
               </li>
@@ -1375,7 +1584,7 @@ function SummaryView({
                   type="button"
                   className="dash-link-row"
                   onClick={() => openPanel("grace")}>
-                  <span className="dash-dot warn" /> Grace{" "}
+                  <span className="dash-dot warn" /> {t("dash.grace")}{" "}
                   <strong>{lic.grace}</strong>
                 </button>
               </li>
@@ -1385,7 +1594,9 @@ function SummaryView({
                   className="dash-link-row crit-text"
                   onClick={() => openPanel("unlicensed")}>
                   <span className="dash-dot crit" />{" "}
-                  <strong>UNLICENSED {lic.unlicensed}</strong>
+                  <strong>
+                    {t("dash.unlicensed")} {lic.unlicensed}
+                  </strong>
                 </button>
               </li>
             </ul>
@@ -1394,9 +1605,10 @@ function SummaryView({
 
         <div className="card dash-widget">
           <div className="dash-widget-head">
-            <h2>Connexion / sync</h2>
+            <h2>{t("nav.connectivity")}</h2>
             <span className="muted" style={{ fontSize: 11 }}>
-              Hors-ligne long &gt; {Math.round(conn.offline_long_ms / 3600000)} h
+              {t("dash.offlineLong")} &gt;{" "}
+              {Math.round(conn.offline_long_ms / 3600000)} h
             </span>
           </div>
           <ul className="dash-status-list">
@@ -1405,8 +1617,10 @@ function SummaryView({
                 type="button"
                 className="dash-link-row"
                 onClick={() => openPanel("online")}>
-                <span className="dash-dot ok" /> Online (&lt;{" "}
-                {Math.round(conn.online_ms / 60000)} min){" "}
+                <span className="dash-dot ok" />{" "}
+                {t("dash.onlineLt", {
+                  n: Math.round(conn.online_ms / 60000)
+                })}{" "}
                 <strong>{conn.online}</strong>
               </button>
             </li>
@@ -1415,7 +1629,7 @@ function SummaryView({
                 type="button"
                 className="dash-link-row"
                 onClick={() => openPanel("stale")}>
-                <span className="dash-dot warn" /> Stale{" "}
+                <span className="dash-dot warn" /> {t("dash.stale")}{" "}
                 <strong>{conn.stale}</strong>
               </button>
             </li>
@@ -1424,7 +1638,7 @@ function SummaryView({
                 type="button"
                 className="dash-link-row crit-text"
                 onClick={() => openPanel("offline")}>
-                <span className="dash-dot crit" /> Not connected long time{" "}
+                <span className="dash-dot crit" /> {t("dash.offlineLongLabel")}{" "}
                 <strong>
                   {conn.schedule_active && !conn.within_work_hours
                     ? conn.offline_long_alertable ?? 0
@@ -1433,37 +1647,37 @@ function SummaryView({
                 {conn.schedule_active && !conn.within_work_hours ? (
                   <span className="muted" style={{ fontSize: 11 }}>
                     {" "}
-                    (hors horaires  -  alertes silencieuses)
+                    {t("dash.offHoursSilent")}
                   </span>
                 ) : null}
               </button>
             </li>
           </ul>
           <p className="muted" style={{ fontSize: 11, marginBottom: 0 }}>
-            Seuil &gt; {Math.round(conn.offline_long_ms / 60000)} min ·{" "}
+            &gt; {Math.round(conn.offline_long_ms / 60000)} min ·{" "}
             {conn.schedule_active
               ? conn.within_work_hours
-                ? "heures de travail actives"
-                : "hors plage horaire (pas d’alerte)"
-              : "schedule off · 24/7"}
-            . Clic pour lister.
+                ? t("dash.workHours")
+                : t("dash.offHours")
+              : t("dash.scheduleOff")}
+            . {t("dash.clickList")}
           </p>
         </div>
 
         <div className="card dash-widget">
           <div className="dash-widget-head">
-            <h2>Statut protection</h2>
+            <h2>{t("dash.protection")}</h2>
           </div>
           <div className="dash-status-row">
             <div className="dash-donut" aria-hidden>
               <div className="dash-donut-inner">
                 <span className="dash-donut-num">{summary.agents}</span>
-                <span className="dash-donut-lbl">agents</span>
+                <span className="dash-donut-lbl">{t("dash.agentsLbl")}</span>
               </div>
             </div>
             <ul className="dash-status-list">
               <li>
-                <span className="dash-dot ok" /> Enrôlés{" "}
+                <span className="dash-dot ok" /> {t("dash.enrolled")}{" "}
                 <strong>{summary.agents}</strong>
               </li>
               <li>
@@ -1471,7 +1685,7 @@ function SummaryView({
                 <strong>{summary.events_total}</strong>
               </li>
               <li>
-                <span className="dash-dot crit" /> Envois risqués{" "}
+                <span className="dash-dot crit" /> {t("dash.riskySends")}{" "}
                 <strong>{riskN}</strong>
               </li>
               <li className="muted" style={{ fontSize: 12 }}>
@@ -1488,17 +1702,17 @@ function SummaryView({
       <div id="dash-activity" className="dash-grid">
         <div className="card dash-widget">
           <div className="dash-widget-head">
-            <h2>Activité des décisions</h2>
+            <h2>{t("dash.activity")}</h2>
             <span className="muted" style={{ fontSize: 11 }}>
-              Clic = détail
+              {t("dash.clickDetail")}
             </span>
           </div>
           <div className="dash-bars">
             {(
               [
-                ["mask_send", "Masquer", maskN, "ok"],
-                ["send_anyway", "Risqué", riskN, "crit"],
-                ["cancel", "Annuler", cancelN, "warn"]
+                ["mask_send", t("dash.mask"), maskN, "ok"],
+                ["send_anyway", t("dash.risky"), riskN, "crit"],
+                ["cancel", t("dash.cancel"), cancelN, "warn"]
               ] as const
             ).map(([k, label, n, tone]) => (
               <button
@@ -1523,9 +1737,9 @@ function SummaryView({
 
         <div className="card dash-widget" style={{ gridColumn: "span 2" }}>
           <div className="dash-widget-head">
-            <h2>Events (14 jours)</h2>
+            <h2>{t("dash.events14")}</h2>
             <span className="muted" style={{ fontSize: 11 }}>
-              Timeline
+              {t("dash.timeline")}
             </span>
           </div>
           <div className="dash-timeline">
@@ -1545,74 +1759,107 @@ function SummaryView({
               </div>
             ))}
             {!(summary.events_by_day || []).length && (
-              <p className="muted">Pas encore de série temporelle</p>
+              <p className="muted">{t("dash.noSeries")}</p>
             )}
           </div>
         </div>
       </div>
 
       <div id="dash-rules" className="dash-grid">
-        <div className="card dash-widget">
-          <div className="dash-widget-head">
-            <h2>Menaces / règles les + fréquentes</h2>
-          </div>
-          {summary.top_rules?.length ? (
-            <ol className="dash-rank">
-              {summary.top_rules.slice(0, 6).map((r, i) => (
-                <li key={r.rule_id}>
-                  <span className="dash-rank-i">{i + 1}.</span>
-                  <span className="mono dash-rank-id" title={r.rule_id}>
-                    {r.rule_id}
-                  </span>
-                  <span className="dash-rank-bar-wrap">
-                    <span
-                      className="dash-rank-bar"
-                      style={{ width: `${(r.count / maxRule) * 100}%` }}
-                    />
-                  </span>
-                  <strong className="dash-rank-n">{r.count}</strong>
-                </li>
+        {/* Mode étendu : Décisions utilisateur à la place des menaces/règles */}
+        {dashExpanded ? (
+          <div className="card dash-widget dash-widget--decisions">
+            <div className="dash-widget-head">
+              <h2>{t("dash.userDecisions")}</h2>
+            </div>
+            <div className="decision-grid decision-grid--compact">
+              {(
+                [
+                  ["mask_send", t("dash.maskSend")],
+                  ["send_anyway", t("dash.sendAnyway")],
+                  ["cancel", t("dash.cancel")],
+                  ["enroll", t("dash.enroll")],
+                  ["unenroll", t("dash.unenroll")]
+                ] as const
+              ).map(([k, label]) => (
+                <button
+                  key={k}
+                  type="button"
+                  className={`decision-btn decision-btn--${k} ${drill === k ? "is-active" : ""}`}
+                  onClick={() => void openDecision(k)}>
+                  <div className="decision-key">{label}</div>
+                  <div className="decision-count">{decisions[k] || 0}</div>
+                  <div className="decision-code mono">{k}</div>
+                </button>
               ))}
-            </ol>
-          ) : (
-            <div className="empty">Aucun event</div>
-          )}
-        </div>
-        {dups.length > 0 && (
+            </div>
+          </div>
+        ) : (
           <div className="card dash-widget">
             <div className="dash-widget-head">
-              <h2>Doublons potentiels</h2>
+              <h2>{t("dash.topThreats")}</h2>
+            </div>
+            {summary.top_rules?.length ? (
+              <ol className="dash-rank">
+                {summary.top_rules.slice(0, 6).map((r, i) => (
+                  <li key={r.rule_id}>
+                    <span className="dash-rank-i">{i + 1}.</span>
+                    <span className="mono dash-rank-id" title={r.rule_id}>
+                      {r.rule_id}
+                    </span>
+                    <span className="dash-rank-bar-wrap">
+                      <span
+                        className="dash-rank-bar"
+                        style={{ width: `${(r.count / maxRule) * 100}%` }}
+                      />
+                    </span>
+                    <strong className="dash-rank-n">{r.count}</strong>
+                  </li>
+                ))}
+              </ol>
+            ) : (
+              <div className="empty">{t("dash.noEvents")}</div>
+            )}
+          </div>
+        )}
+        {dups.length > 0 && !dashExpanded && (
+          <div className="card dash-widget">
+            <div className="dash-widget-head">
+              <h2>{t("dash.duplicates")}</h2>
               <button
                 type="button"
                 className="btn secondary btn-sm"
                 onClick={() => openPanel("duplicates")}>
-                Voir
+                {t("dash.view")}
               </button>
             </div>
             <p className="muted" style={{ fontSize: 12 }}>
-              {dups.length} fingerprint(s) avec plusieurs agents  -  révoquez les
-              entrées obsolètes dans Agents.
+              {dups.length} {t("dash.dupHint")}
             </p>
           </div>
         )}
       </div>
 
+      </div>{/* end dash-fill-body */}
+
+      {/* Décisions utilisateur (vue normale uniquement) */}
+      {!dashExpanded && (
       <div className="card">
-        <h2>Décisions utilisateur</h2>
+        <h2>{t("dash.userDecisions")}</h2>
         <div className="decision-grid">
           {(
             [
-              ["mask_send", "Masquer & envoyer"],
-              ["send_anyway", "Envoyer quand même (Risqué)"],
-              ["cancel", "Annuler"],
-              ["enroll", "Enrôlement"],
-              ["unenroll", "Désinscription"]
+              ["mask_send", t("dash.maskSend")],
+              ["send_anyway", t("dash.sendAnyway")],
+              ["cancel", t("dash.cancel")],
+              ["enroll", t("dash.enroll")],
+              ["unenroll", t("dash.unenroll")]
             ] as const
           ).map(([k, label]) => (
             <button
               key={k}
               type="button"
-              className={`decision-btn ${drill === k ? "is-active" : ""}`}
+              className={`decision-btn decision-btn--${k} ${drill === k ? "is-active" : ""}`}
               onClick={() => void openDecision(k)}>
               <div className="decision-key">{label}</div>
               <div className="decision-count">{decisions[k] || 0}</div>
@@ -1621,21 +1868,41 @@ function SummaryView({
           ))}
         </div>
       </div>
-    </>
+      )}
+    </div>
   )
 }
 
-function MonitoringSettingsView({
+function SystemSettingsView({
   busy,
   setBusy,
   setError,
-  setInfo
+  setInfo,
+  orgCode,
+  orgName,
+  primaryEmail,
+  lang,
+  setLang,
+  t
 }: {
   busy: boolean
   setBusy: (b: boolean) => void
   setError: (e: string | null) => void
   setInfo: (i: string | null) => void
+  orgCode: string
+  orgName: string
+  primaryEmail: string
+  lang: Lang
+  setLang: (l: Lang) => void
+  t: (k: string) => string
 }) {
+  const [settingsTab, setSettingsTab] = useState<
+    "general" | "logs" | "license" | "notifications" | "monitoring" | "reports"
+  >("general")
+  const [addLicOpen, setAddLicOpen] = useState(false)
+  const [licenseKeyInput, setLicenseKeyInput] = useState("")
+  const [licMode, setLicMode] = useState<"trial" | "full">("trial")
+  const [licDaysLeft, setLicDaysLeft] = useState<number | null>(null)
   const [onlineMin, setOnlineMin] = useState(15)
   const [offlineMin, setOfflineMin] = useState(120)
   const [schedOn, setSchedOn] = useState(false)
@@ -1647,6 +1914,35 @@ function MonitoringSettingsView({
   const [days, setDays] = useState<number[]>([1, 2, 3, 4, 5])
   const [retentionDays, setRetentionDays] = useState(90)
   const [weeklyExport, setWeeklyExport] = useState(true)
+  const [logDetection, setLogDetection] = useState(true)
+  const [logLogin, setLogLogin] = useState(true)
+  const [logAudit, setLogAudit] = useState(true)
+  const [logAgentLife, setLogAgentLife] = useState(true)
+  const [notifLicExp, setNotifLicExp] = useState(true)
+  const [notifLicDays, setNotifLicDays] = useState(30)
+  const [notifBrute, setNotifBrute] = useState(true)
+  const [notifBruteThr, setNotifBruteThr] = useState(5)
+  const [licCompany, setLicCompany] = useState("")
+  const [licAddress, setLicAddress] = useState("")
+  const [licEmail, setLicEmail] = useState("")
+  const [licExpires, setLicExpires] = useState("")
+  const [licHash, setLicHash] = useState("")
+  const [reportFormat, setReportFormat] = useState<"csv" | "json">(() => {
+    try {
+      return localStorage.getItem("opsgate_report_format") === "json"
+        ? "json"
+        : "csv"
+    } catch {
+      return "csv"
+    }
+  })
+  const [licStats, setLicStats] = useState<{
+    seats: number
+    seats_used: number
+    seats_available: number | null
+    licensed_agents: number
+    unlicensed_agents: number
+  } | null>(null)
   const [loaded, setLoaded] = useState(false)
 
   useEffect(() => {
@@ -1668,12 +1964,53 @@ function MonitoringSettingsView({
           setBreakStart(br.start)
           setBreakEnd(br.end)
         }
+        const lc = m.logCategories
+        if (lc) {
+          setLogDetection(lc.detectionEvents !== false)
+          setLogLogin(lc.adminLogin !== false)
+          setLogAudit(lc.adminAudit !== false)
+          setLogAgentLife(lc.agentLifecycle !== false)
+        }
+        const n = m.notifications
+        if (n) {
+          setNotifLicExp(n.licenseExpiring !== false)
+          setNotifLicDays(n.licenseExpiringDays ?? 30)
+          setNotifBrute(n.loginBruteForce !== false)
+          setNotifBruteThr(n.loginBruteForceThreshold ?? 5)
+        }
         setLoaded(true)
       } catch (e) {
         setError(String(e))
       }
+      try {
+        const l = await api.licenses()
+        setLicStats({
+          seats: l.seats,
+          seats_used: l.seats_used,
+          seats_available: l.seats_available,
+          licensed_agents: l.licensed_agents,
+          unlicensed_agents: l.unlicensed_agents
+        })
+        if (l.license) {
+          setLicMode(l.license.mode === "full" ? "full" : "trial")
+          setLicHash(l.license.license_key_hash || "")
+          setLicCompany(l.license.company_name || orgName || "")
+          setLicAddress(l.license.address || "")
+          setLicEmail(l.license.contact_email || primaryEmail || "")
+          setLicExpires(
+            l.license.expires_at
+              ? String(l.license.expires_at).slice(0, 10)
+              : ""
+          )
+          setLicDaysLeft(
+            typeof l.license.days_left === "number" ? l.license.days_left : null
+          )
+        }
+      } catch {
+        /* ignore */
+      }
     })()
-  }, [setError])
+  }, [setError, orgName, primaryEmail])
 
   const dayLabels: [number, string][] = [
     [1, "Lun"],
@@ -1685,239 +2022,711 @@ function MonitoringSettingsView({
     [7, "Dim"]
   ]
 
-  if (!loaded) {
-    return <div className="card empty">Chargement des paramètres…</div>
+  const seatRatio =
+    licStats && licStats.seats > 0
+      ? Math.min(1, licStats.seats_used / licStats.seats)
+      : 0
+
+  const saveMonitoring = async () => {
+    setBusy(true)
+    setError(null)
+    try {
+      const daysClamped = Math.min(
+        3650,
+        Math.max(1, Math.floor(retentionDays) || 90)
+      )
+      setRetentionDays(daysClamped)
+      await api.updateMonitoring({
+        onlineMs: onlineMin * 60 * 1000,
+        offlineLongMs: offlineMin * 60 * 1000,
+        logRetentionDays: daysClamped,
+        weeklyExportEnabled: weeklyExport,
+        logCategories: {
+          detectionEvents: logDetection,
+          adminLogin: logLogin,
+          adminAudit: logAudit,
+          agentLifecycle: logAgentLife
+        },
+        notifications: {
+          licenseExpiring: notifLicExp,
+          licenseExpiringDays: notifLicDays,
+          loginBruteForce: notifBrute,
+          loginBruteForceThreshold: notifBruteThr
+        },
+        schedule: {
+          enabled: schedOn,
+          timezone: tz,
+          workDays: days,
+          workStart,
+          workEnd,
+          breaks:
+            schedOn && breakStart && breakEnd
+              ? [{ start: breakStart, end: breakEnd }]
+              : []
+        }
+      })
+      try {
+        localStorage.setItem("opsgate_report_format", reportFormat)
+        setStoredLang(lang)
+      } catch {
+        /* ignore */
+      }
+      setInfo(`${t("settings.saved")} · ${daysClamped} j`)
+    } catch (e) {
+      setError(String(e))
+    } finally {
+      setBusy(false)
+    }
   }
 
+  if (!loaded) {
+    return <div className="card empty">{t("common.loading")}</div>
+  }
+
+  const settingsTabs: Array<
+    | "general"
+    | "logs"
+    | "license"
+    | "notifications"
+    | "monitoring"
+    | "reports"
+  > = [
+    "general",
+    "logs",
+    "license",
+    "notifications",
+    "monitoring",
+    "reports"
+  ]
+
   return (
-    <div className="card">
-      <h2>Monitoring &amp; horaires</h2>
-      <div className="form-stack" style={{ maxWidth: 520 }}>
-        <label className="field-label">Online (minutes)</label>
-        <input
-          className="input"
-          type="number"
-          min={2}
-          value={onlineMin}
-          onChange={(e) => setOnlineMin(Number(e.target.value) || 15)}
-        />
-        <label className="field-label">Not connected long time (minutes)</label>
-        <input
-          className="input"
-          type="number"
-          min={5}
-          value={offlineMin}
-          onChange={(e) => setOfflineMin(Number(e.target.value) || 120)}
-        />
-        <label className="field-label">Rétention logs (jours)</label>
-        <input
-          className="input"
-          type="number"
-          min={7}
-          max={3650}
-          value={retentionDays}
-          onChange={(e) => setRetentionDays(Number(e.target.value) || 90)}
-        />
-        <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <input
-            type="checkbox"
-            checked={weeklyExport}
-            onChange={(e) => setWeeklyExport(e.target.checked)}
-          />
-          Archive auto fin de semaine
-        </label>
-        <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <input
-            type="checkbox"
-            checked={schedOn}
-            onChange={(e) => setSchedOn(e.target.checked)}
-          />
-          Planning heures de travail
-        </label>
-        {schedOn && (
-          <>
-            <label className="field-label">Fuseau horaire</label>
+    <>
+      <div className="card">
+        <h2>{t("settings.title")}</h2>
+        <div className="settings-tabs" role="tablist">
+          {settingsTabs.map((id) => (
+            <button
+              key={id}
+              type="button"
+              role="tab"
+              aria-selected={settingsTab === id}
+              className={`settings-tab ${settingsTab === id ? "active" : ""}`}
+              onClick={() => setSettingsTab(id)}>
+              {t(`settings.tab.${id === "general" ? "general" : id === "logs" ? "logs" : id === "license" ? "license" : id === "notifications" ? "notifications" : id === "monitoring" ? "monitoring" : "reports"}`)}
+            </button>
+          ))}
+        </div>
+
+        {settingsTab === "general" && (
+        <div className="settings-section">
+          <h3>{t("settings.lang")}</h3>
+          <div className="form-stack" style={{ maxWidth: 420 }}>
+            <label className="field-label">{t("settings.lang.ui")}</label>
             <select
               className="input"
-              value={tz}
-              onChange={(e) => setTz(e.target.value)}>
-              {(
-                [
-                  ["Europe/Paris", "GMT+1/+2 · Europe/Paris (France)"],
-                  ["Europe/Brussels", "GMT+1/+2 · Europe/Brussels (Belgique)"],
-                  ["Europe/Zurich", "GMT+1/+2 · Europe/Zurich (Suisse)"],
-                  ["Europe/Berlin", "GMT+1/+2 · Europe/Berlin (Allemagne)"],
-                  ["Europe/Madrid", "GMT+1/+2 · Europe/Madrid (Espagne)"],
-                  ["Europe/London", "GMT+0/+1 · Europe/London (UK)"],
-                  ["Africa/Douala", "GMT+1 · Africa/Douala (Cameroun)"],
-                  ["Africa/Lagos", "GMT+1 · Africa/Lagos (Nigeria / WAT)"],
-                  ["Africa/Casablanca", "GMT+0/+1 · Africa/Casablanca (Maroc)"],
-                  ["Africa/Abidjan", "GMT+0 · Africa/Abidjan (UTC fixe)"],
-                  ["Africa/Nairobi", "GMT+3 · Africa/Nairobi (Kenya / EAT)"],
-                  [
-                    "Africa/Antananarivo",
-                    "GMT+3 · Africa/Antananarivo (Madagascar)"
-                  ],
-                  ["America/New_York", "GMT−5/−4 · America/New_York (US Est)"],
-                  ["America/Chicago", "GMT−6/−5 · America/Chicago (US Centre)"],
-                  [
-                    "America/Los_Angeles",
-                    "GMT−8/−7 · America/Los_Angeles (US Ouest)"
-                  ],
-                  ["America/Toronto", "GMT−5/−4 · America/Toronto (Canada)"],
-                  ["Asia/Dubai", "GMT+4 · Asia/Dubai"],
-                  ["Asia/Tokyo", "GMT+9 · Asia/Tokyo"],
-                  ["UTC", "GMT+0 · UTC"]
-                ] as const
-              ).map(([v, lab]) => (
-                <option key={v} value={v}>
-                  {lab}
-                </option>
-              ))}
+              value={lang}
+              onChange={(e) =>
+                setLang(e.target.value === "en" ? "en" : "fr")
+              }>
+              <option value="fr">Français</option>
+              <option value="en">English</option>
             </select>
-            <label className="field-label">Jours travaillés</label>
-            <div className="row" style={{ flexWrap: "wrap", gap: 8 }}>
-              {dayLabels.map(([d, lab]) => (
-                <label
-                  key={d}
-                  style={{ display: "flex", gap: 4, alignItems: "center" }}>
-                  <input
-                    type="checkbox"
-                    checked={days.includes(d)}
-                    onChange={() =>
-                      setDays((prev) =>
-                        prev.includes(d)
-                          ? prev.filter((x) => x !== d)
-                          : [...prev, d].sort()
-                      )
-                    }
-                  />
-                  {lab}
-                </label>
-              ))}
-            </div>
-            <div className="row">
-              <div>
-                <label className="field-label">Début journée</label>
-                <input
-                  className="input"
-                  type="time"
-                  value={workStart}
-                  onChange={(e) => setWorkStart(e.target.value)}
-                />
-              </div>
-              <div>
-                <label className="field-label">Fin journée</label>
-                <input
-                  className="input"
-                  type="time"
-                  value={workEnd}
-                  onChange={(e) => setWorkEnd(e.target.value)}
-                />
-              </div>
-            </div>
-            <div
-              className="row"
-              style={{
-                alignItems: "flex-end",
-                flexWrap: "wrap",
-                gap: 10,
-                marginTop: 4
-              }}>
-              <div>
-                <label className="field-label">Pause début</label>
-                <input
-                  className="input"
-                  type="time"
-                  value={breakStart}
-                  onChange={(e) => setBreakStart(e.target.value)}
-                />
-              </div>
-              <div>
-                <label className="field-label">Pause fin</label>
-                <input
-                  className="input"
-                  type="time"
-                  value={breakEnd}
-                  onChange={(e) => setBreakEnd(e.target.value)}
-                />
-              </div>
-              <button
-                className="btn"
-                type="button"
-                disabled={busy}
-                style={{ marginBottom: 2 }}
-                onClick={async () => {
-                  setBusy(true)
-                  setError(null)
-                  try {
-                    await api.updateMonitoring({
-                      onlineMs: onlineMin * 60 * 1000,
-                      offlineLongMs: offlineMin * 60 * 1000,
-                      logRetentionDays: retentionDays,
-                      weeklyExportEnabled: weeklyExport,
-                      schedule: {
-                        enabled: schedOn,
-                        timezone: tz,
-                        workDays: days,
-                        workStart,
-                        workEnd,
-                        breaks:
-                          breakStart && breakEnd
-                            ? [{ start: breakStart, end: breakEnd }]
-                            : []
-                      }
-                    })
-                    setInfo(
-                      "Paramètres monitoring enregistrés  -  seuils, rétention logs & planning."
-                    )
-                  } catch (e) {
-                    setError(String(e))
-                  } finally {
-                    setBusy(false)
-                  }
-                }}>
-                Enregistrer
-              </button>
-            </div>
-          </>
+            <p className="muted" style={{ fontSize: 12, margin: 0 }}>
+              {t("settings.lang.hint")}
+            </p>
+          </div>
+        </div>
         )}
-        {!schedOn && (
+
+        {settingsTab === "logs" && (
+        <div className="settings-section">
+          <h3>{t("settings.tab.logs")}</h3>
+          <div className="form-stack" style={{ maxWidth: 520 }}>
+            <label className="field-label">{t("logs.retention")}</label>
+            <input
+              className="input"
+              type="number"
+              min={1}
+              max={3650}
+              value={retentionDays}
+              onChange={(e) =>
+                setRetentionDays(Number(e.target.value) || 90)
+              }
+            />
+            <p className="muted" style={{ fontSize: 12, margin: 0 }}>
+              {t("logs.retentionHint")}
+            </p>
+            <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <input
+                type="checkbox"
+                checked={weeklyExport}
+                onChange={(e) => setWeeklyExport(e.target.checked)}
+              />
+              {t("logs.weekly")}
+            </label>
+            <div className="field-label" style={{ marginTop: 8 }}>
+              {t("logs.types")}
+            </div>
+            <p className="muted" style={{ fontSize: 12, margin: 0 }}>
+              {t("logs.typesHint")}
+            </p>
+            <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <input
+                type="checkbox"
+                checked={logDetection}
+                onChange={(e) => setLogDetection(e.target.checked)}
+              />
+              {t("logs.detection")}
+            </label>
+            <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <input
+                type="checkbox"
+                checked={logLogin}
+                onChange={(e) => setLogLogin(e.target.checked)}
+              />
+              {t("logs.login")}
+            </label>
+            <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <input
+                type="checkbox"
+                checked={logAudit}
+                onChange={(e) => setLogAudit(e.target.checked)}
+              />
+              {t("logs.audit")}
+            </label>
+            <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <input
+                type="checkbox"
+                checked={logAgentLife}
+                onChange={(e) => setLogAgentLife(e.target.checked)}
+              />
+              {t("logs.agents")}
+            </label>
+          </div>
+        </div>
+        )}
+
+        {settingsTab === "notifications" && (
+        <div className="settings-section">
+          <h3>{t("notif.title")}</h3>
+          <div className="form-stack" style={{ maxWidth: 520 }}>
+            <p className="muted" style={{ fontSize: 12, margin: 0 }}>
+              {t("notif.hint")}
+            </p>
+            <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <input
+                type="checkbox"
+                checked={notifLicExp}
+                onChange={(e) => setNotifLicExp(e.target.checked)}
+              />
+              {t("notif.licExp")}
+            </label>
+            {notifLicExp && (
+              <div>
+                <label className="field-label">{t("notif.licDays")}</label>
+                <input
+                  className="input"
+                  type="number"
+                  min={1}
+                  max={365}
+                  value={notifLicDays}
+                  onChange={(e) =>
+                    setNotifLicDays(Number(e.target.value) || 30)
+                  }
+                  style={{ maxWidth: 120 }}
+                />
+              </div>
+            )}
+            <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <input
+                type="checkbox"
+                checked={notifBrute}
+                onChange={(e) => setNotifBrute(e.target.checked)}
+              />
+              {t("notif.brute")}
+            </label>
+            {notifBrute && (
+              <div>
+                <label className="field-label">{t("notif.bruteThr")}</label>
+                <input
+                  className="input"
+                  type="number"
+                  min={3}
+                  max={50}
+                  value={notifBruteThr}
+                  onChange={(e) =>
+                    setNotifBruteThr(Number(e.target.value) || 5)
+                  }
+                  style={{ maxWidth: 120 }}
+                />
+              </div>
+            )}
+          </div>
+        </div>
+        )}
+
+        {settingsTab === "license" && (
+        <div className="settings-section">
+          <h3>{t("settings.tab.license")}</h3>
+          <div className="form-stack" style={{ maxWidth: 520 }}>
+            <div className="row" style={{ gap: 10, flexWrap: "wrap" }}>
+              <span
+                className={`lic-status ${licMode === "full" ? "ok" : "grace"}`}>
+                {licMode === "full" ? t("lic.full") : t("lic.trial")}
+              </span>
+              {licDaysLeft != null && (
+                <span className="muted" style={{ fontSize: 13 }}>
+                  {t("lic.daysLeft")}: <strong>{licDaysLeft}</strong>
+                </span>
+              )}
+            </div>
+            {licMode === "trial" && (
+              <p className="muted" style={{ fontSize: 12, margin: 0 }}>
+                {t("lic.trialHint")}
+              </p>
+            )}
+            <label className="field-label">{t("lic.orgCode")}</label>
+            <input className="input mono" value={orgCode || " - "} readOnly />
+            <label className="field-label">{t("lic.company")}</label>
+            <input className="input" value={licCompany || " - "} readOnly />
+            <label className="field-label">{t("lic.address")}</label>
+            <textarea
+              className="input"
+              rows={2}
+              value={licAddress || " - "}
+              readOnly
+            />
+            <label className="field-label">{t("lic.email")}</label>
+            <input className="input" value={licEmail || " - "} readOnly />
+            <label className="field-label">{t("lic.key")}</label>
+            <input className="input mono" value={licHash || "TRIAL"} readOnly />
+            <label className="field-label">{t("lic.expires")}</label>
+            <input className="input" value={licExpires || " - "} readOnly />
+            <p className="muted" style={{ fontSize: 12, margin: 0 }}>
+              {t("lic.readonlyHint")}
+            </p>
+            <label className="field-label">{t("lic.seats")}</label>
+            <p style={{ margin: 0, fontSize: 14 }}>
+              <strong>
+                {licStats
+                  ? licStats.seats > 0
+                    ? licStats.seats
+                    : licMode === "trial"
+                      ? "Trial"
+                      : " - "
+                  : " - "}
+              </strong>
+            </p>
+            {licStats && licStats.seats > 0 && (
+              <div className="seat-meter" aria-label="seats">
+                <div className="seat-meter-track">
+                  <div
+                    className="seat-meter-fill"
+                    style={{ width: `${Math.round(seatRatio * 100)}%` }}
+                  />
+                  <div
+                    className="seat-meter-marker"
+                    style={{ left: `${Math.round(seatRatio * 100)}%` }}>
+                    <span className="seat-meter-count">
+                      {licStats.seats_used}/{licStats.seats}
+                    </span>
+                  </div>
+                </div>
+                <div className="seat-meter-legend">
+                  <span>0%</span>
+                  <span>100%</span>
+                </div>
+              </div>
+            )}
+            {!addLicOpen ? (
+              <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={() => setAddLicOpen(true)}>
+                  {t("lic.add")}
+                </button>
+                {licMode === "full" && (
+                  <button
+                    type="button"
+                    className="btn danger"
+                    disabled={busy}
+                    onClick={async () => {
+                      if (
+                        !confirm(
+                          "Supprimer la licence full et revenir en essai 30 j ?"
+                        )
+                      )
+                        return
+                      setBusy(true)
+                      try {
+                        await api.revokeLicense()
+                        setLicMode("trial")
+                        setLicCompany("")
+                        setLicAddress("")
+                        setLicEmail("")
+                        setLicHash("TRIAL")
+                        setLicExpires("")
+                        setInfo(t("lic.revoked") || "Licence supprimée")
+                        const l = await api.licenses()
+                        setLicStats({
+                          seats: l.seats,
+                          seats_used: l.seats_used,
+                          seats_available: l.seats_available,
+                          licensed_agents: l.licensed_agents,
+                          unlicensed_agents: l.unlicensed_agents
+                        })
+                        if (l.license) {
+                          setLicDaysLeft(
+                            typeof l.license.days_left === "number"
+                              ? l.license.days_left
+                              : null
+                          )
+                          setLicExpires(
+                            l.license.expires_at
+                              ? String(l.license.expires_at).slice(0, 10)
+                              : ""
+                          )
+                        }
+                      } catch (e) {
+                        setError(String(e))
+                      } finally {
+                        setBusy(false)
+                      }
+                    }}>
+                    {t("lic.revoke") || "Supprimer la licence"}
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div
+                className="form-stack"
+                style={{
+                  padding: 12,
+                  border: "1px solid var(--line)",
+                  borderRadius: 4,
+                  background: "var(--surface-2)"
+                }}>
+                <label className="field-label">{t("lic.add")}</label>
+                <input
+                  className="input mono"
+                  value={licenseKeyInput}
+                  onChange={(e) => setLicenseKeyInput(e.target.value)}
+                  placeholder={t("lic.keyPlaceholder")}
+                />
+                <div className="row" style={{ gap: 8 }}>
+                  <button
+                    type="button"
+                    className="btn"
+                    disabled={busy || !licenseKeyInput.trim()}
+                    onClick={async () => {
+                      setBusy(true)
+                      setError(null)
+                      try {
+                        const r = await api.activateLicense(
+                          licenseKeyInput.trim()
+                        )
+                        setLicMode("full")
+                        setLicCompany(r.license.company_name)
+                        setLicAddress(r.license.address)
+                        setLicEmail(r.license.contact_email)
+                        setLicExpires(
+                          String(r.license.expires_at).slice(0, 10)
+                        )
+                        setLicenseKeyInput("")
+                        setAddLicOpen(false)
+                        const l = await api.licenses()
+                        setLicStats({
+                          seats: l.seats,
+                          seats_used: l.seats_used,
+                          seats_available: l.seats_available,
+                          licensed_agents: l.licensed_agents,
+                          unlicensed_agents: l.unlicensed_agents
+                        })
+                        if (l.license) {
+                          setLicHash(l.license.license_key_hash || "")
+                          setLicDaysLeft(
+                            typeof l.license.days_left === "number"
+                              ? l.license.days_left
+                              : null
+                          )
+                        }
+                        setInfo(t("lic.activated"))
+                      } catch (e) {
+                        setError(String(e))
+                      } finally {
+                        setBusy(false)
+                      }
+                    }}>
+                    {t("lic.activate")}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn secondary"
+                    onClick={() => {
+                      setAddLicOpen(false)
+                      setLicenseKeyInput("")
+                    }}>
+                    {t("lic.cancel")}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+        )}
+
+        {settingsTab === "reports" && (
+        <div className="settings-section">
+          <h3>{t("settings.tab.reports")}</h3>
+          <div className="form-stack" style={{ maxWidth: 420 }}>
+            <label className="field-label">{t("rep.format")}</label>
+            <select
+              className="input"
+              value={reportFormat}
+              onChange={(e) =>
+                setReportFormat(e.target.value === "json" ? "json" : "csv")
+              }>
+              <option value="csv">{t("rep.csv")}</option>
+              <option value="json">{t("rep.json")}</option>
+            </select>
+          </div>
+        </div>
+        )}
+
+        {settingsTab === "monitoring" && (
+        <div className="settings-section">
+          <h3>{t("settings.tab.monitoring")}</h3>
+          <div className="form-stack" style={{ maxWidth: 520 }}>
+            <label className="field-label">{t("mon.online")}</label>
+            <input
+              className="input"
+              type="number"
+              min={2}
+              value={onlineMin}
+              onChange={(e) => setOnlineMin(Number(e.target.value) || 15)}
+            />
+            <label className="field-label">{t("mon.offline")}</label>
+            <input
+              className="input"
+              type="number"
+              min={5}
+              value={offlineMin}
+              onChange={(e) => setOfflineMin(Number(e.target.value) || 120)}
+            />
+            <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <input
+                type="checkbox"
+                checked={schedOn}
+                onChange={(e) => setSchedOn(e.target.checked)}
+              />
+              {t("mon.schedule")}
+            </label>
+            {schedOn && (
+              <>
+                <label className="field-label">Fuseau horaire</label>
+                <select
+                  className="input"
+                  value={tz}
+                  onChange={(e) => setTz(e.target.value)}>
+                  {(
+                    [
+                      ["Europe/Paris", "GMT+1/+2 · Europe/Paris (France)"],
+                      ["Europe/Brussels", "GMT+1/+2 · Europe/Brussels"],
+                      ["Europe/London", "GMT+0/+1 · Europe/London"],
+                      ["Africa/Douala", "GMT+1 · Africa/Douala (Cameroun)"],
+                      ["Africa/Nairobi", "GMT+3 · Africa/Nairobi"],
+                      [
+                        "Africa/Antananarivo",
+                        "GMT+3 · Africa/Antananarivo"
+                      ],
+                      ["America/New_York", "GMT−5/−4 · America/New_York"],
+                      ["UTC", "GMT+0 · UTC"]
+                    ] as const
+                  ).map(([v, lab]) => (
+                    <option key={v} value={v}>
+                      {lab}
+                    </option>
+                  ))}
+                </select>
+                <label className="field-label">Jours travaillés</label>
+                <div className="row" style={{ flexWrap: "wrap", gap: 8 }}>
+                  {dayLabels.map(([d, lab]) => (
+                    <label
+                      key={d}
+                      style={{
+                        display: "flex",
+                        gap: 4,
+                        alignItems: "center"
+                      }}>
+                      <input
+                        type="checkbox"
+                        checked={days.includes(d)}
+                        onChange={() =>
+                          setDays((prev) =>
+                            prev.includes(d)
+                              ? prev.filter((x) => x !== d)
+                              : [...prev, d].sort()
+                          )
+                        }
+                      />
+                      {lab}
+                    </label>
+                  ))}
+                </div>
+                <div className="row">
+                  <div>
+                    <label className="field-label">Début</label>
+                    <input
+                      className="input"
+                      type="time"
+                      value={workStart}
+                      onChange={(e) => setWorkStart(e.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <label className="field-label">Fin</label>
+                    <input
+                      className="input"
+                      type="time"
+                      value={workEnd}
+                      onChange={(e) => setWorkEnd(e.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <label className="field-label">Pause début</label>
+                    <input
+                      className="input"
+                      type="time"
+                      value={breakStart}
+                      onChange={(e) => setBreakStart(e.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <label className="field-label">Pause fin</label>
+                    <input
+                      className="input"
+                      type="time"
+                      value={breakEnd}
+                      onChange={(e) => setBreakEnd(e.target.value)}
+                    />
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+        )}
+
+        {settingsTab !== "license" && (
+        <div className="row" style={{ marginTop: 8 }}>
           <button
             className="btn"
             type="button"
             disabled={busy}
-            onClick={async () => {
-              setBusy(true)
-              setError(null)
-              try {
-                await api.updateMonitoring({
-                  onlineMs: onlineMin * 60 * 1000,
-                  offlineLongMs: offlineMin * 60 * 1000,
-                  logRetentionDays: retentionDays,
-                  weeklyExportEnabled: weeklyExport,
-                  schedule: {
-                    enabled: false,
-                    timezone: tz,
-                    workDays: days,
-                    workStart,
-                    workEnd,
-                    breaks: []
-                  }
-                })
-                setInfo(
-                  "Seuils + rétention logs enregistrés (planning désactivé)."
-                )
-              } catch (e) {
-                setError(String(e))
-              } finally {
-                setBusy(false)
-              }
-            }}>
-            Enregistrer
+            onClick={() => void saveMonitoring()}>
+            {t("settings.save")}
           </button>
+        </div>
         )}
       </div>
+    </>
+  )
+}
+
+function SupportView({ t }: { t: (k: string) => string }) {
+  return (
+    <div className="card help-card">
+      <h2>{t("support.title")}</h2>
+      <p className="muted" style={{ fontSize: 13, maxWidth: 560 }}>
+        {t("support.intro")}
+      </p>
+      <div className="help-grid">
+        <div className="help-tile">
+          <div className="help-tile-kicker">{t("support.contact")}</div>
+          <strong>Email</strong>
+          <p>
+            <a href="mailto:contact@dailyops.tech?subject=%5BOpsGate%5D%20">
+              contact@dailyops.tech
+            </a>
+          </p>
+          <p className="muted" style={{ fontSize: 12 }}>
+            {t("support.response")}
+          </p>
+        </div>
+        <div className="help-tile">
+          <div className="help-tile-kicker">{t("support.ticket")}</div>
+          <strong>{t("support.openTicket")}</strong>
+          <p style={{ fontSize: 13 }}>
+            {t("support.subject")}{" "}
+            <code>[OpsGate] code-org · …</code>
+          </p>
+          <ul className="help-list">
+            <li>{t("support.orgCode")}</li>
+            <li>{t("support.version")}</li>
+            <li>{t("support.desc")}</li>
+          </ul>
+        </div>
+        <div className="help-tile">
+          <div className="help-tile-kicker">{t("support.urgent")}</div>
+          <strong>{t("support.recovery")}</strong>
+          <p style={{ fontSize: 13 }}>{t("support.recoveryHint")}</p>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function HelpView({ t }: { t: (k: string) => string }) {
+  return (
+    <div className="card help-card">
+      <h2>{t("help.title")}</h2>
+      <p className="muted" style={{ fontSize: 13, maxWidth: 560 }}>
+        {t("help.intro")}
+      </p>
+      <div className="help-grid">
+        <div className="help-tile">
+          <div className="help-tile-kicker">{t("help.product")}</div>
+          <strong>DailyOps.Tech</strong>
+          <p>
+            <a href="https://dailyops.tech" target="_blank" rel="noreferrer">
+              dailyops.tech
+            </a>
+          </p>
+          <p className="muted" style={{ fontSize: 12 }}>
+            {t("help.productHint")}
+          </p>
+        </div>
+        <div className="help-tile">
+          <div className="help-tile-kicker">{t("help.docs")}</div>
+          <strong>{t("help.userGuide")}</strong>
+          <p style={{ fontSize: 13 }}>{t("help.userGuideHint")}</p>
+          <p style={{ fontSize: 13, marginTop: 8 }}>{t("help.recoveryHint")}</p>
+        </div>
+        <div className="help-tile">
+          <div className="help-tile-kicker">{t("help.legal")}</div>
+          <strong>{t("help.privacy")}</strong>
+          <p>
+            <a
+              href="https://dailyops.tech/privacy"
+              target="_blank"
+              rel="noreferrer">
+              {t("help.privacyLink")}
+            </a>
+          </p>
+        </div>
+        <div className="help-tile">
+          <div className="help-tile-kicker">{t("help.console")}</div>
+          <strong>{t("help.shortcuts")}</strong>
+          <ul className="help-list">
+            <li>{t("help.shortcutSearch")}</li>
+            <li>{t("help.shortcutTheme")}</li>
+          </ul>
+        </div>
+      </div>
+      <p className="muted" style={{ fontSize: 12, marginTop: 16 }}>
+        OpsGate Console · V1 1.2
+      </p>
     </div>
   )
 }
@@ -1927,13 +2736,15 @@ function LoginScreen({
   setApiBaseState,
   onSaveApi,
   health,
-  onLoggedIn
+  onLoggedIn,
+  t
 }: {
   apiBase: string
   setApiBaseState: (v: string) => void
   onSaveApi: () => void
   health: string
   onLoggedIn: (a: AdminRow) => void
+  t: (k: string, vars?: Record<string, string | number>) => string
 }) {
   const [email, setEmail] = useState("admin@demo.local")
   const [password, setPassword] = useState("0000")
@@ -1954,28 +2765,22 @@ function LoginScreen({
     <div className="login-shell">
       <div className="card login-card">
         <div className="login-brand">
-          <div className="brand-mark" aria-hidden>
-            <img
-              src="/brand/icon-128.png"
-              alt="OpsGate"
-              width={64}
-              height={64}
-            />
-          </div>
+          <BrandMark size={44} />
           <div>
-            <h1>OpsGate</h1>
-            <p>Console</p>
+            <h1>{t("login.title")}</h1>
+            <p>{t("login.subtitle")}</p>
           </div>
         </div>
         <p className="login-health muted">
           <span
-            className={`status-dot ${health.startsWith("API OK") ? "" : "off"}`}
-          />
-          {health.startsWith("API OK") ? "API connectée" : health}
+            className={`api-status ${health.startsWith("API OK") ? "ok" : "bad"}`}>
+            API
+          </span>
+          {health.startsWith("API OK") ? t("login.apiOk") : health}
         </p>
         {advanced && (
           <>
-            <label className="field-label">URL API</label>
+            <label className="field-label">{t("login.apiUrl")}</label>
             <div className="row">
               <input
                 className="input"
@@ -1991,7 +2796,7 @@ function LoginScreen({
             </div>
           </>
         )}
-        <label className="field-label">Email</label>
+        <label className="field-label">{t("login.email")}</label>
         <input
           className="input"
           style={{ width: "100%", minWidth: 0 }}
@@ -1999,7 +2804,7 @@ function LoginScreen({
           onChange={(e) => setEmail(e.target.value)}
           autoComplete="username"
         />
-        <label className="field-label">Mot de passe</label>
+        <label className="field-label">{t("login.password")}</label>
         <input
           className="input"
           style={{ width: "100%", minWidth: 0 }}
@@ -2011,7 +2816,7 @@ function LoginScreen({
         <button
           className="btn"
           type="button"
-          style={{ marginTop: 16, width: "100%" }}
+          style={{ marginTop: 12, width: "100%" }}
           disabled={busy}
           onClick={async () => {
             setBusy(true)
@@ -2023,12 +2828,36 @@ function LoginScreen({
               setToken(r.token)
               onLoggedIn(r.admin)
             } catch (e) {
+              const err = e as Error & {
+                code?: string
+                remaining_attempts?: number
+              }
               const msg = String(e)
-              if (msg.includes("session_already_active")) {
+              if (
+                err.code === "session_already_active" ||
+                msg.includes("session_already_active")
+              ) {
                 setCanForce(true)
+                setErr(t("login.sessionActive"))
+              } else if (
+                err.code === "account_locked" ||
+                msg.toLowerCase().includes("account_locked") ||
+                msg.toLowerCase().includes("verrouillé") ||
+                msg.toLowerCase().includes("locked")
+              ) {
+                setErr(t("login.locked"))
+              } else if (typeof err.remaining_attempts === "number") {
                 setErr(
-                  "Session déjà active. Utilisez « Forcer la déconnexion »."
+                  `${t("login.invalid")}. ${t("login.attemptsLeft", {
+                    n: err.remaining_attempts
+                  })}`
                 )
+              } else if (
+                err.code === "invalid_credentials" ||
+                /invalid|invalide|identifiant/i.test(msg)
+              ) {
+                // Fallback si remaining_attempts absent
+                setErr(msg.startsWith("Invalid") ? msg : `${t("login.invalid")}. ${msg}`)
               } else {
                 setErr(msg)
               }
@@ -2036,13 +2865,13 @@ function LoginScreen({
               setBusy(false)
             }
           }}>
-          Se connecter
+          {t("login.submit")}
         </button>
         <button
           type="button"
           className="login-advanced-toggle"
           onClick={() => setAdvanced((v) => !v)}>
-          {advanced ? "Masquer les options avancées" : "Options avancées"}
+          {advanced ? t("login.advancedHide") : t("login.advanced")}
         </button>
         <p className="login-footer-meta">OpsGate · V1</p>
         {canForce && (
@@ -2059,7 +2888,7 @@ function LoginScreen({
                 const r = await api.login(email, password, true)
                 setToken(r.token)
                 setCanForce(false)
-                setInfo(r.hint || "Session précédente révoquée.")
+                setInfo(r.hint || t("login.force"))
                 onLoggedIn(r.admin)
               } catch (e) {
                 setErr(String(e))
@@ -2227,7 +3056,8 @@ function PolicyView({
   onReload,
   setBusy,
   setError,
-  setInfo
+  setInfo,
+  t
 }: {
   policy: PolicyDoc | null
   profiles: ProfileRow[]
@@ -2237,6 +3067,7 @@ function PolicyView({
   setBusy: (b: boolean) => void
   setError: (e: string | null) => void
   setInfo: (i: string | null) => void
+  t: (k: string, vars?: Record<string, string | number>) => string
 }) {
   const [hosts, setHosts] = useState("")
   const [scanUploads, setScanUploads] = useState(true)
@@ -2250,12 +3081,16 @@ function PolicyView({
   const [msgBlockBody, setMsgBlockBody] = useState("")
   const [msgForceTitle, setMsgForceTitle] = useState("")
   const [msgForceBody, setMsgForceBody] = useState("")
+  const [msgAlertTitleFile, setMsgAlertTitleFile] = useState("")
+  const [msgAlertBodyFile, setMsgAlertBodyFile] = useState("")
   const [showMsgEditor, setShowMsgEditor] = useState(false)
   const [showSchedule, setShowSchedule] = useState(false)
   const [schedEnabled, setSchedEnabled] = useState(false)
   const [schedTz, setSchedTz] = useState("Europe/Paris")
   const [schedStart, setSchedStart] = useState("08:00")
   const [schedEnd, setSchedEnd] = useState("17:00")
+  /** Policy org par défaut : repliée, Modifier pour éditer */
+  const [editDefaultOpen, setEditDefaultOpen] = useState(false)
 
   // New profile form
   const [profName, setProfName] = useState("")
@@ -2266,6 +3101,8 @@ function PolicyView({
   const [profEvents, setProfEvents] = useState(true)
   const [profProtect, setProfProtect] = useState(false)
   const [profAction, setProfAction] = useState("mask_recommend")
+  const [profEnabled, setProfEnabled] = useState(true)
+  const [profPriority, setProfPriority] = useState(100)
   const [profGroups, setProfGroups] = useState<string[]>([])
   const [profMsgNotice, setProfMsgNotice] = useState("")
   const [profMsgAlertTitle, setProfMsgAlertTitle] = useState("")
@@ -2277,7 +3114,23 @@ function PolicyView({
   const [profMsgAlertTitleFile, setProfMsgAlertTitleFile] = useState("")
   const [profMsgAlertBodyFile, setProfMsgAlertBodyFile] = useState("")
   const [showProfMsgs, setShowProfMsgs] = useState(false)
+  const [showProfSchedule, setShowProfSchedule] = useState(false)
+  const [profSchedEnabled, setProfSchedEnabled] = useState(false)
+  const [profSchedTz, setProfSchedTz] = useState("Europe/Paris")
+  const [profSchedStart, setProfSchedStart] = useState("08:00")
+  const [profSchedEnd, setProfSchedEnd] = useState("17:00")
   const [editId, setEditId] = useState<string | null>(null)
+
+  // Hooks TOUJOURS avant tout return conditionnel (sinon page Policy blanche)
+  const sortedProfiles = useMemo(
+    () =>
+      [...(profiles || [])].sort(
+        (a, b) =>
+          (a.priority ?? 100) - (b.priority ?? 100) ||
+          (a.name || "").localeCompare(b.name || "")
+      ),
+    [profiles]
+  )
 
   useEffect(() => {
     if (!policy) return
@@ -2294,6 +3147,8 @@ function PolicyView({
     setMsgBlockBody(um.blockBody || "")
     setMsgForceTitle(um.maskForceTitle || "")
     setMsgForceBody(um.maskForceBody || "")
+    setMsgAlertTitleFile(um.alertTitleFile || "")
+    setMsgAlertBodyFile(um.alertBodyFile || "")
     const ws = policy.workSchedule
     setSchedEnabled(!!ws?.enabled)
     setSchedTz(ws?.timezone || "Europe/Paris")
@@ -2301,20 +3156,8 @@ function PolicyView({
     setSchedEnd(ws?.workEnd || "17:00")
   }, [policy])
 
-  if (!policy) {
-    return (
-      <div className="card empty">
-        Policy introuvable. API demarree ?
-        <div style={{ marginTop: 12 }}>
-          <button className="btn secondary" type="button" onClick={onReload}>
-            Retry
-          </button>
-        </div>
-      </div>
-    )
-  }
-
   const saveDefault = async () => {
+    if (!policy) return
     setBusy(true)
     setError(null)
     setInfo(null)
@@ -2327,6 +3170,10 @@ function PolicyView({
       if (msgBlockBody.trim()) user_messages.blockBody = msgBlockBody.trim()
       if (msgForceTitle.trim()) user_messages.maskForceTitle = msgForceTitle.trim()
       if (msgForceBody.trim()) user_messages.maskForceBody = msgForceBody.trim()
+      if (msgAlertTitleFile.trim())
+        user_messages.alertTitleFile = msgAlertTitleFile.trim()
+      if (msgAlertBodyFile.trim())
+        user_messages.alertBodyFile = msgAlertBodyFile.trim()
       await api.updatePolicy({
         enabled_hosts: hosts
           .split("\n")
@@ -2346,9 +3193,8 @@ function PolicyView({
           breaks: []
         }
       })
-      setInfo(
-        "Policy enregistree. Agents sous ~2 min (ou Force sync)."
-      )
+      setInfo(t("policy.saved"))
+      setEditDefaultOpen(false)
       onReload()
     } catch (e) {
       setError(String(e))
@@ -2360,125 +3206,46 @@ function PolicyView({
   const toggleId = (list: string[], id: string) =>
     list.includes(id) ? list.filter((x) => x !== id) : [...list, id]
 
+  if (!policy) {
+    return (
+      <div className="card empty">
+        {t("policy.missing")}
+        <div style={{ marginTop: 12 }}>
+          <button className="btn secondary" type="button" onClick={onReload}>
+            {t("common.retry")}
+          </button>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <>
-      {/* 1. Profils département d’abord */}
-      <div className="card">
-        <h2>Policies par département</h2>
-        {profiles.length === 0 ? (
-          <div className="empty">Aucun profil</div>
-        ) : (
-          <div className="table-wrap">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Nom</th>
-                  <th>Dépt</th>
-                  <th>Action</th>
-                  <th>Hosts</th>
-                  <th>Upload</th>
-                  <th>Exit mdp</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                {profiles.map((p) => (
-                  <tr key={p.id}>
-                    <td>
-                      <strong>{p.name}</strong>
-                    </td>
-                    <td>{p.department || " - "}</td>
-                    <td className="mono" style={{ fontSize: 11 }}>
-                      {p.defaultAction}
-                    </td>
-                    <td>
-                      <span className="host-count-pill">
-                        {(p.enabledHosts || []).length} sites
-                      </span>
-                    </td>
-                    <td>{p.scanUploads ? "oui" : "non"}</td>
-                    <td>{p.protectUnenroll ? "🔒" : "libre"}</td>
-                    <td>
-                      <button
-                        className="btn secondary btn-sm"
-                        type="button"
-                        disabled={busy}
-                        onClick={() => {
-                          setEditId(p.id)
-                          setProfName(p.name)
-                          setProfDept(p.department || "")
-                          setProfHosts((p.enabledHosts || []).join("\n"))
-                          setProfScan(!!p.scanUploads)
-                          setProfEvents(!!p.eventReporting)
-                          setProfProtect(!!p.protectUnenroll)
-                          setProfAction(p.defaultAction || "mask_recommend")
-                          setProfGroups([...(p.assignedGroupIds || [])])
-                          setProfMsgNotice(p.userMessages?.adminNotice || "")
-                          setProfMsgAlertTitle(p.userMessages?.alertTitle || "")
-                          setProfMsgAlertBody(p.userMessages?.alertBody || "")
-                          setProfMsgBlockTitle(p.userMessages?.blockTitle || "")
-                          setProfMsgBlockBody(p.userMessages?.blockBody || "")
-                          setProfMsgForceTitle(
-                            p.userMessages?.maskForceTitle || ""
-                          )
-                          setProfMsgForceBody(
-                            p.userMessages?.maskForceBody || ""
-                          )
-                          setProfMsgAlertTitleFile(
-                            p.userMessages?.alertTitleFile || ""
-                          )
-                          setProfMsgAlertBodyFile(
-                            p.userMessages?.alertBodyFile || ""
-                          )
-                          setShowProfMsgs(true)
-                          setTimeout(() => {
-                            document
-                              .getElementById("policy-profile-form")
-                              ?.scrollIntoView({
-                                behavior: "smooth",
-                                block: "start"
-                              })
-                          }, 50)
-                        }}>
-                        Modifier
-                      </button>{" "}
-                      <button
-                        className="btn danger btn-sm"
-                        type="button"
-                        disabled={busy}
-                        onClick={async () => {
-                          if (!confirm(`Supprimer le profil ${p.name} ?`)) return
-                          setBusy(true)
-                          try {
-                            await api.deleteProfile(p.id)
-                            setInfo(`Profil ${p.name} supprimé`)
-                            onReload()
-                          } catch (e) {
-                            setError(String(e))
-                          } finally {
-                            setBusy(false)
-                          }
-                        }}>
-                        Suppr.
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+      {/* Policy org par défaut : ligne distincte */}
+      <div className="card policy-default-card">
+        <div className="policy-default-row">
+          <div>
+            <span className="policy-default-badge">{t("policy.defaultBadge")}</span>
+            <strong style={{ marginLeft: 8 }}>{t("policy.defaultTitle")}</strong>
+            <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+              v{policy.version} · epoch {policy.configEpoch ?? " - "} ·{" "}
+              {policy.defaultAction} · {(policy.enabledHosts || []).length}{" "}
+              sites · pack {policy.rulesPackVersion}
+            </div>
           </div>
-        )}
-      </div>
-
-      {/* 2. Policy org par défaut */}
-      <div className="card">
-        <h2>Policy org par défaut</h2>
-        <p className="muted" style={{ fontSize: 12 }}>
-          v{policy.version} · epoch {policy.configEpoch ?? " - "} · pack{" "}
-          {policy.rulesPackVersion}
-        </p>
-
-        <label className="field-label">Sites IA</label>
+          <button
+            type="button"
+            className="btn secondary btn-sm"
+            onClick={() => setEditDefaultOpen((v) => !v)}>
+            {editDefaultOpen ? t("common.hide") : t("common.edit")}
+          </button>
+        </div>
+        {editDefaultOpen && (
+          <div className="policy-default-editor">
+            <h3 style={{ fontSize: "0.95rem", marginTop: 0 }}>
+              {t("policy.editDefault")}
+            </h3>
+        <label className="field-label">{t("policy.aiSites")}</label>
         <HostPicker
           value={hosts
             .split("\n")
@@ -2494,7 +3261,7 @@ function PolicyView({
               checked={scanUploads}
               onChange={(e) => setScanUploads(e.target.checked)}
             />
-            Scanner / autoriser uploads
+            {t("policy.scanUploads")}
           </label>
           <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
             <input
@@ -2502,7 +3269,7 @@ function PolicyView({
               checked={eventReporting}
               onChange={(e) => setEventReporting(e.target.checked)}
             />
-            Collecte d’events (télémétrie)
+            {t("policy.eventReporting")}
           </label>
           <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
             <input
@@ -2510,99 +3277,104 @@ function PolicyView({
               checked={protectUnenroll}
               onChange={(e) => setProtectUnenroll(e.target.checked)}
             />
-            Protéger désenrôlement par mdp admin
+            {t("policy.protectUnenroll")}
           </label>
         </div>
-        <label className="field-label" style={{ marginTop: 12 }}>
-          Action par défaut
-        </label>
-        <select
-          className="input"
-          value={defaultAction}
-          onChange={(e) => setDefaultAction(e.target.value)}>
-          <option value="warn">warn</option>
-          <option value="mask_recommend">mask_recommend</option>
-          <option value="mask_force">mask_force</option>
-          <option value="block">block</option>
-        </select>
+        <p className="muted" style={{ fontSize: 12, marginTop: 6 }}>
+          {t("policy.scanHint")}
+        </p>
+        <div className="policy-block">
+          <label className="field-label">{t("policy.defaultAction")}</label>
+          <select
+            className="input"
+            value={defaultAction}
+            onChange={(e) => setDefaultAction(e.target.value)}>
+            <option value="warn">warn</option>
+            <option value="mask_recommend">mask_recommend</option>
+            <option value="mask_force">mask_force</option>
+            <option value="block">block</option>
+          </select>
+        </div>
 
-        <button
-          type="button"
-          className="btn secondary btn-sm"
-          style={{ marginTop: 10 }}
-          onClick={() => setShowSchedule((v) => !v)}>
-          {showSchedule ? "Masquer horaires" : "Horaires (optionnel)"}
-        </button>
-        {showSchedule && (
-          <div
-            className="form-stack"
-            style={{
-              marginTop: 10,
-              maxWidth: 480,
-              padding: 12,
-              background: "var(--surface-2)",
-              borderRadius: 10,
-              border: "1px solid var(--line)"
-            }}>
-            <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              <input
-                type="checkbox"
-                checked={schedEnabled}
-                onChange={(e) => setSchedEnabled(e.target.checked)}
-              />
-              Activer pour cette policy (sinon planning Monitoring org)
-            </label>
-            <label className="field-label">Fuseau</label>
-            <select
-              className="input"
-              value={schedTz}
-              onChange={(e) => setSchedTz(e.target.value)}>
-              <option value="Europe/Paris">Europe/Paris</option>
-              <option value="Africa/Douala">Africa/Douala</option>
-              <option value="Africa/Nairobi">Africa/Nairobi</option>
-              <option value="Africa/Antananarivo">Africa/Antananarivo</option>
-              <option value="UTC">UTC</option>
-            </select>
-            <div className="row">
-              <div>
-                <label className="field-label">Debut</label>
+        <div className="policy-block">
+          <button
+            type="button"
+            className="btn secondary btn-sm"
+            onClick={() => setShowSchedule((v) => !v)}>
+            {showSchedule ? "Masquer horaires" : "Horaires (optionnel)"}
+          </button>
+          {showSchedule && (
+            <div
+              className="form-stack"
+              style={{
+                marginTop: 12,
+                maxWidth: 480,
+                padding: 12,
+                background: "var(--surface-2)",
+                borderRadius: 4,
+                border: "1px solid var(--line)"
+              }}>
+              <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
                 <input
-                  className="input"
-                  type="time"
-                  value={schedStart}
-                  onChange={(e) => setSchedStart(e.target.value)}
+                  type="checkbox"
+                  checked={schedEnabled}
+                  onChange={(e) => setSchedEnabled(e.target.checked)}
                 />
-              </div>
-              <div>
-                <label className="field-label">Fin</label>
-                <input
-                  className="input"
-                  type="time"
-                  value={schedEnd}
-                  onChange={(e) => setSchedEnd(e.target.value)}
-                />
+                Activer pour cette policy (sinon planning Monitoring org)
+              </label>
+              <label className="field-label">Fuseau</label>
+              <select
+                className="input"
+                value={schedTz}
+                onChange={(e) => setSchedTz(e.target.value)}>
+                <option value="Europe/Paris">Europe/Paris</option>
+                <option value="Africa/Douala">Africa/Douala</option>
+                <option value="Africa/Nairobi">Africa/Nairobi</option>
+                <option value="Africa/Antananarivo">Africa/Antananarivo</option>
+                <option value="UTC">UTC</option>
+              </select>
+              <div className="row">
+                <div>
+                  <label className="field-label">Debut</label>
+                  <input
+                    className="input"
+                    type="time"
+                    value={schedStart}
+                    onChange={(e) => setSchedStart(e.target.value)}
+                  />
+                </div>
+                <div>
+                  <label className="field-label">Fin</label>
+                  <input
+                    className="input"
+                    type="time"
+                    value={schedEnd}
+                    onChange={(e) => setSchedEnd(e.target.value)}
+                  />
+                </div>
               </div>
             </div>
-          </div>
-        )}
-        <button
-          type="button"
-          className="btn secondary btn-sm"
-          style={{ marginTop: 10 }}
-          onClick={() => setShowMsgEditor((v) => !v)}>
-          {showMsgEditor ? "Masquer messages" : "Messages utilisateur"}
-        </button>
-        {showMsgEditor && (
-          <div
-            className="form-stack"
-            style={{
-              marginTop: 12,
-              maxWidth: 640,
-              padding: 14,
-              background: "var(--surface-2)",
-              borderRadius: 10,
-              border: "1px solid var(--line)"
-            }}>
+          )}
+        </div>
+
+        <div className="policy-block">
+          <button
+            type="button"
+            className="btn secondary btn-sm"
+            onClick={() => setShowMsgEditor((v) => !v)}>
+            {showMsgEditor ? "Masquer messages" : "Messages utilisateur"}
+          </button>
+          {showMsgEditor && (
+            <div
+              className="form-stack"
+              style={{
+                marginTop: 12,
+                maxWidth: 640,
+                padding: 14,
+                background: "var(--surface-2)",
+                borderRadius: 4,
+                border: "1px solid var(--line)"
+              }}>
             <label className="field-label">Notice admin</label>
             <textarea
               className="input"
@@ -2652,16 +3424,33 @@ function PolicyView({
               value={msgForceBody}
               onChange={(e) => setMsgForceBody(e.target.value)}
             />
-          </div>
-        )}
+            <label className="field-label">
+              Fichier joint  -  titre (si analyse fichiers active)
+            </label>
+            <input
+              className="input"
+              value={msgAlertTitleFile}
+              onChange={(e) => setMsgAlertTitleFile(e.target.value)}
+              placeholder="Fichier retenu - données sensibles"
+            />
+            <label className="field-label">Fichier joint  -  corps</label>
+            <textarea
+              className="input"
+              rows={2}
+              value={msgAlertBodyFile}
+              onChange={(e) => setMsgAlertBodyFile(e.target.value)}
+            />
+            </div>
+          )}
+        </div>
 
-        <div className="row" style={{ marginTop: 14 }}>
+        <div className="row" style={{ marginTop: 18 }}>
           <button
             className="btn"
             type="button"
             disabled={busy}
             onClick={() => void saveDefault()}>
-            Enregistrer la policy
+            {t("policy.save")}
           </button>
           <button
             className="btn secondary"
@@ -2681,29 +3470,194 @@ function PolicyView({
                 setBusy(false)
               }
             }}>
-            Forcer sync agents
+            {t("policy.forceSync")}
           </button>
-        </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Policies par département (priorité type firewall) */}
+      <div className="card">
+        <h2>{t("policy.profilesTitle")}</h2>
+        <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>
+          {t("policy.profilesHint")}
+        </p>
+        {sortedProfiles.length === 0 ? (
+          <div className="empty">{t("policy.noProfiles")}</div>
+        ) : (
+          <div className="table-wrap">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>{t("policy.prio")}</th>
+                  <th>{t("policy.state")}</th>
+                  <th>{t("policy.name")}</th>
+                  <th>{t("policy.dept")}</th>
+                  <th>{t("policy.action")}</th>
+                  <th>{t("policy.hosts")}</th>
+                  <th>{t("policy.upload")}</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {sortedProfiles.map((p) => (
+                  <tr
+                    key={p.id}
+                    className={p.enabled === false ? "row-disabled" : undefined}>
+                    <td className="mono">{p.priority ?? 100}</td>
+                    <td>
+                      <span
+                        className={`lic-status ${
+                          p.enabled === false ? "grace" : "ok"
+                        }`}>
+                        {p.enabled === false ? "off" : "on"}
+                      </span>
+                    </td>
+                    <td>
+                      <strong>{p.name}</strong>
+                    </td>
+                    <td>{p.department || " - "}</td>
+                    <td className="mono" style={{ fontSize: 11 }}>
+                      {p.defaultAction}
+                    </td>
+                    <td>
+                      <span className="host-count-pill">
+                        {(p.enabledHosts || []).length} {t("policy.sites")}
+                      </span>
+                    </td>
+                    <td>{p.scanUploads ? t("common.yes") : t("common.no")}</td>
+                    <td>
+                      <button
+                        className="btn secondary btn-sm"
+                        type="button"
+                        disabled={busy}
+                        onClick={async () => {
+                          setBusy(true)
+                          try {
+                            await api.updateProfile(p.id, {
+                              enabled: p.enabled === false
+                            })
+                            setInfo(
+                              p.enabled === false
+                                ? t("policy.profileEnabled", { name: p.name })
+                                : t("policy.profileDisabled", { name: p.name })
+                            )
+                            onReload()
+                          } catch (e) {
+                            setError(String(e))
+                          } finally {
+                            setBusy(false)
+                          }
+                        }}>
+                        {p.enabled === false
+                          ? t("common.enable")
+                          : t("common.disable")}
+                      </button>{" "}
+                      <button
+                        className="btn secondary btn-sm"
+                        type="button"
+                        disabled={busy}
+                        onClick={() => {
+                          setEditId(p.id)
+                          setProfName(p.name)
+                          setProfDept(p.department || "")
+                          setProfHosts((p.enabledHosts || []).join("\n"))
+                          setProfScan(!!p.scanUploads)
+                          setProfEvents(!!p.eventReporting)
+                          setProfProtect(!!p.protectUnenroll)
+                          setProfAction(p.defaultAction || "mask_recommend")
+                          setProfEnabled(p.enabled !== false)
+                          setProfPriority(p.priority ?? 100)
+                          setProfGroups([...(p.assignedGroupIds || [])])
+                          setProfMsgNotice(p.userMessages?.adminNotice || "")
+                          setProfMsgAlertTitle(p.userMessages?.alertTitle || "")
+                          setProfMsgAlertBody(p.userMessages?.alertBody || "")
+                          setProfMsgBlockTitle(p.userMessages?.blockTitle || "")
+                          setProfMsgBlockBody(p.userMessages?.blockBody || "")
+                          setProfMsgForceTitle(
+                            p.userMessages?.maskForceTitle || ""
+                          )
+                          setProfMsgForceBody(
+                            p.userMessages?.maskForceBody || ""
+                          )
+                          setProfMsgAlertTitleFile(
+                            p.userMessages?.alertTitleFile || ""
+                          )
+                          setProfMsgAlertBodyFile(
+                            p.userMessages?.alertBodyFile || ""
+                          )
+                          const pws = p.workSchedule
+                          setProfSchedEnabled(!!pws?.enabled)
+                          setProfSchedTz(pws?.timezone || "Europe/Paris")
+                          setProfSchedStart(pws?.workStart || "08:00")
+                          setProfSchedEnd(pws?.workEnd || "17:00")
+                          setShowProfSchedule(!!pws?.enabled)
+                          setShowProfMsgs(true)
+                          setTimeout(() => {
+                            document
+                              .getElementById("policy-profile-form")
+                              ?.scrollIntoView({
+                                behavior: "smooth",
+                                block: "start"
+                              })
+                          }, 50)
+                        }}>
+                        {t("common.edit")}
+                      </button>{" "}
+                      <button
+                        className="btn danger btn-sm"
+                        type="button"
+                        disabled={busy}
+                        onClick={async () => {
+                          if (
+                            !confirm(
+                              t("policy.deleteConfirm", { name: p.name })
+                            )
+                          )
+                            return
+                          setBusy(true)
+                          try {
+                            await api.deleteProfile(p.id)
+                            setInfo(
+                              t("policy.profileDeleted", { name: p.name })
+                            )
+                            onReload()
+                          } catch (e) {
+                            setError(String(e))
+                          } finally {
+                            setBusy(false)
+                          }
+                        }}>
+                        {t("common.delete")}
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       {/* 3. Créer / modifier profil */}
       <div className="card" id="policy-profile-form">
-        <h2>{editId ? "Modifier le profil" : "Nouveau profil"}</h2>
+        <h2>{editId ? t("policy.editProfile") : t("policy.newProfile")}</h2>
         <div className="row" style={{ marginBottom: 8 }}>
           <input
             className="input"
-            placeholder="Nom"
+            placeholder={t("common.name")}
             value={profName}
             onChange={(e) => setProfName(e.target.value)}
           />
           <input
             className="input"
-            placeholder="Département"
+            placeholder={t("policy.department")}
             value={profDept}
             onChange={(e) => setProfDept(e.target.value)}
           />
         </div>
-        <div className="field-label">Sites IA</div>
+        <div className="field-label">{t("policy.aiSitesShort")}</div>
         <HostPicker
           value={profHosts
             .split("\n")
@@ -2718,7 +3672,7 @@ function PolicyView({
               checked={profScan}
               onChange={(e) => setProfScan(e.target.checked)}
             />
-            Uploads
+            {t("policy.scanFiles")}
           </label>
           <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
             <input
@@ -2726,7 +3680,7 @@ function PolicyView({
               checked={profEvents}
               onChange={(e) => setProfEvents(e.target.checked)}
             />
-            Events
+            {t("policy.events")}
           </label>
           <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
             <input
@@ -2734,7 +3688,7 @@ function PolicyView({
               checked={profProtect}
               onChange={(e) => setProfProtect(e.target.checked)}
             />
-            Protéger désenrôlement (mdp)
+            {t("policy.protectPwd")}
           </label>
           <select
             className="input"
@@ -2745,27 +3699,112 @@ function PolicyView({
             <option value="mask_force">mask_force</option>
             <option value="block">block</option>
           </select>
+          <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
+            Priorité
+            <input
+              className="input"
+              type="number"
+              min={1}
+              max={9999}
+              value={profPriority}
+              onChange={(e) =>
+                setProfPriority(Number(e.target.value) || 100)
+              }
+              style={{ width: 80 }}
+              title="Plus petit = plus prioritaire"
+            />
+          </label>
+          <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
+            <input
+              type="checkbox"
+              checked={profEnabled}
+              onChange={(e) => setProfEnabled(e.target.checked)}
+            />
+            Profil actif
+          </label>
         </div>
-        <button
-          type="button"
-          className="btn secondary btn-sm"
-          style={{ marginTop: 10 }}
-          onClick={() => setShowProfMsgs((v) => !v)}>
-          {showProfMsgs
-            ? "Masquer messages banner (profil)"
-            : "Messages banner (override policy org)"}
-        </button>
-        {showProfMsgs && (
-          <div
-            className="form-stack"
-            style={{
-              marginTop: 10,
-              maxWidth: 560,
-              padding: 12,
-              background: "var(--surface-2)",
-              borderRadius: 8,
-              border: "1px solid var(--line)"
-            }}>
+        <div className="policy-block">
+          <button
+            type="button"
+            className="btn secondary btn-sm"
+            onClick={() => setShowProfSchedule((v) => !v)}>
+            {showProfSchedule
+              ? "Masquer horaires (profil)"
+              : "Horaires (optionnel, profil)"}
+          </button>
+          {showProfSchedule && (
+            <div
+              className="form-stack"
+              style={{
+                marginTop: 12,
+                maxWidth: 480,
+                padding: 12,
+                background: "var(--surface-2)",
+                borderRadius: 4,
+                border: "1px solid var(--line)"
+              }}>
+              <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <input
+                  type="checkbox"
+                  checked={profSchedEnabled}
+                  onChange={(e) => setProfSchedEnabled(e.target.checked)}
+                />
+                Activer pour ce profil (sinon policy org / monitoring)
+              </label>
+              <label className="field-label">Fuseau</label>
+              <select
+                className="input"
+                value={profSchedTz}
+                onChange={(e) => setProfSchedTz(e.target.value)}>
+                <option value="Europe/Paris">Europe/Paris</option>
+                <option value="Africa/Douala">Africa/Douala</option>
+                <option value="Africa/Nairobi">Africa/Nairobi</option>
+                <option value="Africa/Antananarivo">Africa/Antananarivo</option>
+                <option value="UTC">UTC</option>
+              </select>
+              <div className="row">
+                <div>
+                  <label className="field-label">Debut</label>
+                  <input
+                    className="input"
+                    type="time"
+                    value={profSchedStart}
+                    onChange={(e) => setProfSchedStart(e.target.value)}
+                  />
+                </div>
+                <div>
+                  <label className="field-label">Fin</label>
+                  <input
+                    className="input"
+                    type="time"
+                    value={profSchedEnd}
+                    onChange={(e) => setProfSchedEnd(e.target.value)}
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+        <div className="policy-block">
+          <button
+            type="button"
+            className="btn secondary btn-sm"
+            onClick={() => setShowProfMsgs((v) => !v)}>
+            {showProfMsgs
+              ? "Masquer messages banner (profil)"
+              : "Messages banner (override policy org)"}
+          </button>
+          {showProfMsgs && (
+            <div
+              className="form-stack"
+              style={{
+                marginTop: 12,
+                maxWidth: 560,
+                padding: 12,
+                background: "var(--surface-2)",
+                borderRadius: 4,
+                border: "1px solid var(--line)"
+              }}>
             <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>
               Même jeu de champs que la policy org. Les valeurs non vides
               remplacent celles de la policy par défaut pour ce profil.
@@ -2816,22 +3855,25 @@ function PolicyView({
               value={profMsgForceBody}
               onChange={(e) => setProfMsgForceBody(e.target.value)}
             />
-            <label className="field-label">Fichier  -  titre</label>
+            <label className="field-label">
+              Fichier joint  -  titre (override, analyse fichiers)
+            </label>
             <input
               className="input"
               value={profMsgAlertTitleFile}
               onChange={(e) => setProfMsgAlertTitleFile(e.target.value)}
             />
-            <label className="field-label">Fichier  -  corps</label>
+            <label className="field-label">Fichier joint  -  corps</label>
             <textarea
               className="input"
               rows={2}
               value={profMsgAlertBodyFile}
               onChange={(e) => setProfMsgAlertBodyFile(e.target.value)}
             />
-          </div>
-        )}
-        <div style={{ marginTop: 10 }}>
+            </div>
+          )}
+        </div>
+        <div style={{ marginTop: 14 }}>
           <div className="field-label">Groupes soumis à cette policy</div>
           <div className="row" style={{ flexWrap: "wrap", gap: 8 }}>
             {groups.map((g) => (
@@ -2894,8 +3936,18 @@ function PolicyView({
                   event_reporting: profEvents,
                   protect_unenroll: profProtect,
                   default_action: profAction,
+                  enabled: profEnabled,
+                  priority: profPriority,
                   assigned_group_ids: profGroups,
-                  user_messages
+                  user_messages,
+                  work_schedule: {
+                    enabled: profSchedEnabled,
+                    timezone: profSchedTz,
+                    workDays: [1, 2, 3, 4, 5],
+                    workStart: profSchedStart,
+                    workEnd: profSchedEnd,
+                    breaks: []
+                  }
                 }
                 if (editId) {
                   await api.updateProfile(editId, body)
@@ -2916,6 +3968,8 @@ function PolicyView({
                 setProfMsgAlertTitleFile("")
                 setProfMsgAlertBodyFile("")
                 setShowProfMsgs(false)
+                setShowProfSchedule(false)
+                setProfSchedEnabled(false)
                 setEditId(null)
                 onReload()
               } catch (e) {
@@ -3076,7 +4130,8 @@ function PeopleView({
   onReload,
   setBusy,
   setError,
-  setInfo
+  setInfo,
+  t
 }: {
   sessionAdmin: AdminRow
   admins: AdminRow[]
@@ -3088,10 +4143,12 @@ function PeopleView({
   setBusy: (b: boolean) => void
   setError: (e: string | null) => void
   setInfo: (i: string | null) => void
+  t: (k: string, vars?: Record<string, string | number>) => string
 }) {
   const [admLabel, setAdmLabel] = useState("Operator")
   const [admEmail, setAdmEmail] = useState("")
   const [admPwd, setAdmPwd] = useState("")
+  const [admAsPrincipal, setAdmAsPrincipal] = useState(false)
   const [admPerms, setAdmPerms] = useState<AdminPermission[]>([
     "console_access",
     "unenroll_agents"
@@ -3155,34 +4212,46 @@ function PeopleView({
   return (
     <>
       <div className="card">
-        <h2>Administrators</h2>
+        <h2>{t("people.admins")}</h2>
         <div className="table-wrap"><table className="table">
           <thead>
             <tr>
-              <th>Label</th>
-              <th>Email</th>
-              <th>Rôles</th>
+              <th>{t("people.label")}</th>
+              <th>{t("people.email")}</th>
+              <th>{t("people.roles")}</th>
               <th></th>
             </tr>
           </thead>
           <tbody>
             {admins.map((a) => (
-              <tr key={a.id}>
+              <tr key={a.id} className={a.locked ? "row-disabled" : undefined}>
                 <td>
                   <strong>{a.label}</strong>
                   {a.is_principal ? " · Principal" : ""}
+                  {a.locked ? (
+                    <span className="lic-status bad" style={{ marginLeft: 8 }}>
+                      {t("people.locked")}
+                    </span>
+                  ) : null}
                 </td>
                 <td className="muted">{a.email}</td>
                 <td className="cell-wide muted" style={{ fontSize: 12 }}>
-                  {(a.permissions || []).join(", ")}
+                  {a.is_principal
+                    ? t("people.fullAccess")
+                    : (a.permissions || []).join(", ")}
+                  {a.failed_login_count
+                    ? ` · ${t("people.failures")} ${a.failed_login_count}`
+                    : ""}
                 </td>
                 <td className="cell-actions">
                   <div className="btn-group">
-                    {sessionAdmin.id === a.id && (
+                    {/* Modifier : soi-même ou principal sur tout admin */}
+                    {(sessionAdmin.id === a.id || isPrincipal) && (
                       <button
                         className="btn secondary btn-sm"
                         type="button"
                         disabled={busy}
+                        title={t("common.edit")}
                         onClick={() => {
                           setEditId(a.id)
                           setEditEmail(a.email)
@@ -3190,23 +4259,18 @@ function PeopleView({
                           setEditPwd("")
                           setEditPwd2("")
                         }}>
-                        Modifier
+                        {t("common.edit")}
                       </button>
                     )}
-                    {!a.is_principal && (
+                    {sessionAdmin.id !== a.id && isPrincipal && (
                       <button
                         className="btn secondary btn-sm"
                         type="button"
-                        disabled={busy || !isPrincipal}
-                        title={
-                          isPrincipal
-                            ? "Définir un mot de passe temporaire  -  l’admin devra le changer"
-                            : "Réservé à l’Administrator principal"
-                        }
+                        disabled={busy}
+                        title={t("people.newPwd")}
                         onClick={() => {
-                          if (!isPrincipal) return
                           const pwd = prompt(
-                            `Mot de passe temporaire pour ${a.label} (≥6) :`
+                            `${t("people.newPwdPrompt")} ${a.label} (≥6) :`
                           )
                           if (!pwd || pwd.length < 6) return
                           setBusy(true)
@@ -3214,27 +4278,27 @@ function PeopleView({
                             .resetSecondaryPassword(a.id, pwd)
                             .then(() => {
                               setInfo(
-                                `Mot de passe temporaire défini pour ${a.label}`
+                                `${t("people.newPwdSet")} ${a.label}`
                               )
                               onReload()
                             })
                             .catch((e) => setError(String(e)))
                             .finally(() => setBusy(false))
                         }}>
-                        Nouveau mdp
+                        {t("people.newPwd")}
                       </button>
                     )}
-                    {!a.is_principal && isPrincipal && (
+                    {a.locked && isPrincipal && (
                       <button
-                        className="btn danger btn-sm"
+                        className="btn secondary btn-sm"
                         type="button"
                         disabled={busy}
+                        title={t("people.unlock")}
                         onClick={async () => {
-                          if (!confirm(`Supprimer ${a.label} ?`)) return
                           setBusy(true)
                           try {
-                            await api.deleteAdmin(a.id)
-                            setInfo(`${a.label} supprimé`)
+                            await api.unlockAdmin(a.id)
+                            setInfo(`${t("people.unlocked")} ${a.label}`)
                             onReload()
                           } catch (e) {
                             setError(String(e))
@@ -3242,7 +4306,29 @@ function PeopleView({
                             setBusy(false)
                           }
                         }}>
-                        Suppr.
+                        {t("people.unlock")}
+                      </button>
+                    )}
+                    {sessionAdmin.id !== a.id && isPrincipal && (
+                      <button
+                        className="btn danger btn-sm"
+                        type="button"
+                        disabled={busy}
+                        onClick={async () => {
+                          if (!confirm(`${t("common.delete")} ${a.label} ?`))
+                            return
+                          setBusy(true)
+                          try {
+                            await api.deleteAdmin(a.id)
+                            setInfo(`${a.label} ${t("people.deleted")}`)
+                            onReload()
+                          } catch (e) {
+                            setError(String(e))
+                          } finally {
+                            setBusy(false)
+                          }
+                        }}>
+                        {t("common.delete")}
                       </button>
                     )}
                   </div>
@@ -3253,62 +4339,94 @@ function PeopleView({
         </table></div>
         {editId && (
           <div className="card" style={{ marginTop: 12, background: "#f6f7f9" }}>
-            <h3>Modifier mon compte</h3>
-            <label className="field-label">Email</label>
+            <h3>
+              {t("people.editAccount")}
+              {editId !== sessionAdmin.id
+                ? ` · ${admins.find((x) => x.id === editId)?.label || ""}`
+                : ""}
+            </h3>
+            <label className="field-label">{t("people.email")}</label>
             <input
               className="input"
               value={editEmail}
               onChange={(e) => setEditEmail(e.target.value)}
             />
-            <label className="field-label">Mot de passe actuel</label>
-            <input
-              className="input"
-              type="password"
-              value={editCur}
-              onChange={(e) => setEditCur(e.target.value)}
-            />
-            <label className="field-label">Nouveau mdp (optionnel)</label>
-            <input
-              className="input"
-              type="password"
-              value={editPwd}
-              onChange={(e) => setEditPwd(e.target.value)}
-            />
-            <label className="field-label">Confirmer nouveau mdp</label>
-            <input
-              className="input"
-              type="password"
-              value={editPwd2}
-              onChange={(e) => setEditPwd2(e.target.value)}
-            />
+            {editId === sessionAdmin.id ? (
+              <>
+                <label className="field-label">{t("people.currentPwd")}</label>
+                <input
+                  className="input"
+                  type="password"
+                  value={editCur}
+                  onChange={(e) => setEditCur(e.target.value)}
+                />
+                <label className="field-label">{t("people.newPwdOptional")}</label>
+                <input
+                  className="input"
+                  type="password"
+                  value={editPwd}
+                  onChange={(e) => setEditPwd(e.target.value)}
+                />
+                <label className="field-label">{t("people.confirmPwd")}</label>
+                <input
+                  className="input"
+                  type="password"
+                  value={editPwd2}
+                  onChange={(e) => setEditPwd2(e.target.value)}
+                />
+              </>
+            ) : (
+              <>
+                <label className="field-label">{t("people.newPwdOptional")}</label>
+                <input
+                  className="input"
+                  type="password"
+                  value={editPwd}
+                  onChange={(e) => setEditPwd(e.target.value)}
+                  placeholder="≥6"
+                />
+              </>
+            )}
             <div className="row" style={{ marginTop: 10 }}>
               <button
                 className="btn"
                 type="button"
                 disabled={
                   busy ||
-                  !editCur ||
+                  (editId === sessionAdmin.id && !editCur) ||
                   (editPwd.length > 0 &&
-                    (editPwd.length < 6 || editPwd !== editPwd2))
+                    (editPwd.length < 6 ||
+                      (editId === sessionAdmin.id && editPwd !== editPwd2)))
                 }
                 onClick={async () => {
                   setBusy(true)
                   try {
-                    if (editPwd) {
-                      await api.changePassword(
-                        editCur,
-                        editPwd,
-                        editPwd2,
-                        editEmail
-                      )
+                    if (editId === sessionAdmin.id) {
+                      if (editPwd) {
+                        await api.changePassword(
+                          editCur,
+                          editPwd,
+                          editPwd2,
+                          editEmail
+                        )
+                      } else {
+                        await api.updateAdminSelf(editId, {
+                          email: editEmail,
+                          current_password: editCur
+                        })
+                      }
                     } else {
-                      await api.updateAdminSelf(editId, {
+                      // Principal modifie un autre admin
+                      await api.updateAdmin(editId, {
                         email: editEmail,
-                        current_password: editCur
+                        ...(editPwd.length >= 6 ? { password: editPwd } : {})
                       })
                     }
-                    setInfo("Compte mis à jour")
+                    setInfo(t("people.accountUpdated"))
                     setEditId(null)
+                    setEditPwd("")
+                    setEditPwd2("")
+                    setEditCur("")
                     onReload()
                   } catch (e) {
                     setError(String(e))
@@ -3316,53 +4434,79 @@ function PeopleView({
                     setBusy(false)
                   }
                 }}>
-                Enregistrer
+                {t("common.save")}
               </button>
               <button
                 className="btn secondary"
                 type="button"
-                onClick={() => setEditId(null)}>
-                Annuler
+                onClick={() => {
+                  setEditId(null)
+                  setEditPwd("")
+                  setEditPwd2("")
+                  setEditCur("")
+                }}>
+                {t("common.cancel")}
               </button>
             </div>
           </div>
         )}
-        <h3 style={{ fontSize: 14 }}>Nouvel admin (secondaire)</h3>
+        <h3 style={{ fontSize: 14 }}>{t("people.newAdmin")}</h3>
         <div className="row" style={{ marginTop: 8, flexWrap: "wrap" }}>
           <input
             className="input"
             value={admLabel}
             onChange={(e) => setAdmLabel(e.target.value)}
-            placeholder="Label"
+            placeholder={t("people.label")}
           />
           <input
             className="input"
             value={admEmail}
             onChange={(e) => setAdmEmail(e.target.value)}
-            placeholder="email (reset mdp)"
+            placeholder="email"
           />
           <input
             className="input"
             type="password"
             value={admPwd}
             onChange={(e) => setAdmPwd(e.target.value)}
-            placeholder="Mdp ≥6"
+            placeholder={t("people.pwdMin")}
           />
         </div>
-        <div className="row" style={{ marginTop: 8, flexWrap: "wrap", gap: 8 }}>
-          {ALL_PERMS.map((p) => (
-            <label
-              key={p}
-              style={{ display: "flex", gap: 4, alignItems: "center" }}>
-              <input
-                type="checkbox"
-                checked={admPerms.includes(p)}
-                onChange={() => togglePerm(p)}
-              />
-              {p}
-            </label>
-          ))}
-        </div>
+        {isPrincipal && (
+          <label
+            style={{
+              display: "flex",
+              gap: 8,
+              alignItems: "center",
+              marginTop: 10
+            }}>
+            <input
+              type="checkbox"
+              checked={admAsPrincipal}
+              onChange={(e) => {
+                setAdmAsPrincipal(e.target.checked)
+                if (e.target.checked) setAdmPerms([...ALL_PERMS])
+              }}
+            />
+            {t("people.asPrincipal")}
+          </label>
+        )}
+        {!admAsPrincipal && (
+          <div className="row" style={{ marginTop: 8, flexWrap: "wrap", gap: 8 }}>
+            {ALL_PERMS.map((p) => (
+              <label
+                key={p}
+                style={{ display: "flex", gap: 4, alignItems: "center" }}>
+                <input
+                  type="checkbox"
+                  checked={admPerms.includes(p)}
+                  onChange={() => togglePerm(p)}
+                />
+                {p}
+              </label>
+            ))}
+          </div>
+        )}
         <button
           className="btn"
           type="button"
@@ -3377,11 +4521,15 @@ function PeopleView({
                 label: admLabel.trim(),
                 email: admEmail.trim(),
                 password: admPwd,
-                permissions: admPerms
+                permissions: admAsPrincipal ? ALL_PERMS : admPerms,
+                is_principal: admAsPrincipal
               })
-              setInfo(`Admin ${admLabel} créé`)
+              setInfo(
+                `${t("people.adminCreated")} ${admLabel}${admAsPrincipal ? " (Principal)" : ""}`
+              )
               setAdmPwd("")
               setAdmEmail("")
+              setAdmAsPrincipal(false)
               onReload()
             } catch (e) {
               const msg = String(e)
@@ -3389,9 +4537,7 @@ function PeopleView({
                 msg.toLowerCase().includes("déjà inscrit") ||
                 msg.includes("email_already_registered")
               ) {
-                setError(
-                  "E-mail déjà inscrit  -  un administrateur utilise déjà cette adresse."
-                )
+                setError(t("people.emailTaken"))
               } else {
                 setError(msg)
               }
@@ -3399,21 +4545,21 @@ function PeopleView({
               setBusy(false)
             }
           }}>
-          Ajouter admin
+          {t("people.addAdmin")}
         </button>
       </div>
 
       <div className="card">
-        <h2>Groupes d’utilisateurs</h2>
+        <h2>{t("people.groups")}</h2>
         {groups.length === 0 ? (
-          <div className="empty">Aucun groupe</div>
+          <div className="empty">{t("people.noGroups")}</div>
         ) : (
           <div className="table-wrap"><table className="table">
             <thead>
               <tr>
-                <th>Nom</th>
-                <th>Description</th>
-                <th>Policy profil</th>
+                <th>{t("common.name")}</th>
+                <th>{t("common.description")}</th>
+                <th>{t("people.policyProfile")}</th>
                 <th></th>
               </tr>
             </thead>
@@ -3445,14 +4591,14 @@ function PeopleView({
                           setGrpProfile(g.policyProfileId || "")
                           setShowGrpForm(true)
                         }}>
-                        Modifier
+                        {t("common.edit")}
                       </button>
                       <button
                         className="btn danger btn-sm"
                         type="button"
                         disabled={busy}
                         onClick={async () => {
-                          if (!confirm(`Supprimer groupe ${g.name}?`)) return
+                          if (!confirm(`${t("common.delete")} ${g.name}?`)) return
                           setBusy(true)
                           try {
                             await api.deleteGroup(g.id)
@@ -3463,7 +4609,7 @@ function PeopleView({
                             setBusy(false)
                           }
                         }}>
-                        Suppr.
+                        {t("common.delete")}
                       </button>
                     </div>
                   </td>
@@ -3484,7 +4630,7 @@ function PeopleView({
               setGrpDesc("")
               setGrpProfile("")
             }}>
-            + Créer un groupe
+            {t("people.createGroup")}
           </button>
         ) : (
           <div className="form-stack" style={{ maxWidth: 520, marginTop: 12 }}>
@@ -3492,7 +4638,7 @@ function PeopleView({
               className="row"
               style={{ justifyContent: "space-between", alignItems: "center" }}>
               <strong style={{ fontSize: 14 }}>
-                {grpEditId ? "Modifier le groupe" : "Nouveau groupe"}
+                {grpEditId ? t("people.editGroup") : t("people.newGroup")}
               </strong>
               <button
                 className="btn secondary btn-sm"
@@ -3504,29 +4650,29 @@ function PeopleView({
                   setGrpDesc("")
                   setGrpProfile("")
                 }}>
-                Fermer
+                {t("common.close")}
               </button>
             </div>
-            <label className="field-label">Nom</label>
+            <label className="field-label">{t("common.name")}</label>
             <input
               className="input"
               value={grpName}
               onChange={(e) => setGrpName(e.target.value)}
               placeholder="Finance"
             />
-            <label className="field-label">Description</label>
+            <label className="field-label">{t("common.description")}</label>
             <input
               className="input"
               value={grpDesc}
               onChange={(e) => setGrpDesc(e.target.value)}
-              placeholder="Équipe finance  -  policy stricte"
+              placeholder="…"
             />
-            <label className="field-label">Profil policy lié</label>
+            <label className="field-label">{t("people.policyProfile")}</label>
             <select
               className="input"
               value={grpProfile}
               onChange={(e) => setGrpProfile(e.target.value)}>
-              <option value="">(pas de policy  -  policy org par défaut)</option>
+              <option value="">—</option>
               {profiles.map((p) => (
                 <option key={p.id} value={p.id}>
                   {p.name}
@@ -3547,14 +4693,14 @@ function PeopleView({
                         description: grpDesc || undefined,
                         policy_profile_id: grpProfile || null
                       })
-                      setInfo("Groupe mis à jour")
+                      setInfo(t("people.groupUpdated"))
                     } else {
                       await api.createGroup({
                         name: grpName.trim(),
                         description: grpDesc || undefined,
                         policy_profile_id: grpProfile || null
                       })
-                      setInfo("Groupe créé")
+                      setInfo(t("people.groupCreated"))
                     }
                     setGrpName("")
                     setGrpDesc("")
@@ -3824,12 +4970,19 @@ function PeopleView({
                 type="button"
                 disabled={busy || rcActive === 0}
                 onClick={async () => {
-                  if (!confirm("Invalider tous les codes actifs ?")) return
+                  if (
+                    !confirm(
+                      "Invalider le pool ? TOUS les codes (actifs et utilisés) seront EFFACÉS définitivement."
+                    )
+                  )
+                    return
                   setBusy(true)
                   try {
                     const r = await api.revokeRecoveryPool()
                     setRcPlain(null)
-                    setInfo(`Pool invalidé · ${r.revoked} code(s)`)
+                    setInfo(
+                      `Pool purgé · ${r.revoked} code(s) effacé(s)`
+                    )
                     await loadRecoveryPool()
                     try {
                       await api.forceSync()
@@ -3855,27 +5008,37 @@ function PeopleView({
                 className="btn secondary"
                 type="button"
                 disabled={busy}
-                title="Ancien secret unique OPSGATE_VENDOR_RECOVERY (transition)"
+                title="Secours transition uniquement - mode principal: codes one-time"
                 onClick={async () => {
                   setBusy(true)
                   try {
                     const r = await api.recoveryInfo()
                     setRecoveryHint(r.recovery_password_hint)
+                    setInfo(
+                      "Secret env encore accepté en secours (transition). Mode principal: codes one-time."
+                    )
                   } catch (e) {
                     setError(String(e))
                   } finally {
                     setBusy(false)
                   }
                 }}>
-                Secret d'urgence (env)
+                Secret env (secours)
               </button>
               <button
                 type="button"
                 className="btn secondary"
                 onClick={() => setRcShowUsed((v) => !v)}>
-                {rcShowUsed ? "Masquer utilises" : "Afficher utilises"}
+                {rcShowUsed ? "Masquer utilisés" : "Afficher utilisés"}
               </button>
             </div>
+            <p className="muted" style={{ fontSize: 12, marginTop: 10 }}>
+              Mode principal: codes one-time. Invalider le pool{" "}
+              <strong>efface tous les codes</strong> de ce pool (actifs et
+              déjà utilisés). Le secret env{" "}
+              <code>OPSGATE_VENDOR_RECOVERY</code> reste techniquement accepté
+              en secours offline si le pool est vide (déprécié, retrait V2).
+            </p>
             {rcPlain && rcPlain.length > 0 && (
               <div
                 className="recovery-codes-once"
@@ -3883,8 +5046,11 @@ function PeopleView({
                   marginTop: 12,
                   padding: 12,
                   background: "var(--surface-2)",
-                  borderRadius: 10,
-                  border: "1px solid var(--accent)"
+                  borderRadius: 2,
+                  borderLeft: "3px solid var(--warn)",
+                  borderTop: "1px solid var(--line)",
+                  borderRight: "1px solid var(--line)",
+                  borderBottom: "1px solid var(--line)"
                 }}>
                 <strong style={{ fontSize: 13 }}>
                   Affichage unique  -  stockez hors ligne
@@ -3944,11 +5110,14 @@ function PeopleView({
             )}
             {recoveryHint && (
               <p className="muted" style={{ marginTop: 10, fontSize: 12 }}>
-                Secret d'urgence (env) : <code>{recoveryHint}</code>
-                {" "}(fallback si pool vide; a remplace a terme par les codes one-time)
+                Secret env (secours) : <code>{recoveryHint}</code>
+                {" · "}encore utilisable en transition; production = codes
+                one-time uniquement.
               </p>
             )}
-            {rcRows.filter((c) => rcShowUsed || c.active).length > 0 && (
+            {rcRows.filter((c) =>
+              c.active ? true : rcShowUsed && !!c.consumed_at
+            ).length > 0 && (
               <div className="table-wrap" style={{ marginTop: 12 }}>
                 <table className="table">
                   <thead>
@@ -3961,14 +5130,16 @@ function PeopleView({
                   </thead>
                   <tbody>
                     {rcRows
-                      .filter((c) => rcShowUsed || c.active)
+                      .filter((c) =>
+                        c.active ? true : rcShowUsed && !!c.consumed_at
+                      )
                       .slice(0, 40)
                       .map((c) => (
                       <tr key={c.id}>
                         <td>
                           <span
-                            className={`badge ${c.active ? "active" : "medium"}`}>
-                            {c.active ? "actif" : "utilise"}
+                            className={`lic-status ${c.active ? "ok" : "grace"}`}>
+                            {c.active ? "actif" : "utilisé"}
                           </span>
                         </td>
                         <td className="muted">{c.label || " - "}</td>
@@ -4033,10 +5204,21 @@ function AgentsView({
   const [selected, setSelected] = useState<string[]>([])
   const [bulkGroup, setBulkGroup] = useState("")
   const [bulkProfile, setBulkProfile] = useState("")
+  const [pageSize, setPageSize] = useState(50)
+  const [page, setPage] = useState(1)
 
   useEffect(() => {
     void api.licenses().then(setStats).catch(() => setStats(null))
   }, [agents])
+
+  useEffect(() => {
+    setPage(1)
+  }, [agents.length, pageSize])
+
+  const pagedAgents = useMemo(() => {
+    const start = (page - 1) * pageSize
+    return agents.slice(start, start + pageSize)
+  }, [agents, page, pageSize])
 
   const toggleSel = (id: string) =>
     setSelected((prev) =>
@@ -4175,6 +5357,14 @@ function AgentsView({
         {agents.length === 0 ? (
           <div className="empty">Aucun agent</div>
         ) : (
+          <>
+          <PagerBar
+            page={page}
+            pageSize={pageSize}
+            total={agents.length}
+            onPage={setPage}
+            onPageSize={setPageSize}
+          />
           <div className="table-wrap"><table className="table">
             <thead>
               <tr>
@@ -4201,7 +5391,7 @@ function AgentsView({
               </tr>
             </thead>
             <tbody>
-              {agents.map((a) => (
+              {pagedAgents.map((a) => (
                 <tr key={a.id}>
                   <td>
                     <input
@@ -4219,15 +5409,11 @@ function AgentsView({
                   <td>
                     {a.license_status === "unlicensed" ||
                     a.licensed === false ? (
-                      <span style={{ color: "#dc2626", fontWeight: 700 }}>
-                        UNLICENSED
-                      </span>
+                      <span className="lic-status bad">UNLICENSED</span>
                     ) : a.license_status === "grace" ? (
-                      <span style={{ color: "#b45309", fontWeight: 650 }}>
-                        grace
-                      </span>
+                      <span className="lic-status grace">grace</span>
                     ) : (
-                      <span className="badge active">licensed</span>
+                      <span className="lic-status ok">licensed</span>
                     )}
                   </td>
                   <td className="muted" style={{ fontSize: 12 }}>
@@ -4336,6 +5522,14 @@ function AgentsView({
               ))}
             </tbody>
           </table></div>
+          <PagerBar
+            page={page}
+            pageSize={pageSize}
+            total={agents.length}
+            onPage={setPage}
+            onPageSize={setPageSize}
+          />
+          </>
         )}
       </div>
     </>
@@ -4369,14 +5563,90 @@ function downloadTextFile(filename: string, content: string, mime: string) {
   URL.revokeObjectURL(url)
 }
 
+function PageSizeSelect({
+  value,
+  onChange
+}: {
+  value: number
+  onChange: (n: number) => void
+}) {
+  return (
+    <label className="row" style={{ gap: 6, alignItems: "center" }}>
+      <span>Lignes</span>
+      <select
+        className="input"
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value) || 50)}>
+        <option value={10}>10</option>
+        <option value={50}>50</option>
+        <option value={100}>100</option>
+      </select>
+    </label>
+  )
+}
+
+function PagerBar({
+  page,
+  pageSize,
+  total,
+  onPage,
+  onPageSize
+}: {
+  page: number
+  pageSize: number
+  total: number
+  onPage: (p: number) => void
+  onPageSize: (n: number) => void
+}) {
+  const pages = Math.max(1, Math.ceil(total / pageSize))
+  const safe = Math.min(Math.max(1, page), pages)
+  const from = total === 0 ? 0 : (safe - 1) * pageSize + 1
+  const to = Math.min(total, safe * pageSize)
+  return (
+    <div className="pager-bar">
+      <span>
+        {total === 0 ? "0 entrée" : `${from}–${to} / ${total}`}
+      </span>
+      <div className="row">
+        <PageSizeSelect
+          value={pageSize}
+          onChange={(n) => {
+            onPageSize(n)
+            onPage(1)
+          }}
+        />
+        <button
+          type="button"
+          className="btn secondary btn-sm"
+          disabled={safe <= 1}
+          onClick={() => onPage(safe - 1)}>
+          Préc.
+        </button>
+        <span>
+          {safe}/{pages}
+        </span>
+        <button
+          type="button"
+          className="btn secondary btn-sm"
+          disabled={safe >= pages}
+          onClick={() => onPage(safe + 1)}>
+          Suiv.
+        </button>
+      </div>
+    </div>
+  )
+}
+
 function EventsView({
   events,
   setError,
-  setInfo
+  setInfo,
+  t
 }: {
   events: EventRow[]
   setError?: (e: string | null) => void
   setInfo?: (i: string | null) => void
+  t: (k: string) => string
 }) {
   const [decisionF, setDecisionF] = useState("")
   const [severityF, setSeverityF] = useState("")
@@ -4384,6 +5654,11 @@ function EventsView({
   const [labelF, setLabelF] = useState("")
   const [dateFrom, setDateFrom] = useState("")
   const [dateTo, setDateTo] = useState("")
+  const [exportFrom, setExportFrom] = useState("")
+  const [exportTo, setExportTo] = useState("")
+  const [showExportRange, setShowExportRange] = useState(false)
+  const [pageSize, setPageSize] = useState(50)
+  const [page, setPage] = useState(1)
   const [exportBusy, setExportBusy] = useState(false)
   const searchRef = useRef<HTMLInputElement>(null)
   const [archives, setArchives] = useState<
@@ -4397,38 +5672,12 @@ function EventsView({
       expires_at: string
     }>
   >([])
-  const [retention, setRetention] = useState<{
-    days: number
-    weekly_export_enabled: boolean
-    oldest_event_ts: string | null
-    days_until_oldest_purge: number | null
-    note?: string
-  } | null>(() => {
-    try {
-      const raw = sessionStorage.getItem("opsgate_events_retention")
-      return raw ? JSON.parse(raw) : null
-    } catch {
-      return null
-    }
-  })
 
   useEffect(() => {
     void (async () => {
       try {
         const r = await api.listEventExports()
         setArchives(r.exports || [])
-      } catch {
-        /* ignore */
-      }
-      try {
-        const e = await api.events()
-        if (e.retention) {
-          setRetention(e.retention)
-          sessionStorage.setItem(
-            "opsgate_events_retention",
-            JSON.stringify(e.retention)
-          )
-        }
       } catch {
         /* ignore */
       }
@@ -4494,17 +5743,47 @@ function EventsView({
     })
   }, [events, decisionF, severityF, sourceF, labelF, dateFrom, dateTo])
 
-  const doExport = async (range: "week" | "all") => {
+  useEffect(() => {
+    setPage(1)
+  }, [decisionF, severityF, sourceF, labelF, dateFrom, dateTo, pageSize])
+
+  const pagedEvents = useMemo(() => {
+    const start = (page - 1) * pageSize
+    return filtered.slice(start, start + pageSize)
+  }, [filtered, page, pageSize])
+
+  const doExport = async (
+    range: "week" | "all" | "custom",
+    from?: string,
+    to?: string
+  ) => {
     setExportBusy(true)
     setError?.(null)
     try {
-      const r = await api.exportEvents(range, "csv")
-      downloadTextFile(r.filename, r.content, "text/csv;charset=utf-8")
+      let fmt: "csv" | "json" = "csv"
+      try {
+        if (localStorage.getItem("opsgate_report_format") === "json") {
+          fmt = "json"
+        }
+      } catch {
+        /* ignore */
+      }
+      if (range === "custom" && (!from || !to)) {
+        setError?.("from/to required")
+        setExportBusy(false)
+        return
+      }
+      const r = await api.exportEvents(range, fmt, {
+        from: range === "custom" ? from : undefined,
+        to: range === "custom" ? to : undefined
+      })
+      downloadTextFile(
+        r.filename,
+        r.content,
+        fmt === "json" ? "application/json" : "text/csv;charset=utf-8"
+      )
       setInfo?.(
-        `Export ${range} · ${r.count} events · rétention ${r.retention_days} j` +
-          (r.days_until_oldest_purge != null
-            ? ` · purge plus ancien dans ~${r.days_until_oldest_purge} j`
-            : "")
+        `Export ${range}${from && to ? ` ${from}→${to}` : ""} · ${r.count} events`
       )
       const list = await api.listEventExports()
       setArchives(list.exports || [])
@@ -4526,32 +5805,66 @@ function EventsView({
           gap: 10,
           marginBottom: 12
         }}>
-        <h2 style={{ margin: 0 }}>Événements</h2>
+        <h2 style={{ margin: 0 }}>{t("events.title")}</h2>
         <div className="row" style={{ flexWrap: "wrap", gap: 8 }}>
           <button
             type="button"
             className="btn secondary btn-sm"
             disabled={exportBusy}
             onClick={() => void doExport("week")}>
-            {exportBusy ? "…" : "Export semaine"}
+            {exportBusy ? "…" : t("events.exportWeek")}
+          </button>
+          <button
+            type="button"
+            className="btn secondary btn-sm"
+            disabled={exportBusy}
+            onClick={() => setShowExportRange((v) => !v)}>
+            {t("events.exportCustom")}
           </button>
           <button
             type="button"
             className="btn secondary btn-sm"
             disabled={exportBusy}
             onClick={() => void doExport("all")}>
-            Export tout
+            {t("events.exportAll")}
           </button>
         </div>
       </div>
-      {retention && (
-        <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>
-          Rétention {retention.days} j
-          {retention.days_until_oldest_purge != null
-            ? ` · purge ~${Math.max(0, retention.days_until_oldest_purge)} j`
-            : ""}
-          {retention.weekly_export_enabled ? " · hebdo ON" : ""}
-        </p>
+      {showExportRange && (
+        <div
+          className="filters-bar"
+          style={{ marginBottom: 14 }}
+          aria-label="Export range">
+          <label className="field-label" style={{ margin: 0 }}>
+            {t("events.from")}
+          </label>
+          <input
+            className="input filter-date"
+            type="date"
+            value={exportFrom}
+            onChange={(e) => setExportFrom(e.target.value)}
+          />
+          <label className="field-label" style={{ margin: 0 }}>
+            {t("events.to")}
+          </label>
+          <input
+            className="input filter-date"
+            type="date"
+            value={exportTo}
+            onChange={(e) => setExportTo(e.target.value)}
+          />
+          <div className="filter-actions">
+            <button
+              type="button"
+              className="btn btn-sm"
+              disabled={exportBusy || !exportFrom || !exportTo}
+              onClick={() =>
+                void doExport("custom", exportFrom, exportTo)
+              }>
+              {t("events.export")}
+            </button>
+          </div>
+        </div>
       )}
       {archives.length > 0 && (
         <div style={{ marginBottom: 14 }}>
@@ -4605,23 +5918,25 @@ function EventsView({
         <div className="empty">Aucun événement</div>
       ) : (
         <>
-          <div className="row" style={{ marginBottom: 12, flexWrap: "wrap" }}>
+          <div className="filters-bar" role="search" aria-label="Filtres events">
             <select
               className="input"
               value={decisionF}
-              onChange={(e) => setDecisionF(e.target.value)}>
-              <option value="">Toutes décisions</option>
+              onChange={(e) => setDecisionF(e.target.value)}
+              title="Décision">
+              <option value="">Décision</option>
               {decisions.map((d) => (
                 <option key={d} value={d}>
-                  {decisionLabelFr(d)} ({d})
+                  {decisionLabelFr(d)}
                 </option>
               ))}
             </select>
             <select
               className="input"
               value={severityF}
-              onChange={(e) => setSeverityF(e.target.value)}>
-              <option value="">Toutes sévérités</option>
+              onChange={(e) => setSeverityF(e.target.value)}
+              title="Sévérité">
+              <option value="">Sévérité</option>
               {severities.map((s) => (
                 <option key={s} value={s}>
                   {s}
@@ -4631,8 +5946,9 @@ function EventsView({
             <select
               className="input"
               value={sourceF}
-              onChange={(e) => setSourceF(e.target.value)}>
-              <option value="">Toutes sources</option>
+              onChange={(e) => setSourceF(e.target.value)}
+              title="Source">
+              <option value="">Source</option>
               {sources.map((s) => (
                 <option key={s} value={s}>
                   {s}
@@ -4641,38 +5957,42 @@ function EventsView({
             </select>
             <input
               ref={searchRef}
-              className="input"
-              placeholder="Label / host / type... (/)"
+              className="input filter-search"
+              placeholder="Label / host / type… (/)"
               value={labelF}
               onChange={(e) => setLabelF(e.target.value)}
             />
             <input
-              className="input"
+              className="input filter-date"
               type="date"
               value={dateFrom}
               onChange={(e) => setDateFrom(e.target.value)}
               title="Du"
+              aria-label="Date début"
             />
             <input
-              className="input"
+              className="input filter-date"
               type="date"
               value={dateTo}
               onChange={(e) => setDateTo(e.target.value)}
               title="Au"
+              aria-label="Date fin"
             />
-            <button
-              className="btn secondary btn-sm"
-              type="button"
-              onClick={() => {
-                setDecisionF("")
-                setSeverityF("")
-                setSourceF("")
-                setLabelF("")
-                setDateFrom("")
-                setDateTo("")
-              }}>
-              Reset
-            </button>
+            <div className="filter-actions">
+              <button
+                className="btn secondary btn-sm"
+                type="button"
+                onClick={() => {
+                  setDecisionF("")
+                  setSeverityF("")
+                  setSourceF("")
+                  setLabelF("")
+                  setDateFrom("")
+                  setDateTo("")
+                }}>
+                Reset
+              </button>
+            </div>
           </div>
           <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>
             {filtered.length} / {events.length} event(s)
@@ -4680,20 +6000,28 @@ function EventsView({
           {filtered.length === 0 ? (
             <div className="empty">Aucun event pour ces filtres</div>
           ) : (
+            <>
+            <PagerBar
+              page={page}
+              pageSize={pageSize}
+              total={filtered.length}
+              onPage={setPage}
+              onPageSize={setPageSize}
+            />
             <div className="table-wrap">
-              <table className="table">
+              <table className="table table-resizable">
                 <thead>
                   <tr>
-                    <th>Quand</th>
+                    <th className="col-time">Quand</th>
                     <th>Label appareil</th>
                     <th>Décision</th>
                     <th>Acteur</th>
                     <th>Sévérité</th>
-                    <th>Détail</th>
+                    <th className="col-detail">Détail</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {filtered.map((e) => (
+                  {pagedEvents.map((e) => (
                     <tr key={e.id}>
                       <td className="muted">
                         {e.ts ? new Date(e.ts).toLocaleString("fr-FR") : " - "}
@@ -4765,6 +6093,14 @@ function EventsView({
                 </tbody>
               </table>
             </div>
+            <PagerBar
+              page={page}
+              pageSize={pageSize}
+              total={filtered.length}
+              onPage={setPage}
+              onPageSize={setPageSize}
+            />
+            </>
           )}
         </>
       )}
@@ -4784,6 +6120,11 @@ function AuditView({ isPrincipal }: { isPrincipal: boolean }) {
     }>
   >([])
   const [filter, setFilter] = useState("")
+  const [dateFrom, setDateFrom] = useState("")
+  const [dateTo, setDateTo] = useState("")
+  const [sortDir, setSortDir] = useState<"desc" | "asc">("desc")
+  const [pageSize, setPageSize] = useState(50)
+  const [page, setPage] = useState(1)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
 
@@ -4805,6 +6146,34 @@ function AuditView({ isPrincipal }: { isPrincipal: boolean }) {
     void load()
   }, [load])
 
+  const filtered = useMemo(() => {
+    const fromMs = dateFrom ? Date.parse(dateFrom + "T00:00:00") : null
+    const toMs = dateTo ? Date.parse(dateTo + "T23:59:59.999") : null
+    let list = rows.filter((r) => {
+      if (fromMs == null && toMs == null) return true
+      const t = Date.parse(r.createdAt)
+      if (!Number.isFinite(t)) return false
+      if (fromMs != null && t < fromMs) return false
+      if (toMs != null && t > toMs) return false
+      return true
+    })
+    list = [...list].sort((a, b) => {
+      const ta = Date.parse(a.createdAt) || 0
+      const tb = Date.parse(b.createdAt) || 0
+      return sortDir === "desc" ? tb - ta : ta - tb
+    })
+    return list
+  }, [rows, dateFrom, dateTo, sortDir])
+
+  useEffect(() => {
+    setPage(1)
+  }, [filter, dateFrom, dateTo, sortDir, pageSize])
+
+  const pagedAudit = useMemo(() => {
+    const start = (page - 1) * pageSize
+    return filtered.slice(start, start + pageSize)
+  }, [filtered, page, pageSize])
+
   if (!isPrincipal) {
     return (
       <div className="card">
@@ -4817,7 +6186,7 @@ function AuditView({ isPrincipal }: { isPrincipal: boolean }) {
   const exportCsv = () => {
     const headers = ["created_at", "admin_label", "admin_email", "action", "detail"]
     const lines = [headers.join(",")]
-    for (const r of rows) {
+    for (const r of filtered) {
       const cells = [
         r.createdAt || "",
         r.adminLabel || "",
@@ -4851,16 +6220,17 @@ function AuditView({ isPrincipal }: { isPrincipal: boolean }) {
         <button
           type="button"
           className="btn secondary btn-sm"
-          disabled={!rows.length}
+          disabled={!filtered.length}
           onClick={exportCsv}>
           Export CSV
         </button>
       </div>
-      <div className="row" style={{ marginBottom: 12 }}>
+      <div className="filters-bar" role="search" aria-label="Filtres audit">
         <select
           className="input"
           value={filter}
-          onChange={(e) => setFilter(e.target.value)}>
+          onChange={(e) => setFilter(e.target.value)}
+          title="Action">
           <option value="">Toutes les actions</option>
           <option value="login">login</option>
           <option value="logout">logout</option>
@@ -4890,50 +6260,124 @@ function AuditView({ isPrincipal }: { isPrincipal: boolean }) {
           <option value="moving_rule_delete">moving_rule_delete</option>
           <option value="moving_rule_apply">moving_rule_apply</option>
           <option value="recovery_info_view">recovery_info_view</option>
+          <option value="recovery_codes_generated">recovery_codes_generated</option>
+          <option value="recovery_pool_revoked">recovery_pool_revoked</option>
         </select>
-        <button className="btn secondary" type="button" disabled={busy} onClick={() => void load()}>
-          {busy ? "…" : "Actualiser"}
-        </button>
+        <input
+          className="input"
+          type="date"
+          value={dateFrom}
+          onChange={(e) => setDateFrom(e.target.value)}
+          title="Du"
+          aria-label="Date début"
+        />
+        <input
+          className="input"
+          type="date"
+          value={dateTo}
+          onChange={(e) => setDateTo(e.target.value)}
+          title="Au"
+          aria-label="Date fin"
+        />
+        <select
+          className="input"
+          value={sortDir}
+          onChange={(e) =>
+            setSortDir(e.target.value === "asc" ? "asc" : "desc")
+          }
+          title="Tri date">
+          <option value="desc">Date ↓ récent</option>
+          <option value="asc">Date ↑ ancien</option>
+        </select>
+        <div className="filter-actions">
+          <button
+            className="btn secondary btn-sm"
+            type="button"
+            disabled={busy}
+            onClick={() => void load()}>
+            {busy ? "…" : "Actualiser"}
+          </button>
+          <button
+            className="btn secondary btn-sm"
+            type="button"
+            onClick={() => {
+              setFilter("")
+              setDateFrom("")
+              setDateTo("")
+              setSortDir("desc")
+            }}>
+            Reset
+          </button>
+        </div>
       </div>
+      <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>
+        {filtered.length} / {rows.length} entrée(s)
+      </p>
       {err && <p className="err">{err}</p>}
-      {rows.length === 0 ? (
+      {filtered.length === 0 ? (
         <div className="empty">Aucun événement d’audit</div>
       ) : (
-        <div className="table-wrap">
-          <table className="table">
-            <thead>
-              <tr>
-                <th>Quand</th>
-                <th>Admin</th>
-                <th>Action</th>
-                <th>Détail</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r) => (
-                <tr key={r.id}>
-                  <td className="muted">
-                    {r.createdAt
-                      ? new Date(r.createdAt).toLocaleString("fr-FR")
-                      : " - "}
-                  </td>
-                  <td>
-                    {r.adminLabel || " - "}
-                    {r.adminEmail ? (
-                      <div className="muted" style={{ fontSize: 11 }}>
-                        {r.adminEmail}
-                      </div>
-                    ) : null}
-                  </td>
-                  <td>
-                    <code>{r.action}</code>
-                  </td>
-                  <td className="muted">{r.detail || " - "}</td>
+        <>
+          <PagerBar
+            page={page}
+            pageSize={pageSize}
+            total={filtered.length}
+            onPage={setPage}
+            onPageSize={setPageSize}
+          />
+          <div className="table-wrap">
+            <table className="table table-resizable">
+              <thead>
+                <tr>
+                  <th className="col-time">
+                    <button
+                      type="button"
+                      className="btn secondary btn-sm"
+                      style={{ padding: "2px 8px", fontSize: 12 }}
+                      onClick={() =>
+                        setSortDir((d) => (d === "desc" ? "asc" : "desc"))
+                      }>
+                      Quand {sortDir === "desc" ? "↓" : "↑"}
+                    </button>
+                  </th>
+                  <th>Admin</th>
+                  <th>Action</th>
+                  <th className="col-detail">Détail</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {pagedAudit.map((r) => (
+                  <tr key={r.id}>
+                    <td className="muted">
+                      {r.createdAt
+                        ? new Date(r.createdAt).toLocaleString("fr-FR")
+                        : " - "}
+                    </td>
+                    <td>
+                      {r.adminLabel || " - "}
+                      {r.adminEmail ? (
+                        <div className="muted" style={{ fontSize: 11 }}>
+                          {r.adminEmail}
+                        </div>
+                      ) : null}
+                    </td>
+                    <td>
+                      <code>{r.action}</code>
+                    </td>
+                    <td className="muted">{r.detail || " - "}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <PagerBar
+            page={page}
+            pageSize={pageSize}
+            total={filtered.length}
+            onPage={setPage}
+            onPageSize={setPageSize}
+          />
+        </>
       )}
     </div>
   )

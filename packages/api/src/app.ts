@@ -263,13 +263,23 @@ export function createApp() {
     const orgId = c.get("orgId")
     const agentId = c.get("agentId")
     const org = await store.getOrg(orgId)
-    const pack = await store.getActivePack(orgId)
+    // Garantit un pack actif (évite enrolled_but_sync_failed:http_404)
+    let pack = await store.getActivePack(orgId)
+    if (!pack) {
+      pack = await store.ensureDefaultPack(orgId)
+    }
     const effectiveBundle = await store.getEffectivePolicyForAgent(
       orgId,
       agentId
     )
-    if (!org || !pack || !effectiveBundle) {
-      return c.json({ error: "not_found" }, 404)
+    if (!org) {
+      return c.json({ error: "org_not_found" }, 404)
+    }
+    if (!pack) {
+      return c.json({ error: "no_rules_pack" }, 404)
+    }
+    if (!effectiveBundle) {
+      return c.json({ error: "policy_not_found" }, 404)
     }
 
     const { policy, profile, effective, admins, licensed } = effectiveBundle
@@ -288,7 +298,8 @@ export function createApp() {
       unlicensedSince = new Date().toISOString()
       if (agent) agent.unlicensedSince = unlicensedSince
     }
-    const graceMs = 5 * 60 * 1000
+    const { LICENSE_GRACE_MS } = await import("./summary-helpers")
+    const graceMs = LICENSE_GRACE_MS
     const unlicensedAge = unlicensedSince
       ? Date.now() - new Date(unlicensedSince).getTime()
       : 0
@@ -392,6 +403,15 @@ export function createApp() {
       device_label: ev.device_label || agent.deviceLabel
     }))
 
+    const cats = await orgLogCategories(agent.orgId)
+    if (!cats.detectionEvents) {
+      return c.json({
+        ok: true,
+        accepted: 0,
+        skipped: true,
+        reason: "log_category_detection_disabled"
+      })
+    }
     const result = await store.appendEvents(agent.orgId, agent.id, enriched)
     return c.json({ ok: true, ...result })
   })
@@ -409,6 +429,9 @@ export function createApp() {
       permissions: a.isPrincipal ? ALL_ADMIN_PERMISSIONS : a.permissions,
       active: a.active,
       must_change_password: !!a.mustChangePassword,
+      locked: !!a.lockedAt,
+      locked_at: a.lockedAt || null,
+      failed_login_count: a.failedLoginCount || 0,
       created_at: a.createdAt,
       updated_at: a.updatedAt
     }
@@ -440,12 +463,55 @@ export function createApp() {
     }
   }
 
+  async function orgLogCategories(orgId: string) {
+    const { mergeMonitoringSettings, DEFAULT_LOG_CATEGORIES } = await import(
+      "./types"
+    )
+    const org = await store.getOrg(orgId)
+    const mon = mergeMonitoringSettings(org?.monitoring)
+    return mon.logCategories || DEFAULT_LOG_CATEGORIES
+  }
+
+  function isLoginAuditAction(
+    action: import("./types").AdminAuditAction
+  ): boolean {
+    return (
+      action === "login" ||
+      action === "logout" ||
+      action === "logout_idle" ||
+      action === "login_failed" ||
+      action === "login_brute_force"
+    )
+  }
+
+  function isAgentLifecycleAction(
+    action: import("./types").AdminAuditAction
+  ): boolean {
+    return (
+      action === "agent_revoke" ||
+      action === "agent_assign" ||
+      action === "agent_license" ||
+      action === "agent_merge" ||
+      action === "recovery_code_consumed"
+    )
+  }
+
   async function audit(
     gate: { admin: OrgAdmin; orgId: string },
     action: import("./types").AdminAuditAction,
     detail: string,
     meta?: Record<string, unknown>
   ) {
+    const cats = await orgLogCategories(gate.orgId)
+    if (isLoginAuditAction(action) && !cats.adminLogin) return
+    if (isAgentLifecycleAction(action) && !cats.agentLifecycle) return
+    if (
+      !isLoginAuditAction(action) &&
+      !isAgentLifecycleAction(action) &&
+      !cats.adminAudit
+    ) {
+      return
+    }
     await store.appendAdminAudit({
       orgId: gate.orgId,
       adminId: gate.admin.id,
@@ -515,10 +581,122 @@ export function createApp() {
     if (!body.email || !body.password) {
       return c.json({ error: "email_password_required" }, 400)
     }
+    const emailKey = body.email.trim().toLowerCase()
+    // Compte déjà verrouillé ?
+    try {
+      const hits = await store.findAdminsByEmail(emailKey)
+      const locked = hits.find((a) => a.lockedAt)
+      if (locked) {
+        return c.json(
+          {
+            error: "account_locked",
+            message:
+              "Compte verrouillé après trop d'échecs d'authentification. Un administrateur principal doit le déverrouiller."
+          },
+          403
+        )
+      }
+    } catch {
+      /* ignore */
+    }
     const result = await store.createAdminSession(body.email, body.password, {
       force: !!body.force
     })
     if (!result.ok) {
+      if (result.error === "invalid_credentials") {
+        try {
+          const hits = await store.findAdminsByEmail(emailKey)
+          const hit = hits[0]
+          if (hit) {
+            const org = await store.getOrg(hit.orgId)
+            const { mergeMonitoringSettings } = await import("./types")
+            const mon = mergeMonitoringSettings(org?.monitoring)
+            const thr =
+              mon.notifications?.loginBruteForce !== false
+                ? mon.notifications?.loginBruteForceThreshold ?? 5
+                : 999
+            const rec = await store.recordAdminLoginFailure(hit.id, thr)
+            const cats = mon.logCategories
+            if (cats?.adminLogin !== false) {
+              await store.appendAdminAudit({
+                orgId: hit.orgId,
+                adminId: hit.id,
+                adminEmail: hit.email,
+                adminLabel: hit.label,
+                action: "login_failed",
+                detail: `Échec authentification (${rec.count}x)`
+              })
+            }
+            if (rec.locked) {
+              if (cats?.adminLogin !== false) {
+                await store.appendAdminAudit({
+                  orgId: hit.orgId,
+                  adminId: hit.id,
+                  adminEmail: hit.email,
+                  adminLabel: hit.label,
+                  action: "account_locked",
+                  detail: `Compte verrouillé après ${rec.count} échecs (seuil ${thr})`
+                })
+              }
+              return c.json(
+                {
+                  error: "account_locked",
+                  remaining_attempts: 0,
+                  message:
+                    "Compte verrouillé après trop d'échecs. Un administrateur principal doit le déverrouiller."
+                },
+                403
+              )
+            }
+            const remaining = Math.max(0, thr - rec.count)
+            if (
+              mon.notifications?.loginBruteForce !== false &&
+              rec.count >= thr &&
+              cats?.adminLogin !== false
+            ) {
+              await store.appendAdminAudit({
+                orgId: hit.orgId,
+                adminId: hit.id,
+                adminEmail: hit.email,
+                adminLabel: hit.label,
+                action: "login_brute_force",
+                detail: `Alerte: ${rec.count} échecs (seuil ${thr})`
+              })
+            }
+            return c.json(
+              {
+                error: "invalid_credentials",
+                remaining_attempts: remaining,
+                message:
+                  remaining > 0
+                    ? `Invalid. Il vous reste ${remaining} essai${remaining > 1 ? "s" : ""}.`
+                    : "Invalid."
+              },
+              401
+            )
+          }
+        } catch {
+          /* ignore */
+        }
+        return c.json(
+          {
+            error: "invalid_credentials",
+            message: "Identifiants invalides."
+          },
+          401
+        )
+      }
+      if (result.error === "account_locked") {
+        return c.json(
+          {
+            error: "account_locked",
+            remaining_attempts: 0,
+            message:
+              "Compte verrouillé. Un administrateur principal doit le déverrouiller."
+          },
+          403
+        )
+      }
       const status = result.error === "session_already_active" ? 409 : 401
       return c.json(
         {
@@ -532,16 +710,16 @@ export function createApp() {
         status
       )
     }
-    await store.appendAdminAudit({
-      orgId: result.session.orgId,
-      adminId: result.admin.id,
-      adminEmail: result.admin.email,
-      adminLabel: result.admin.label,
-      action: "login",
-      detail: result.forced
-        ? "Connexion console (prise de contrôle — session précédente révoquée)"
+    await audit(
+      {
+        admin: result.admin,
+        orgId: result.session.orgId
+      },
+      "login",
+      result.forced
+        ? "Connexion console (prise de contrôle - session précédente révoquée)"
         : "Connexion console"
-    })
+    )
     return c.json({
       ok: true,
       token: result.session.token,
@@ -701,6 +879,10 @@ export function createApp() {
     } catch {
       return c.json({ error: "invalid_json" }, 400)
     }
+    // Licence titulaire: uniquement via POST /license/activate (clé préprogrammée)
+    if (body.licenseDisplay) {
+      delete body.licenseDisplay
+    }
     const updated = await store.updateOrgMonitoring(org.id, body)
     await store.appendAdminAudit({
       orgId: org.id,
@@ -763,7 +945,7 @@ export function createApp() {
     const agents = await Promise.all(
       agentsRaw.map(async (a) => {
         const licensed = await store.isAgentLicensed(org.id, a.id)
-        const graceMs = 5 * 60 * 1000
+        const { LICENSE_GRACE_MS: graceMs } = await import("./summary-helpers")
         let license_status: "licensed" | "grace" | "unlicensed" = "licensed"
         if (!licensed) {
           const since = a.unlicensedSince
@@ -884,6 +1066,7 @@ export function createApp() {
   v1.post("/org/admins", async (c) => {
     const _gate = await requireConsoleAuth(c, "manage_admins")
     if (!_gate.ok) return c.json({ error: _gate.error }, _gate.status)
+    // Création principal : réservé aux principals
     const org = await store.getOrg(_gate.orgId)
     if (!org) return c.json({ error: "no_org" }, 404)
     let body: {
@@ -891,6 +1074,7 @@ export function createApp() {
       email?: string
       password?: string
       permissions?: AdminPermission[]
+      is_principal?: boolean
     }
     try {
       body = await c.req.json()
@@ -907,6 +1091,9 @@ export function createApp() {
         { error: "label_email_password_min6_required" },
         400
       )
+    }
+    if (body.is_principal && !_gate.admin.isPrincipal) {
+      return c.json({ error: "principal_only" }, 403)
     }
     const emailNorm = body.email.trim().toLowerCase()
     const emailTaken = (await store.listAdmins(org.id)).some(
@@ -926,7 +1113,8 @@ export function createApp() {
       label: body.label.trim(),
       email: body.email.trim(),
       password: body.password,
-      permissions: body.permissions
+      permissions: body.permissions,
+      isPrincipal: !!body.is_principal
     })
     if (!admin) {
       return c.json(
@@ -940,7 +1128,27 @@ export function createApp() {
     await audit(
       _gate,
       "admin_create",
-      `Création admin « ${admin.label} » (${admin.email})`,
+      `Création admin « ${admin.label} » (${admin.email})${admin.isPrincipal ? " · Principal" : ""}`,
+      { admin_id: admin.id, is_principal: admin.isPrincipal }
+    )
+    return c.json({ ok: true, admin: publicAdminView(admin) })
+  })
+
+  /** Déverrouiller un compte après lockout brute-force (principal) */
+  v1.post("/org/admins/:adminId/unlock", async (c) => {
+    const _gate = await requireConsoleAuth(c, "manage_admins")
+    if (!_gate.ok) return c.json({ error: _gate.error }, _gate.status)
+    if (!_gate.admin.isPrincipal) {
+      return c.json({ error: "principal_only" }, 403)
+    }
+    const org = await store.getOrg(_gate.orgId)
+    if (!org) return c.json({ error: "no_org" }, 404)
+    const admin = await store.unlockAdmin(org.id, c.req.param("adminId"))
+    if (!admin) return c.json({ error: "admin_not_found" }, 404)
+    await audit(
+      _gate,
+      "account_unlocked",
+      `Déverrouillage compte « ${admin.label} » (${admin.email})`,
       { admin_id: admin.id }
     )
     return c.json({ ok: true, admin: publicAdminView(admin) })
@@ -1112,20 +1320,28 @@ export function createApp() {
     const existing = (await store.listAdmins(org.id)).find(
       (a) => a.id === c.req.param("adminId")
     )
-    if (!existing || existing.isPrincipal) {
-      return c.json({ error: "secondary_admin_only" }, 400)
+    if (!existing) {
+      return c.json({ error: "admin_not_found" }, 404)
+    }
+    // Principal peut reset n'importe quel autre compte (y compris principal)
+    if (!_gate.admin.isPrincipal) {
+      return c.json({ error: "principal_only" }, 403)
+    }
+    if (existing.id === _gate.admin.id) {
+      return c.json({ error: "cannot_reset_self" }, 400)
     }
     const admin = await store.upsertAdmin(org.id, {
       id: existing.id,
       label: existing.label,
       email: existing.email,
       password: body.new_password,
-      mustChangePassword: true
+      mustChangePassword: true,
+      unlock: true
     })
     await audit(
       _gate,
       "admin_password_reset",
-      `Reset mdp admin secondaire « ${existing.label} » (${existing.email})`,
+      `Reset mdp admin « ${existing.label} » (${existing.email}) + déverrouillage`,
       { admin_id: existing.id }
     )
     return c.json({
@@ -1146,7 +1362,11 @@ export function createApp() {
     const ok = await store.deleteAdmin(org.id, c.req.param("adminId"))
     if (!ok) {
       return c.json(
-        { error: "admin_not_found_or_is_principal" },
+        {
+          error: "admin_delete_failed",
+          message:
+            "Suppression impossible (dernier principal, ou admin introuvable)."
+        },
         400
       )
     }
@@ -1211,7 +1431,191 @@ export function createApp() {
     const org = await store.getOrg(_gate.orgId)
     if (!org) return c.json({ error: "no_org" }, 404)
     const stats = await store.getLicenseStats(org.id)
-    return c.json({ org_id: org.id, ...stats })
+    const { mergeMonitoringSettings } = await import("./types")
+    const mon = mergeMonitoringSettings(org.monitoring)
+    const lic = mon.licenseDisplay || {
+      companyName: "",
+      address: "",
+      contactEmail: "",
+      expiresAt: null,
+      mode: "trial" as const
+    }
+    const mode = lic.mode === "full" ? "full" : "trial"
+    // Trial 30 jours depuis création org si pas de full
+    const trialEnds = new Date(Date.parse(org.createdAt) + 30 * 86400000)
+    const expiresAt =
+      mode === "full" && lic.expiresAt
+        ? lic.expiresAt
+        : trialEnds.toISOString()
+    const company =
+      mode === "full" && lic.companyName?.trim()
+        ? lic.companyName.trim()
+        : org.name
+    const email =
+      mode === "full" && lic.contactEmail?.trim()
+        ? lic.contactEmail.trim()
+        : org.primaryEmail
+    const address = mode === "full" ? lic.address || "" : ""
+    const license_key_hash =
+      mode === "full" && lic.licenseKeyFingerprint
+        ? `OG-${lic.licenseKeyFingerprint.slice(0, 8).toUpperCase()}-${lic.licenseKeyFingerprint.slice(8, 16).toUpperCase()}`
+        : "TRIAL"
+    const daysLeft = Math.ceil(
+      (Date.parse(expiresAt) - Date.now()) / 86400000
+    )
+    return c.json({
+      org_id: org.id,
+      ...stats,
+      license: {
+        mode,
+        company_name: company,
+        address,
+        contact_email: email,
+        org_code: org.orgCode,
+        license_key_hash,
+        seats_total: stats.seats,
+        seats_used: stats.seats_used,
+        seats_available: stats.seats_available,
+        expires_at: expiresAt,
+        days_left: daysLeft,
+        trial: mode === "trial",
+        activated_at: lic.activatedAt || null
+      }
+    })
+  })
+
+  /** Active une licence (principal) — clé courte OPS-… ou legacy OG1… */
+  v1.post("/org/license/activate", async (c) => {
+    const _gate = await requireConsoleAuth(c, "manage_policies")
+    if (!_gate.ok) return c.json({ error: _gate.error }, _gate.status)
+    if (!_gate.admin.isPrincipal) {
+      return c.json({ error: "principal_only" }, 403)
+    }
+    const org = await store.getOrg(_gate.orgId)
+    if (!org) return c.json({ error: "no_org" }, 404)
+    let body: { license_key?: string }
+    try {
+      body = await c.req.json()
+    } catch {
+      return c.json({ error: "invalid_json" }, 400)
+    }
+    const key = body.license_key?.trim() || ""
+    if (!key) return c.json({ error: "license_key_required" }, 400)
+    const {
+      parseShortKeyOrLegacy,
+      licenseKeyFingerprint,
+      normalizeLicenseKey
+    } = await import("./license-keys")
+    const parsed = parseShortKeyOrLegacy(key)
+    let p: import("./license-keys").IssuedLicensePayload
+    let displayKey = key
+    if (parsed.kind === "error") {
+      return c.json({ error: parsed.error }, 400)
+    }
+    if (parsed.kind === "short") {
+      const rec = await store.lookupIssuedLicense(parsed.key)
+      if (!rec) return c.json({ error: "license_not_found" }, 404)
+      if (rec.revokedAt) return c.json({ error: "license_revoked" }, 400)
+      if (Date.parse(rec.expiresAt) < Date.now()) {
+        return c.json({ error: "license_expired" }, 400)
+      }
+      p = {
+        v: 1,
+        orgCode: rec.orgCode,
+        companyName: rec.companyName,
+        address: rec.address,
+        contactEmail: rec.contactEmail,
+        seats: rec.seats,
+        expiresAt: rec.expiresAt,
+        issuedAt: rec.issuedAt
+      }
+      displayKey = rec.licenseKey
+    } else {
+      p = parsed.payload
+      displayKey = normalizeLicenseKey(key)
+    }
+    if (p.orgCode.toUpperCase() !== org.orgCode.toUpperCase()) {
+      return c.json(
+        {
+          error: "org_code_mismatch",
+          message:
+            "Cette licence est liée à une autre organisation (code org)."
+        },
+        400
+      )
+    }
+    const { mergeMonitoringSettings } = await import("./types")
+    const prev = mergeMonitoringSettings(org.monitoring)
+    await store.setOrgLicenseSeats(org.id, p.seats)
+    await store.updateOrgMonitoring(org.id, {
+      ...prev,
+      licenseDisplay: {
+        companyName: p.companyName,
+        address: p.address,
+        contactEmail: p.contactEmail,
+        expiresAt: p.expiresAt,
+        mode: "full",
+        seats: p.seats,
+        activatedAt: new Date().toISOString(),
+        licenseKeyFingerprint: licenseKeyFingerprint(displayKey)
+      }
+    })
+    await audit(
+      _gate,
+      "org_settings_update",
+      `Licence full activée · ${p.companyName} · ${p.seats} sièges · exp ${p.expiresAt.slice(0, 10)}`,
+      { seats: p.seats, org_code: p.orgCode }
+    )
+    const stats = await store.getLicenseStats(org.id)
+    return c.json({
+      ok: true,
+      license: {
+        mode: "full",
+        company_name: p.companyName,
+        address: p.address,
+        contact_email: p.contactEmail,
+        org_code: org.orgCode,
+        seats_total: p.seats,
+        seats_used: stats.seats_used,
+        expires_at: p.expiresAt,
+        license_key_display: displayKey
+      }
+    })
+  })
+
+  /** Supprime / repasse en trial (principal) */
+  v1.post("/org/license/revoke", async (c) => {
+    const _gate = await requireConsoleAuth(c, "manage_policies")
+    if (!_gate.ok) return c.json({ error: _gate.error }, _gate.status)
+    if (!_gate.admin.isPrincipal) {
+      return c.json({ error: "principal_only" }, 403)
+    }
+    const org = await store.getOrg(_gate.orgId)
+    if (!org) return c.json({ error: "no_org" }, 404)
+    const { mergeMonitoringSettings } = await import("./types")
+    const prev = mergeMonitoringSettings(org.monitoring)
+    const fp = prev.licenseDisplay?.licenseKeyFingerprint
+    // Révocation optionnelle de la clé en base si on a le full key (non stockée en clair)
+    await store.setOrgLicenseSeats(org.id, 0)
+    await store.updateOrgMonitoring(org.id, {
+      ...prev,
+      licenseDisplay: {
+        companyName: "",
+        address: "",
+        contactEmail: "",
+        expiresAt: null,
+        mode: "trial",
+        seats: 0,
+        activatedAt: null,
+        licenseKeyFingerprint: null
+      }
+    })
+    await audit(
+      _gate,
+      "org_settings_update",
+      `Licence full révoquée · retour trial 30j${fp ? ` · fp ${fp}` : ""}`
+    )
+    return c.json({ ok: true, mode: "trial" })
   })
 
   v1.post("/org/users", async (c) => {
@@ -1451,6 +1855,8 @@ export function createApp() {
       scan_uploads?: boolean
       event_reporting?: boolean
       protect_unenroll?: boolean
+      enabled?: boolean
+      priority?: number
       assigned_group_ids?: string[]
       assigned_user_ids?: string[]
       user_messages?: Partial<import("./types").PolicyUserMessages>
@@ -1470,6 +1876,8 @@ export function createApp() {
       scanUploads: body.scan_uploads,
       eventReporting: body.event_reporting,
       protectUnenroll: body.protect_unenroll,
+      enabled: body.enabled,
+      priority: body.priority,
       assignedGroupIds: body.assigned_group_ids,
       assignedUserIds: body.assigned_user_ids,
       userMessages: body.user_messages,
@@ -1502,6 +1910,8 @@ export function createApp() {
       scan_uploads?: boolean
       event_reporting?: boolean
       protect_unenroll?: boolean
+      enabled?: boolean
+      priority?: number
       assigned_group_ids?: string[]
       assigned_user_ids?: string[]
       user_messages?: Partial<import("./types").PolicyUserMessages>
@@ -1534,6 +1944,10 @@ export function createApp() {
         body.protect_unenroll !== undefined
           ? body.protect_unenroll
           : existing.protectUnenroll,
+      enabled:
+        body.enabled !== undefined ? body.enabled : existing.enabled,
+      priority:
+        body.priority !== undefined ? body.priority : existing.priority,
       userMessages:
         body.user_messages !== undefined
           ? body.user_messages
@@ -1746,7 +2160,7 @@ export function createApp() {
     await audit(
       _gate,
       "recovery_pool_revoked",
-      `Pool recovery invalidé · ${revoked} code(s)`,
+      `Pool recovery purgé · ${revoked} code(s) effacé(s)`,
       { revoked }
     )
     return c.json({ ok: true, revoked })
@@ -1767,7 +2181,10 @@ export function createApp() {
     return c.json({
       ok: true,
       note:
-        "Recovery vendor UNIQUEMENT si agent offline > 2h (sync toutes les 15 min). N'ouvre pas les postes synchronisés. V1.x : préférer pool de codes one-time (voir RECOVERY-CONCEPTEUR.md).",
+        "Mode principal: codes one-time (pool). Secret env OPSGATE_VENDOR_RECOVERY encore accepté en secours offline (transition) si le pool est vide ; il sera retiré en V2. Offline ≥ 2h uniquement.",
+      mode: "one_time_primary",
+      legacy_env_usable: true,
+      legacy_env_deprecated: true,
       recovery_password_hint: VENDOR_RECOVERY_PASSWORD,
       offline_after_ms: VENDOR_RECOVERY_OFFLINE_MS,
       env_override: "OPSGATE_VENDOR_RECOVERY"
@@ -2067,15 +2484,17 @@ export function createApp() {
     })
   })
 
-  /** Export téléchargeable (semaine / tout) — CSV ou JSON */
+  /** Export téléchargeable (semaine / tout / custom from-to) — CSV ou JSON */
   v1.get("/org/events/export", async (c) => {
     const _gate = await requireConsoleAuth(c, "console_access")
     if (!_gate.ok) return c.json({ error: _gate.error }, _gate.status)
     const org = await store.getOrg(_gate.orgId)
     if (!org) return c.json({ error: "no_org" }, 404)
-    const range = (c.req.query("range") || "week") as "week" | "all"
+    const range = (c.req.query("range") || "week") as "week" | "all" | "custom"
     const format = (c.req.query("format") || "csv") as "csv" | "json"
     const storeExport = c.req.query("store") === "1"
+    const fromQ = c.req.query("from") || ""
+    const toQ = c.req.query("to") || ""
     const { mergeMonitoringSettings } = await import("./types")
     const mon = mergeMonitoringSettings(org.monitoring)
     const {
@@ -2100,6 +2519,20 @@ export function createApp() {
       fromTs = from.toISOString()
       toTs = to.toISOString()
       label = weekKey
+    } else if (range === "custom" || fromQ || toQ) {
+      const fromMs = fromQ
+        ? Date.parse(fromQ.length <= 10 ? fromQ + "T00:00:00.000Z" : fromQ)
+        : 0
+      const toMs = toQ
+        ? Date.parse(toQ.length <= 10 ? toQ + "T23:59:59.999Z" : toQ)
+        : Date.now()
+      if (!Number.isFinite(fromMs) || !Number.isFinite(toMs) || fromMs > toMs) {
+        return c.json({ error: "invalid_date_range" }, 400)
+      }
+      slice = filterEventsRange(all, fromMs, toMs)
+      fromTs = new Date(fromMs).toISOString()
+      toTs = new Date(toMs).toISOString()
+      label = `${fromQ || "start"}_${toQ || "end"}`.replace(/[^\w.-]+/g, "-")
     }
     const content =
       format === "json" ? eventsToJson(slice) : eventsToCsv(slice)

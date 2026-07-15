@@ -108,24 +108,30 @@ function IndexPopup() {
               width: 34,
               height: 34,
               borderRadius: 9,
-              background: "linear-gradient(145deg, #0f172a 0%, #164e63 100%)",
+              background: "linear-gradient(145deg, #0a1128 0%, #0f766e 100%)",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
-              border: "1px solid rgba(103,232,249,0.35)",
+              boxShadow: "inset 0 0 0 1px rgba(43, 217, 197, 0.4)",
               flexShrink: 0
             }}>
             <svg width="18" height="18" viewBox="0 0 32 32" aria-hidden="true">
               <path
                 fill="none"
-                stroke="#67e8f9"
-                strokeWidth="2.2"
+                stroke="#2bd9c5"
+                strokeWidth="2"
                 strokeLinecap="round"
                 d="M8 22V12c0-4 3.5-7 8-7s8 3 8 7v10"
               />
               <path
-                fill="#67e8f9"
+                fill="#2bd9c5"
                 d="M16 14.5c-1.8 0-3.2 1.3-3.2 3v1.2h6.4V17.5c0-1.7-1.4-3-3.2-3z"
+              />
+              <path
+                fill="none"
+                stroke="#e2e8f0"
+                strokeWidth="1.6"
+                d="M12.5 18.5h7v4.2c0 1.6-1.6 3-3.5 3s-3.5-1.4-3.5-3v-4.2z"
               />
             </svg>
           </div>
