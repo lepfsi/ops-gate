@@ -13,7 +13,7 @@ Après stabilisation terrain de la **V1** (extension + control plane + Postgres)
 
 | Epic | Contenu |
 |------|---------|
-| **V2-A Proxy** | Agent local + PAC, allowlist IA, même engine, events `source=proxy` |
+| **V2-A Proxy** | Agent local + PAC, allowlist IA, même engine, events `source=proxy` — **P0 spike livré** (`packages/proxy`, `PROXY-P0.md`) |
 | **V2-B SSO** | OIDC (priorité) + SAML, JIT admins, `sso_enforce` |
 | **V2-C MFA** | TOTP + backup codes ; SMTP réel ; WebAuthn optionnel |
 | **V2-D Multi-tenant** | Isolation org, quotas, rate limits, onboarding, backups |

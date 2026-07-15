@@ -12,7 +12,7 @@ Mis à jour : 13 juillet 2026
 | **Réglages système console** | Thème, durée idle custom, timezone, rétention logs, **langue UI** |
 | **LDAP / AD sync** | Champs prêts ; sync groupes AD → policy |
 | **SSO + MFA** | PLATFORM-v2 |
-| **Proxy local** | PLATFORM-v2 |
+| **Proxy local** | **Saut data-plane en cours** — P0 dans `packages/proxy` + `docs/architecture/PROXY-P0.md` (PAC, allowlist, engine). P1 = MITM allowlist. |
 | **Chrome Web Store** | PLATFORM-v2 |
 | **Multi-navigateur (Firefox / Safari)** | Chromium (Chrome/Edge/Brave/Opera) = Plasmo MV3 aujourd’hui. Firefox = manifest V2/V3 adapté + build `plasmo --target=firefox-mv3`. Safari = port Xcode / App Store (lourd). Voir `docs/CAHIER-CONCEPTEUR.md` § multi-browser |
 | **Portal personnel cloud** | Billing / multi-device |

@@ -22,7 +22,11 @@
     "console:build": "pnpm --filter @opsgate/console build",
     "console:preview": "pnpm --filter @opsgate/console preview",
     "guide:docx": "node scripts/build-guide-utilisateur.mjs",
-    "guide:pdf": "python scripts/build-guide-pdf.py"
+    "guide:pdf": "python scripts/build-guide-pdf.py",
+    "proxy:dev": "pnpm --filter @opsgate/proxy dev",
+    "proxy:serve": "pnpm --filter @opsgate/proxy serve",
+    "proxy:pac": "pnpm --filter @opsgate/proxy pac",
+    "proxy:inspect": "pnpm --filter @opsgate/proxy inspect"
   },
   "dependencies": {
     "@opsgate/engine": "workspace:*",
