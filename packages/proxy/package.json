@@ -1,7 +1,7 @@
 {
   "name": "@opsgate/proxy",
-  "version": "0.2.0-p1",
-  "description": "OpsGate local HTTPS proxy — P1 MITM observe allowlist + engine",
+  "version": "0.3.0-p2",
+  "description": "OpsGate local HTTPS proxy — P2 enroll + events source=proxy",
   "private": true,
   "type": "module",
   "bin": {
@@ -14,6 +14,8 @@
     "inspect": "tsx src/index.ts inspect",
     "gen-ca": "tsx src/index.ts gen-ca",
     "ca-path": "tsx src/index.ts ca-path",
+    "enroll": "tsx src/index.ts enroll",
+    "status": "tsx src/index.ts status",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

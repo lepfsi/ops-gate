@@ -604,13 +604,15 @@ export interface RulesPackPayload {
   published_at?: string
 }
 
-export type EventSource = "prompt" | "file" | "system" | "text"
+export type EventSource = "prompt" | "file" | "system" | "text" | "proxy"
 export type EventDecision =
   | "mask_send"
   | "send_anyway"
   | "cancel"
   | "unenroll"
   | "enroll"
+  /** Proxy P1/P2 : détection observée sans action utilisateur */
+  | "observe"
 
 /** low | medium | high | warning (system.unenroll) */
 export type EventSeverity = "low" | "medium" | "high" | "warning"

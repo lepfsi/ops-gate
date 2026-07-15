@@ -1,7 +1,7 @@
-# @opsgate/proxy — P1 (MITM observe)
+# @opsgate/proxy — P2 (MITM observe + control plane)
 
-**Phase** : P1  
-**Docs** : [`PROXY-P0.md`](../../docs/architecture/PROXY-P0.md) · [`PROXY-P1.md`](../../docs/architecture/PROXY-P1.md)
+**Phase** : P2  
+**Docs** : [`PROXY-P0.md`](../../docs/architecture/PROXY-P0.md) · [`PROXY-P1.md`](../../docs/architecture/PROXY-P1.md) · [`PROXY-P2.md`](../../docs/architecture/PROXY-P2.md)
 
 Proxy HTTP(S) **local** OpsGate :
 
@@ -30,6 +30,10 @@ pnpm proxy:gen-ca
 pnpm proxy:ca-path
 # Installer la CA dans le magasin utilisateur Windows :
 certutil -addstore -user Root "C:\Users\Utilisateur\ops-gate\packages\proxy\data\ca\ca-cert.pem"
+
+# Control plane (API doit tourner)
+pnpm api:dev            # autre terminal
+pnpm proxy:enroll       # ou auto au premier proxy:dev
 ```
 
 Redémarrer Chrome/Edge après install CA.
@@ -39,7 +43,9 @@ Redémarrer Chrome/Edge après install CA.
 ```powershell
 cd C:\Users\Utilisateur\ops-gate
 
-pnpm proxy:dev          # 127.0.0.1:8888
+pnpm proxy:dev          # 127.0.0.1:8888 (+ auto-enroll si API up)
+pnpm proxy:enroll       # enroll agent type proxy
+pnpm proxy:status       # CA + agent_id
 pnpm proxy:pac          # génère opsgate-proxy.pac
 pnpm proxy:inspect      # engine partagé (stdin/fichier)
 pnpm proxy:gen-ca       # (re)génère CA
@@ -74,6 +80,21 @@ chrome.exe --proxy-server=127.0.0.1:8888
 | `OPSGATE_PROXY_PORT` | `8888` | Port |
 | `OPSGATE_PROXY_ALLOWLIST` | — | Hosts extra (CSV) |
 | `OPSGATE_PROXY_MITM` | `1` | `0` = tunnel only |
+| `OPSGATE_API_URL` | `http://127.0.0.1:8787` | Control plane |
+| `OPSGATE_ORG_CODE` | `DEMO-OPSGATE` | Org enroll |
+| `OPSGATE_PROXY_AUTO_ENROLL` | `1` | Enroll au serve si pas de token |
+
+## Chrome (test forcé — fiable sous Windows)
+
+```powershell
+& "C:\Program Files\Google\Chrome\Application\chrome.exe" --user-data-dir="$env:TEMP\opsgate-chrome-proxy-test" --proxy-server="127.0.0.1:8888" --disable-quic "https://chatgpt.com"
+```
+
+PAC HTTP (proxy déjà lancé) :
+
+```text
+--proxy-pac-url=http://127.0.0.1:8888/opsgate-proxy.pac
+```
 
 ## Sécurité
 
@@ -82,6 +103,11 @@ chrome.exe --proxy-server=127.0.0.1:8888
 - Logs : metadata + previews redactées, **pas** le prompt brut
 - Pas de MITM hors allowlist
 
-## P2 (suivant)
+## P2 (livré)
 
-Enroll proxy, events API `source=proxy`, pack sync, mode enforce.
+- Enroll `device_type=proxy` → `data/agent.json`
+- Events `source=proxy` / `decision=observe` vers la console
+
+## P3 (suivant)
+
+Installer Windows, badge console « Proxy », mode enforce, pack sync.

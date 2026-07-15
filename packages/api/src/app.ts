@@ -107,6 +107,11 @@ export function createApp() {
       personal_license_key?: string
       /** Empreinte stable extension (anti-doublon re-enroll) */
       device_fingerprint?: string
+      /**
+       * Type d’agent (info product) — extension | proxy.
+       * Stocké dans device_label prefix / app_version si besoin ; pas de colonne dédiée V1.
+       */
+      device_type?: "extension" | "proxy"
     }
     try {
       body = await c.req.json()
@@ -137,14 +142,23 @@ export function createApp() {
     if (!policy) return c.json({ error: "policy_missing" }, 500)
 
     const agentToken = newToken()
+    const isProxy = body.device_type === "proxy"
     const agent = await store.enrollAgent({
       orgId: org.id,
       token: agentToken,
-      deviceLabel: body.device_label,
+      deviceLabel:
+        body.device_label ||
+        (isProxy ? "OpsGate Proxy" : undefined),
       hostName: body.host_name,
-      appVersion: body.app_version,
+      appVersion:
+        body.app_version ||
+        (isProxy ? "proxy-p2" : undefined),
       personalLicenseKey: body.personal_license_key,
-      deviceFingerprint: body.device_fingerprint
+      deviceFingerprint:
+        body.device_fingerprint ||
+        (isProxy
+          ? `proxy:${body.host_name || "local"}:${org.id.slice(0, 8)}`
+          : undefined)
     })
 
     if (org.isPersonal && !agent.licenseAssigned) {
@@ -167,6 +181,7 @@ export function createApp() {
       org_name: org.name,
       mode: org.modeDefault,
       personal: !!org.isPersonal,
+      device_type: isProxy ? "proxy" : "extension",
       policy_etag: etag,
       rules_pack_version: policy.rulesPackVersion,
       replaced: !!agent.replaced,
@@ -175,7 +190,9 @@ export function createApp() {
         ? "Existing installation re-enrolled (same fingerprint) — previous token revoked."
         : org.isPersonal
           ? "Personal account enrolled."
-          : "Store agent_token securely. It is shown only once."
+          : isProxy
+            ? "Proxy enrolled. Store agent_token (shown once)."
+            : "Store agent_token securely. It is shown only once."
     })
   })
 

@@ -22,6 +22,33 @@ Complément de [PLATFORM-v1.1.md](./PLATFORM-v1.1.md).
 }
 ```
 
+### Valeurs `source` / `decision`
+
+| Champ | Valeurs |
+|-------|---------|
+| `source` | `prompt` \| `file` \| `system` \| `text` \| **`proxy`** (P2) |
+| `decision` | `mask_send` \| `send_anyway` \| `cancel` \| `enroll` \| `unenroll` \| **`observe`** (proxy mode observe) |
+
+Exemple event proxy (observe) :
+
+```json
+{
+  "schema_version": 1,
+  "client_event_id": "uuid-v4",
+  "ts": "2026-07-15T16:48:03.974Z",
+  "source": "proxy",
+  "hostname": "chatgpt.com",
+  "decision": "observe",
+  "detection_count": 1,
+  "highest_severity": "high",
+  "rule_ids": ["generic-api-key"],
+  "types": ["API Key / Token"],
+  "masked": false,
+  "redacted_matches": [{ "rule_id": "generic-api-key", "preview": "sk-abcde…2345" }],
+  "device_label": "OpsGate Proxy"
+}
+```
+
 ## Champ `redacted_matches` (si policy org = metadata_plus_redacted_match)
 
 ```json
