@@ -70,13 +70,18 @@ export function extractTextCandidates(buf: string): string[] {
   return [...new Set(out)].slice(0, 50)
 }
 
+function resolveFilterMode(): "observe" | "enforce" {
+  const env = (process.env.OPSGATE_PROXY_MODE || "").toLowerCase()
+  if (env === "observe" || env === "enforce") return env
+  const cfg = getProxyRemoteConfig()
+  if (cfg.mode === "observe" || cfg.mode === "enforce") return cfg.mode
+  return "enforce"
+}
+
 function shouldEnforceBlock(severity: string | null): boolean {
   const cfg = getProxyRemoteConfig()
-  if (!cfg.enabled) return false
-  // Mode enforce org, ou forçage env OPSGATE_PROXY_MODE=enforce
-  const mode =
-    (process.env.OPSGATE_PROXY_MODE || cfg.mode || "observe").toLowerCase()
-  if (mode !== "enforce") return false
+  if (cfg.enabled === false) return false
+  if (resolveFilterMode() !== "enforce") return false
   return severity === "high" || severity === "medium"
 }
 

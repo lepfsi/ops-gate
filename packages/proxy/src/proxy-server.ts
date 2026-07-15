@@ -10,6 +10,7 @@ import { log } from "./log.js"
 import { mitmConnect } from "./mitm.js"
 import { createStreamObserver } from "./observe.js"
 import { generatePac } from "./pac.js"
+import { getProxyRemoteConfig } from "./sync.js"
 
 function parseHostPort(
   hostHeader: string,
@@ -145,18 +146,30 @@ export function startProxyServer(cfg: ProxyConfig): http.Server {
   const server = http.createServer((req, res) => {
     const urlPath = (req.url || "").split("?")[0]
     if (urlPath === "/opsgate-proxy/health" || urlPath === "/healthz") {
+      const remote = getProxyRemoteConfig()
+      const envMode = (process.env.OPSGATE_PROXY_MODE || "").toLowerCase()
+      const filterMode =
+        envMode === "observe" || envMode === "enforce"
+          ? envMode
+          : remote.mode || "enforce"
       res.writeHead(200, { "content-type": "application/json" })
       res.end(
         JSON.stringify({
           ok: true,
-          phase: "P2",
-          mode: cfg.mode,
+          phase: "P3",
           mitm: cfg.mitm,
+          /** observe = journal seul | enforce = coupe le flux si medium/high */
+          filter_mode: filterMode,
+          filter_enabled: remote.enabled !== false,
           ca_ready: caExists(),
           allowlist: cfg.allowlist,
           listen: `${cfg.host}:${cfg.port}`,
           api_base: cfg.apiBase,
-          org_code: cfg.orgCode
+          org_code: cfg.orgCode,
+          note:
+            "Le proxy ne fait PAS de banner warn (c’est l’extension). " +
+            "Proxy: observe=log MMC, enforce=coupe la requête. " +
+            "Chrome doit être lancé avec --proxy-server=127.0.0.1:8888"
         })
       )
       return

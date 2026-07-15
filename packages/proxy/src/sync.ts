@@ -57,9 +57,20 @@ export async function syncProxyConfig(state: AgentState): Promise<ProxyRemoteCon
       }
       rules_pack?: { version?: string }
     }
+    // Env OPSGATE_PROXY_MODE prime sur l’API (debug local)
+    const envMode = (process.env.OPSGATE_PROXY_MODE || "").toLowerCase()
+    const apiMode =
+      data.proxy?.mode === "enforce"
+        ? "enforce"
+        : data.proxy?.mode === "observe"
+          ? "observe"
+          : "enforce"
     lastConfig = {
       enabled: data.proxy?.enabled !== false,
-      mode: data.proxy?.mode === "enforce" ? "enforce" : "observe",
+      mode:
+        envMode === "observe" || envMode === "enforce"
+          ? (envMode as "observe" | "enforce")
+          : apiMode,
       config_epoch: data.policy?.config_epoch,
       rules_pack_version:
         data.rules_pack?.version || data.policy?.rules_pack_version,
