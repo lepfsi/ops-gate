@@ -155,6 +155,14 @@ export interface OrgMonitoringSettings {
   notifications?: OrgNotificationSettings
   /** Titulaire licence (entreprise) */
   licenseDisplay?: OrgLicenseDisplay
+  /**
+   * Proxy local org (P3 foundations).
+   * mode observe = events only ; enforce = futur mask/block (stub P3).
+   */
+  proxy?: {
+    enabled: boolean
+    mode: "observe" | "enforce"
+  }
 }
 
 /** Code recovery one-time (hash only en base ; clair affiché une fois) */
@@ -225,6 +233,10 @@ export const DEFAULT_MONITORING_SETTINGS: OrgMonitoringSettings = {
     seats: 0,
     activatedAt: null,
     licenseKeyFingerprint: null
+  },
+  proxy: {
+    enabled: true,
+    mode: "observe"
   }
 }
 
@@ -340,6 +352,18 @@ export function mergeMonitoringSettings(
       breaks: Array.isArray(partial.schedule.breaks)
         ? partial.schedule.breaks
         : DEFAULT_MONITORING_SETTINGS.schedule.breaks
+    }
+  }
+  if (partial.proxy && typeof partial.proxy === "object") {
+    base.proxy = {
+      enabled:
+        typeof partial.proxy.enabled === "boolean"
+          ? partial.proxy.enabled
+          : base.proxy!.enabled,
+      mode:
+        partial.proxy.mode === "enforce" || partial.proxy.mode === "observe"
+          ? partial.proxy.mode
+          : base.proxy!.mode
     }
   }
   return base
@@ -567,6 +591,8 @@ export interface Agent {
    * Même PC / rebuild → même fingerprint → ré-enroll du même agent.
    */
   deviceFingerprint?: string
+  /** extension (défaut) | proxy (data-plane local P2+) */
+  deviceType?: "extension" | "proxy"
 }
 
 export interface PasswordResetChallenge {

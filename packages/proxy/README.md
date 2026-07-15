@@ -108,6 +108,11 @@ PAC HTTP (proxy déjà lancé) :
 - Enroll `device_type=proxy` → `data/agent.json`
 - Events `source=proxy` / `decision=observe` vers la console
 
-## P3 (suivant)
+## P3 foundations (en cours)
 
-Installer Windows, badge console « Proxy », mode enforce, pack sync.
+- Badge console **Proxy** (`device_type`)
+- Sync config / heartbeat (`GET /v1/agents/me/config` toutes les 2 min)
+- Flags org `proxy.mode` observe|enforce (enforce = stub log)
+- Helper : `.\scripts\install-proxy-windows.ps1`
+
+Voir [`PROXY-P3.md`](../../docs/architecture/PROXY-P3.md).

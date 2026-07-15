@@ -1621,11 +1621,13 @@ export class MemoryStore implements OpsGateStore {
     userId?: string
     personalLicenseKey?: string
     deviceFingerprint?: string
+    deviceType?: "extension" | "proxy"
   }): Promise<Agent & { replaced?: boolean }> {
     const now = new Date().toISOString()
     const tokenHash = hashToken(input.token)
     const labelKey = (input.deviceLabel || "").trim().toLowerCase()
     const fp = (input.deviceFingerprint || "").trim()
+    const dtype = input.deviceType === "proxy" ? "proxy" : "extension"
     const org = this.orgs.get(input.orgId)
     const personal = !!org?.isPersonal
 
@@ -1650,6 +1652,7 @@ export class MemoryStore implements OpsGateStore {
         userId: input.userId ?? existing.userId,
         personalAccount: personal,
         deviceFingerprint: fp || existing.deviceFingerprint,
+        deviceType: dtype,
         licenseAssigned: personal
           ? assignLicense
           : existing.licenseAssigned === true,
@@ -1700,6 +1703,7 @@ export class MemoryStore implements OpsGateStore {
       personalAccount: personal,
       unlicensedSince: personal && assignLicense ? undefined : now,
       deviceFingerprint: fp || undefined,
+      deviceType: dtype,
       replaced: false
     }
     this.agents.set(agent.id, agent)

@@ -30,6 +30,7 @@ import {
   AGENT_STATE_PATH
 } from "./agent-state.js"
 import { setAgentStateGetter } from "./observe.js"
+import { startConfigPoll } from "./sync.js"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const pkgRoot = path.resolve(__dirname, "..")
@@ -197,8 +198,11 @@ async function main() {
     setAgentStateGetter(() => getOrLoadState())
 
     const server = startProxyServer(cfg)
+    // P3 foundation — heartbeat + flags proxy (observe|enforce stub)
+    const stopPoll = startConfigPoll(() => getOrLoadState(), 120_000)
 
     const shutdown = () => {
+      stopPoll()
       const st = getOrLoadState()
       if (st) void flushEvents(st)
       try {

@@ -139,7 +139,9 @@ CREATE TABLE IF NOT EXISTS agents (
   last_config_epoch INT,
   group_id TEXT,
   /** Empreinte installation extension (anti-doublon re-enroll) */
-  device_fingerprint TEXT
+  device_fingerprint TEXT,
+  /** extension | proxy */
+  device_type TEXT NOT NULL DEFAULT 'extension'
 );
 
 CREATE INDEX IF NOT EXISTS agents_org_idx ON agents(org_id);
