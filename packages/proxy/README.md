@@ -83,6 +83,7 @@ chrome.exe --proxy-server=127.0.0.1:8888
 | `OPSGATE_API_URL` | `http://127.0.0.1:8787` | Control plane |
 | `OPSGATE_ORG_CODE` | `DEMO-OPSGATE` | Org enroll |
 | `OPSGATE_PROXY_AUTO_ENROLL` | `1` | Enroll au serve si pas de token |
+| `OPSGATE_PROXY_MODE` | `enforce` | `enforce` = coupe flux medium/high ; `observe` = journal seul |
 
 ## Chrome (test forcé — fiable sous Windows)
 

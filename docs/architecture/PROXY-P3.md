@@ -15,7 +15,8 @@
 | Flags org `proxy.mode` observe/enforce | **Oui** (config agent) | Enforce réel = suite |
 | Sync config / heartbeat | **Oui** (poll 2 min) | — |
 | Helper install Windows (dev) | **Oui** (script PS1) | MSI signé = suite |
-| Mode enforce mask/block | **Stub log only** | Suite P3.1 |
+| Mode enforce (filtre) | **Oui** : abort flux si medium/high ; events `decision=block` | Banner UX = extension |
+| Uploads fichier (multipart) | **Oui** : extract filename + scan texte ; `file_names` dans events | PDF binaire = partiel |
 | Pack signé côté proxy | **epoch + version exposés** | Vérif ed25519 = suite |
 
 ---

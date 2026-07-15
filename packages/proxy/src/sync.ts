@@ -15,7 +15,11 @@ export type ProxyRemoteConfig = {
 
 let lastConfig: ProxyRemoteConfig = {
   enabled: true,
-  mode: "observe"
+  // Défaut enforce : filtre actif comme l’extension (surcharge API / env)
+  mode:
+    (process.env.OPSGATE_PROXY_MODE || "enforce").toLowerCase() === "observe"
+      ? "observe"
+      : "enforce"
 }
 
 export function getProxyRemoteConfig(): ProxyRemoteConfig {
@@ -68,11 +72,13 @@ export async function syncProxyConfig(state: AgentState): Promise<ProxyRemoteCon
       rules_pack_version: lastConfig.rules_pack_version ?? null,
       hosts: lastConfig.enabled_hosts?.length ?? 0
     })
-    if (lastConfig.mode === "enforce") {
-      log("warn", "enforce_stub", {
-        note: "P3 foundation — enforce not applied yet (observe only)"
-      })
-    }
+    log("info", "proxy_filter_mode", {
+      mode: lastConfig.mode,
+      note:
+        lastConfig.mode === "enforce"
+          ? "medium/high detections abort client→server stream"
+          : "journal only (no block)"
+    })
     return lastConfig
   } catch (e) {
     log("warn", "config_sync_error", {

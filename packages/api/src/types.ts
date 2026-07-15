@@ -236,7 +236,8 @@ export const DEFAULT_MONITORING_SETTINGS: OrgMonitoringSettings = {
   },
   proxy: {
     enabled: true,
-    mode: "observe"
+    /** enforce = le proxy coupe les flux medium/high (filtre, y compris uploads textuels) */
+    mode: "enforce"
   }
 }
 
@@ -637,8 +638,10 @@ export type EventDecision =
   | "cancel"
   | "unenroll"
   | "enroll"
-  /** Proxy P1/P2 : détection observée sans action utilisateur */
+  /** Proxy : détection observée (pas de blocage) */
   | "observe"
+  /** Proxy enforce : flux coupé suite à détection */
+  | "block"
 
 /** low | medium | high | warning (system.unenroll) */
 export type EventSeverity = "low" | "medium" | "high" | "warning"

@@ -731,6 +731,14 @@ textarea.input {
   color: #1d4ed8;
 }
 
+.decision-btn--block {
+  border-left-color: #b91c1c;
+  background: linear-gradient(135deg, #fef2f2 0%, var(--surface-2) 70%);
+}
+.decision-btn--block .decision-count {
+  color: #b91c1c;
+}
+
 .decision-btn:hover {
   border-color: var(--accent);
   box-shadow: 0 1px 4px rgba(15, 23, 42, 0.06);
@@ -778,6 +786,9 @@ html[data-theme="dark"] .decision-btn--unenroll {
 }
 html[data-theme="dark"] .decision-btn--observe {
   background: linear-gradient(135deg, rgba(37, 99, 235, 0.14) 0%, var(--surface-2) 75%);
+}
+html[data-theme="dark"] .decision-btn--block {
+  background: linear-gradient(135deg, rgba(185, 28, 28, 0.14) 0%, var(--surface-2) 75%);
 }
 
 /* ========== Feedback ========== */

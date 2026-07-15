@@ -27,7 +27,7 @@ Complément de [PLATFORM-v1.1.md](./PLATFORM-v1.1.md).
 | Champ | Valeurs |
 |-------|---------|
 | `source` | `prompt` \| `file` \| `system` \| `text` \| **`proxy`** (P2) |
-| `decision` | `mask_send` \| `send_anyway` \| `cancel` \| `enroll` \| `unenroll` \| **`observe`** (proxy mode observe) |
+| `decision` | `mask_send` \| `send_anyway` \| `cancel` \| `enroll` \| `unenroll` \| **`observe`** \| **`block`** (proxy) |
 
 Exemple event proxy (observe) :
 
