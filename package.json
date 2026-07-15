@@ -26,7 +26,9 @@
     "proxy:dev": "pnpm --filter @opsgate/proxy dev",
     "proxy:serve": "pnpm --filter @opsgate/proxy serve",
     "proxy:pac": "pnpm --filter @opsgate/proxy pac",
-    "proxy:inspect": "pnpm --filter @opsgate/proxy inspect"
+    "proxy:inspect": "pnpm --filter @opsgate/proxy inspect",
+    "proxy:gen-ca": "pnpm --filter @opsgate/proxy gen-ca",
+    "proxy:ca-path": "pnpm --filter @opsgate/proxy ca-path"
   },
   "dependencies": {
     "@opsgate/engine": "workspace:*",

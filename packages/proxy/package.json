@@ -1,7 +1,7 @@
 {
   "name": "@opsgate/proxy",
-  "version": "0.1.0-p0",
-  "description": "OpsGate local HTTPS proxy spike (P0) — PAC + allowlist + engine path",
+  "version": "0.2.0-p1",
+  "description": "OpsGate local HTTPS proxy — P1 MITM observe allowlist + engine",
   "private": true,
   "type": "module",
   "bin": {
@@ -12,13 +12,17 @@
     "serve": "tsx src/index.ts serve",
     "pac": "tsx src/index.ts pac",
     "inspect": "tsx src/index.ts inspect",
+    "gen-ca": "tsx src/index.ts gen-ca",
+    "ca-path": "tsx src/index.ts ca-path",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@opsgate/engine": "workspace:*"
+    "@opsgate/engine": "workspace:*",
+    "node-forge": "^1.4.0"
   },
   "devDependencies": {
     "@types/node": "20.11.5",
+    "@types/node-forge": "^1.3.14",
     "tsx": "4.19.2",
     "typescript": "5.3.3"
   }
