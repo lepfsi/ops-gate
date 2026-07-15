@@ -337,6 +337,11 @@ export interface PolicyProfile {
   assignedUserIds: string[]
   /** Messages banner (override policy org si définis) */
   userMessages?: Partial<PolicyUserMessages>
+  /**
+   * Horaires de ce profil (optionnel).
+   * Si enabled, remplace le planning org pour les alertes offline de ces agents.
+   */
+  workSchedule?: WorkSchedule | null
   updatedAt: string
 }
 
@@ -359,6 +364,8 @@ export interface Policy {
    * Si true : policy org défaut protège le désenrôlement (mdp admin requis).
    */
   protectUnenroll: boolean
+  /** Horaires policy org (optionnel, fallback monitoring org) */
+  workSchedule?: WorkSchedule | null
   /**
    * Epoch de force-sync (incrémenté depuis la console).
    */

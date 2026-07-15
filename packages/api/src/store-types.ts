@@ -114,6 +114,7 @@ export type EffectivePolicyBundle = {
     eventReporting: boolean
     protectUnenroll: boolean
     userMessages?: Partial<import("./types").PolicyUserMessages>
+    workSchedule?: import("./types").WorkSchedule | null
   }
   /** Admins actifs (hash) pour l'agent — username = label ou email */
   admins: Array<{
@@ -158,6 +159,7 @@ export interface OpsGateStore {
         | "protectUnenroll"
         | "configEpoch"
         | "userMessages"
+        | "workSchedule"
       >
     >
   ): Promise<Policy | undefined>
@@ -236,6 +238,7 @@ export interface OpsGateStore {
     orgId: string,
     input: {
       userMessages?: Partial<import("./types").PolicyUserMessages>
+      workSchedule?: import("./types").WorkSchedule | null
       id?: string
       name: string
       department?: string
@@ -315,6 +318,11 @@ export interface OpsGateStore {
   getActivePackPayload(orgId: string): Promise<RulesPackPayload | undefined>
   publishPack(input: PublishPackInput): Promise<PublishPackResult>
   activatePack(orgId: string, version: string): Promise<ActivatePackResult>
+  deletePack(
+    orgId: string,
+    version: string
+  ): Promise<{ ok: boolean; error?: string }>
+  prunePacks(orgId: string, keep?: number): Promise<{ deleted: number }>
 
   enrollAgent(input: {
     orgId: string

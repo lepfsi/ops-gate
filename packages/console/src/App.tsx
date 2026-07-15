@@ -347,7 +347,7 @@ export default function App() {
       })
       setInfo(
         ids.length
-          ? `Pack ${res.version} : ${res.rules_count} règles actives — désactivées : ${ids.join(", ")} (voir Audit → rule_disable)`
+          ? `Pack ${res.version} : ${res.rules_count} règles actives  -  désactivées : ${ids.join(", ")} (voir Audit → rule_disable)`
           : `Publié & activé ${res.version} (${res.rules_count} règles)`
       )
       await loadTab("packs")
@@ -627,7 +627,7 @@ export default function App() {
             // Offline = échec : l’agent ne poll pas, forcer l’epoch ne sert à rien maintenant
             if (offlineMs > 15 * 60 * 1000) {
               setError(
-                `Force sync échoué — agent hors-ligne depuis ${Math.round(offlineMs / 60000)} min. ` +
+                `Force sync échoué  -  agent hors-ligne depuis ${Math.round(offlineMs / 60000)} min. ` +
                   `Il doit être online (dernier sync < 15 min) pour recevoir la config (poll ≤2 min).`
               )
               return
@@ -705,6 +705,19 @@ export default function App() {
           onPublishNotes={setPublishNotes}
           onPublish={onPublish}
           onActivate={onActivate}
+          onDelete={async (version) => {
+            setBusy(true)
+            setError(null)
+            try {
+              await api.deletePack(version)
+              setInfo(`Pack ${version} supprime`)
+              await loadTab("packs")
+            } catch (e) {
+              setError(String(e))
+            } finally {
+              setBusy(false)
+            }
+          }}
         />
       )}
       {tab === "agents" && (
@@ -728,7 +741,7 @@ export default function App() {
               }
               setInfo(
                 r?.message ||
-                  `Agent ${id} révoqué — l’extension repasse en local_only au prochain sync (≤ 2 min), sans mot de passe local.`
+                  `Agent ${id} révoqué  -  l’extension repasse en local_only au prochain sync (≤ 2 min), sans mot de passe local.`
               )
               await loadTab("agents")
               await loadTab("summary")
@@ -745,7 +758,7 @@ export default function App() {
             setInfo(null)
             try {
               await api.assignAgentProfile(agentId, profileId)
-              setInfo("Profil assigné — force-sync déclenché pour les agents")
+              setInfo("Profil assigné  -  force-sync déclenché pour les agents")
               await loadTab("agents")
             } catch (e) {
               setError(String(e))
@@ -759,7 +772,7 @@ export default function App() {
             setInfo(null)
             try {
               await api.assignAgentUser(agentId, userId)
-              setInfo("Utilisateur lié — policy via groupes au prochain sync")
+              setInfo("Utilisateur lié  -  policy via groupes au prochain sync")
               await loadTab("agents")
             } catch (e) {
               setError(String(e))
@@ -971,7 +984,7 @@ function SummaryView({
       setDrillEvents(list)
       if (list.length === 0 && (summary.by_decision?.[k] || 0) > 0) {
         setInfo?.(
-          `Compteur « ${k} » = ${summary.by_decision?.[k]} mais liste vide — recharger l’API ou vérifier org DEMO-OPSGATE.`
+          `Compteur « ${k} » = ${summary.by_decision?.[k]} mais liste vide  -  recharger l’API ou vérifier org DEMO-OPSGATE.`
         )
       }
     } catch (e) {
@@ -1006,7 +1019,7 @@ function SummaryView({
     try {
       const r = await api.mergeAgents(keep.id, merge)
       setInfo?.(
-        `Fusion OK — conservé ${r.kept.slice(0, 12)}… · ${r.removed} supprimé(s)`
+        `Fusion OK  -  conservé ${r.kept.slice(0, 12)}… · ${r.removed} supprimé(s)`
       )
       onMerged?.()
       setPanel(null)
@@ -1063,16 +1076,16 @@ function SummaryView({
               return (
                 <tr key={a.id}>
                   <td>
-                    <strong>{a.device_label || "—"}</strong>
+                    <strong>{a.device_label || " - "}</strong>
                     <div className="mono muted" style={{ fontSize: 10 }}>
                       {a.id.slice(0, 16)}…
                     </div>
                   </td>
-                  <td className="muted">{a.host_name || "—"}</td>
+                  <td className="muted">{a.host_name || " - "}</td>
                   <td className="muted" style={{ fontSize: 12 }}>
                     {a.last_seen_at
                       ? new Date(a.last_seen_at).toLocaleString("fr-FR")
-                      : "—"}
+                      : " - "}
                   </td>
                   <td>{formatOffline(a.offline_for_ms)}</td>
                   <td>
@@ -1097,7 +1110,7 @@ function SummaryView({
                         disabled={busy || offline}
                         title={
                           offline
-                            ? "Indisponible : agent hors-ligne — force sync échouera jusqu’au retour online"
+                            ? "Indisponible : agent hors-ligne  -  force sync échouera jusqu’au retour online"
                             : "Forcer resync policy/pack maintenant"
                         }
                         onClick={() =>
@@ -1257,10 +1270,10 @@ function SummaryView({
                   {drillEvents.slice(0, 80).map((e) => (
                     <tr key={e.id || `${e.ts}-${e.decision}-${e.hostname}`}>
                       <td className="muted">
-                        {e.ts ? new Date(e.ts).toLocaleString("fr-FR") : "—"}
+                        {e.ts ? new Date(e.ts).toLocaleString("fr-FR") : " - "}
                       </td>
                       <td>
-                        <strong>{e.device_label || "—"}</strong>
+                        <strong>{e.device_label || " - "}</strong>
                       </td>
                       <td>
                         <strong>{decisionLabelFr(e.decision)}</strong>
@@ -1270,7 +1283,7 @@ function SummaryView({
                         </div>
                       </td>
                       <td className="muted" style={{ fontSize: 12 }}>
-                        {e.hostname || "—"}
+                        {e.hostname || " - "}
                       </td>
                       <td>
                         <span className={`badge ${e.highest_severity || "low"}`}>
@@ -1278,7 +1291,7 @@ function SummaryView({
                         </span>
                       </td>
                       <td className="muted" style={{ fontSize: 11 }}>
-                        {(e.types || []).join(", ") || "—"}
+                        {(e.types || []).join(", ") || " - "}
                         {e.file_names?.length
                           ? ` · fichiers: ${e.file_names.slice(0, 2).join(", ")}`
                           : ""}
@@ -1420,7 +1433,7 @@ function SummaryView({
                 {conn.schedule_active && !conn.within_work_hours ? (
                   <span className="muted" style={{ fontSize: 11 }}>
                     {" "}
-                    (hors horaires — alertes silencieuses)
+                    (hors horaires  -  alertes silencieuses)
                   </span>
                 ) : null}
               </button>
@@ -1464,7 +1477,7 @@ function SummaryView({
               <li className="muted" style={{ fontSize: 12 }}>
                 Pack{" "}
                 <strong className="mono">
-                  {summary.active_rules_pack?.version || "—"}
+                  {summary.active_rules_pack?.version || " - "}
                 </strong>
               </li>
             </ul>
@@ -1577,7 +1590,7 @@ function SummaryView({
               </button>
             </div>
             <p className="muted" style={{ fontSize: 12 }}>
-              {dups.length} fingerprint(s) avec plusieurs agents — révoquez les
+              {dups.length} fingerprint(s) avec plusieurs agents  -  révoquez les
               entrées obsolètes dans Agents.
             </p>
           </div>
@@ -1856,7 +1869,7 @@ function MonitoringSettingsView({
                       }
                     })
                     setInfo(
-                      "Paramètres monitoring enregistrés — seuils, rétention logs & planning."
+                      "Paramètres monitoring enregistrés  -  seuils, rétention logs & planning."
                     )
                   } catch (e) {
                     setError(String(e))
@@ -2175,7 +2188,7 @@ function LoginScreen({
                       setBusy(true)
                       try {
                         await api.confirmPrincipalOtp(otp, otpNew)
-                        setInfo("Mdp mis à jour — connectez-vous")
+                        setInfo("Mdp mis à jour  -  connectez-vous")
                         setPassword(otpNew)
                         setEmail(resetEmail)
                         setResetStep(null)
@@ -2238,6 +2251,11 @@ function PolicyView({
   const [msgForceTitle, setMsgForceTitle] = useState("")
   const [msgForceBody, setMsgForceBody] = useState("")
   const [showMsgEditor, setShowMsgEditor] = useState(false)
+  const [showSchedule, setShowSchedule] = useState(false)
+  const [schedEnabled, setSchedEnabled] = useState(false)
+  const [schedTz, setSchedTz] = useState("Europe/Paris")
+  const [schedStart, setSchedStart] = useState("08:00")
+  const [schedEnd, setSchedEnd] = useState("17:00")
 
   // New profile form
   const [profName, setProfName] = useState("")
@@ -2276,12 +2294,17 @@ function PolicyView({
     setMsgBlockBody(um.blockBody || "")
     setMsgForceTitle(um.maskForceTitle || "")
     setMsgForceBody(um.maskForceBody || "")
+    const ws = policy.workSchedule
+    setSchedEnabled(!!ws?.enabled)
+    setSchedTz(ws?.timezone || "Europe/Paris")
+    setSchedStart(ws?.workStart || "08:00")
+    setSchedEnd(ws?.workEnd || "17:00")
   }, [policy])
 
   if (!policy) {
     return (
       <div className="card empty">
-        Policy introuvable. API démarrée ?
+        Policy introuvable. API demarree ?
         <div style={{ marginTop: 12 }}>
           <button className="btn secondary" type="button" onClick={onReload}>
             Retry
@@ -2313,10 +2336,18 @@ function PolicyView({
         event_reporting: eventReporting,
         protect_unenroll: protectUnenroll,
         default_action: defaultAction,
-        user_messages
+        user_messages,
+        work_schedule: {
+          enabled: schedEnabled,
+          timezone: schedTz,
+          workDays: [1, 2, 3, 4, 5],
+          workStart: schedStart,
+          workEnd: schedEnd,
+          breaks: []
+        }
       })
       setInfo(
-        "Policy org + messages utilisateur enregistrés. Agents sous ~2 min (ou Force sync)."
+        "Policy enregistree. Agents sous ~2 min (ou Force sync)."
       )
       onReload()
     } catch (e) {
@@ -2356,7 +2387,7 @@ function PolicyView({
                     <td>
                       <strong>{p.name}</strong>
                     </td>
-                    <td>{p.department || "—"}</td>
+                    <td>{p.department || " - "}</td>
                     <td className="mono" style={{ fontSize: 11 }}>
                       {p.defaultAction}
                     </td>
@@ -2443,7 +2474,7 @@ function PolicyView({
       <div className="card">
         <h2>Policy org par défaut</h2>
         <p className="muted" style={{ fontSize: 12 }}>
-          v{policy.version} · epoch {policy.configEpoch ?? "—"} · pack{" "}
+          v{policy.version} · epoch {policy.configEpoch ?? " - "} · pack{" "}
           {policy.rulesPackVersion}
         </p>
 
@@ -2499,6 +2530,65 @@ function PolicyView({
           type="button"
           className="btn secondary btn-sm"
           style={{ marginTop: 10 }}
+          onClick={() => setShowSchedule((v) => !v)}>
+          {showSchedule ? "Masquer horaires" : "Horaires (optionnel)"}
+        </button>
+        {showSchedule && (
+          <div
+            className="form-stack"
+            style={{
+              marginTop: 10,
+              maxWidth: 480,
+              padding: 12,
+              background: "var(--surface-2)",
+              borderRadius: 10,
+              border: "1px solid var(--line)"
+            }}>
+            <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <input
+                type="checkbox"
+                checked={schedEnabled}
+                onChange={(e) => setSchedEnabled(e.target.checked)}
+              />
+              Activer pour cette policy (sinon planning Monitoring org)
+            </label>
+            <label className="field-label">Fuseau</label>
+            <select
+              className="input"
+              value={schedTz}
+              onChange={(e) => setSchedTz(e.target.value)}>
+              <option value="Europe/Paris">Europe/Paris</option>
+              <option value="Africa/Douala">Africa/Douala</option>
+              <option value="Africa/Nairobi">Africa/Nairobi</option>
+              <option value="Africa/Antananarivo">Africa/Antananarivo</option>
+              <option value="UTC">UTC</option>
+            </select>
+            <div className="row">
+              <div>
+                <label className="field-label">Debut</label>
+                <input
+                  className="input"
+                  type="time"
+                  value={schedStart}
+                  onChange={(e) => setSchedStart(e.target.value)}
+                />
+              </div>
+              <div>
+                <label className="field-label">Fin</label>
+                <input
+                  className="input"
+                  type="time"
+                  value={schedEnd}
+                  onChange={(e) => setSchedEnd(e.target.value)}
+                />
+              </div>
+            </div>
+          </div>
+        )}
+        <button
+          type="button"
+          className="btn secondary btn-sm"
+          style={{ marginTop: 10 }}
           onClick={() => setShowMsgEditor((v) => !v)}>
           {showMsgEditor ? "Masquer messages" : "Messages utilisateur"}
         </button>
@@ -2521,41 +2611,41 @@ function PolicyView({
               value={msgAdminNotice}
               onChange={(e) => setMsgAdminNotice(e.target.value)}
             />
-            <label className="field-label">Alerte — titre</label>
+            <label className="field-label">Alerte  -  titre</label>
             <input
               className="input"
               value={msgAlertTitle}
               onChange={(e) => setMsgAlertTitle(e.target.value)}
-              placeholder="Données sensibles détectées — action requise"
+              placeholder="Données sensibles détectées  -  action requise"
             />
-            <label className="field-label">Alerte — corps</label>
+            <label className="field-label">Alerte  -  corps</label>
             <textarea
               className="input"
               rows={2}
               value={msgAlertBody}
               onChange={(e) => setMsgAlertBody(e.target.value)}
             />
-            <label className="field-label">Blocage total — titre</label>
+            <label className="field-label">Blocage total  -  titre</label>
             <input
               className="input"
               value={msgBlockTitle}
               onChange={(e) => setMsgBlockTitle(e.target.value)}
               placeholder="Envoi non autorisé par votre administrateur"
             />
-            <label className="field-label">Blocage total — corps</label>
+            <label className="field-label">Blocage total  -  corps</label>
             <textarea
               className="input"
               rows={3}
               value={msgBlockBody}
               onChange={(e) => setMsgBlockBody(e.target.value)}
             />
-            <label className="field-label">Masquage forcé — titre</label>
+            <label className="field-label">Masquage forcé  -  titre</label>
             <input
               className="input"
               value={msgForceTitle}
               onChange={(e) => setMsgForceTitle(e.target.value)}
             />
-            <label className="field-label">Masquage forcé — corps</label>
+            <label className="field-label">Masquage forcé  -  corps</label>
             <textarea
               className="input"
               rows={2}
@@ -2687,52 +2777,52 @@ function PolicyView({
               value={profMsgNotice}
               onChange={(e) => setProfMsgNotice(e.target.value)}
             />
-            <label className="field-label">Alerte — titre</label>
+            <label className="field-label">Alerte  -  titre</label>
             <input
               className="input"
               value={profMsgAlertTitle}
               onChange={(e) => setProfMsgAlertTitle(e.target.value)}
             />
-            <label className="field-label">Alerte — corps</label>
+            <label className="field-label">Alerte  -  corps</label>
             <textarea
               className="input"
               rows={2}
               value={profMsgAlertBody}
               onChange={(e) => setProfMsgAlertBody(e.target.value)}
             />
-            <label className="field-label">Blocage total — titre</label>
+            <label className="field-label">Blocage total  -  titre</label>
             <input
               className="input"
               value={profMsgBlockTitle}
               onChange={(e) => setProfMsgBlockTitle(e.target.value)}
             />
-            <label className="field-label">Blocage total — corps</label>
+            <label className="field-label">Blocage total  -  corps</label>
             <textarea
               className="input"
               rows={2}
               value={profMsgBlockBody}
               onChange={(e) => setProfMsgBlockBody(e.target.value)}
             />
-            <label className="field-label">Masquage forcé — titre</label>
+            <label className="field-label">Masquage forcé  -  titre</label>
             <input
               className="input"
               value={profMsgForceTitle}
               onChange={(e) => setProfMsgForceTitle(e.target.value)}
             />
-            <label className="field-label">Masquage forcé — corps</label>
+            <label className="field-label">Masquage forcé  -  corps</label>
             <textarea
               className="input"
               rows={2}
               value={profMsgForceBody}
               onChange={(e) => setProfMsgForceBody(e.target.value)}
             />
-            <label className="field-label">Fichier — titre</label>
+            <label className="field-label">Fichier  -  titre</label>
             <input
               className="input"
               value={profMsgAlertTitleFile}
               onChange={(e) => setProfMsgAlertTitleFile(e.target.value)}
             />
-            <label className="field-label">Fichier — corps</label>
+            <label className="field-label">Fichier  -  corps</label>
             <textarea
               className="input"
               rows={2}
@@ -2863,7 +2953,8 @@ function PacksView({
   onDisableRuleId,
   onPublishNotes,
   onPublish,
-  onActivate
+  onActivate,
+  onDelete
 }: {
   packs: PackListItem[]
   activeVersion?: string
@@ -2874,18 +2965,24 @@ function PacksView({
   onPublishNotes: (v: string) => void
   onPublish: () => void
   onActivate: (v: string) => void
+  onDelete: (v: string) => void
 }) {
   return (
     <>
       <div className="card">
-        <h2>Publier un pack</h2>
-        <div className="row" style={{ marginBottom: 10 }}>
+        <h2>Pack actif et publication</h2>
+        <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>
+          Actif : <strong className="mono">{activeVersion || "-"}</strong>
+          {" · "}
+          historique plafonne a 12 versions inactives (prune auto)
+        </p>
+        <div className="row" style={{ marginBottom: 10, flexWrap: "wrap" }}>
           <input
             className="input"
             style={{ minWidth: 280 }}
             value={disableRuleId}
             onChange={(e) => onDisableRuleId(e.target.value)}
-            placeholder="IDs à désactiver : email-address,phone-fr"
+            placeholder="IDs a desactiver : email-address,phone-fr"
           />
           <input
             className="input"
@@ -2895,12 +2992,9 @@ function PacksView({
             placeholder="notes (ex. pilote RH)"
           />
           <button className="btn" type="button" disabled={busy} onClick={onPublish}>
-            {busy ? "…" : "Publier & activer"}
+            {busy ? "..." : "Publier et activer"}
           </button>
         </div>
-        <p className="muted" style={{ fontSize: 12 }}>
-          Pack actif : <strong>{activeVersion || "—"}</strong>
-        </p>
       </div>
 
       <div className="card">
@@ -2914,7 +3008,7 @@ function PacksView({
                 <th>Version</th>
                 <th>Rules</th>
                 <th>Notes</th>
-                <th>Publié</th>
+                <th>Publie</th>
                 <th></th>
               </tr>
             </thead>
@@ -2926,21 +3020,41 @@ function PacksView({
                     {p.active && <span className="badge active">active</span>}
                   </td>
                   <td>{p.rules_count}</td>
-                  <td className="muted">{p.notes || "—"}</td>
+                  <td className="muted">{p.notes || "-"}</td>
                   <td className="muted">
                     {new Date(p.published_at).toLocaleString("fr-FR")}
-                    <div className="mono">{p.checksum.slice(0, 12)}…</div>
+                    <div className="mono">{p.checksum.slice(0, 12)}...</div>
                   </td>
                   <td>
-                    {!p.active && (
-                      <button
-                        className="btn secondary"
-                        type="button"
-                        disabled={busy}
-                        onClick={() => onActivate(p.version)}>
-                        Activer
-                      </button>
-                    )}
+                    <div className="btn-group">
+                      {!p.active && (
+                        <button
+                          className="btn secondary btn-sm"
+                          type="button"
+                          disabled={busy}
+                          onClick={() => onActivate(p.version)}>
+                          Activer
+                        </button>
+                      )}
+                      {!p.active && (
+                        <button
+                          className="btn danger btn-sm"
+                          type="button"
+                          disabled={busy}
+                          onClick={() => {
+                            if (
+                              !confirm(
+                                `Supprimer le pack ${p.version} (non actif) ?`
+                              )
+                            ) {
+                              return
+                            }
+                            onDelete(p.version)
+                          }}>
+                          Suppr.
+                        </button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -3012,6 +3126,7 @@ function PeopleView({
     null
   )
   const [rcCount, setRcCount] = useState(20)
+  const [rcShowUsed, setRcShowUsed] = useState(false)
   const [grpEditId, setGrpEditId] = useState<string | null>(null)
   const [showGrpForm, setShowGrpForm] = useState(false)
 
@@ -3085,7 +3200,7 @@ function PeopleView({
                         disabled={busy || !isPrincipal}
                         title={
                           isPrincipal
-                            ? "Définir un mot de passe temporaire — l’admin devra le changer"
+                            ? "Définir un mot de passe temporaire  -  l’admin devra le changer"
                             : "Réservé à l’Administrator principal"
                         }
                         onClick={() => {
@@ -3275,7 +3390,7 @@ function PeopleView({
                 msg.includes("email_already_registered")
               ) {
                 setError(
-                  "E-mail déjà inscrit — un administrateur utilise déjà cette adresse."
+                  "E-mail déjà inscrit  -  un administrateur utilise déjà cette adresse."
                 )
               } else {
                 setError(msg)
@@ -3309,13 +3424,13 @@ function PeopleView({
                     <strong>{g.name}</strong>
                   </td>
                   <td className="muted" style={{ fontSize: 12 }}>
-                    {g.description || "—"}
+                    {g.description || " - "}
                   </td>
                   <td className="mono" style={{ fontSize: 12 }}>
                     {g.policyProfileId
                       ? profiles.find((p) => p.id === g.policyProfileId)
                           ?.name || g.policyProfileId
-                      : "—"}
+                      : " - "}
                   </td>
                   <td>
                     <div className="btn-group">
@@ -3404,14 +3519,14 @@ function PeopleView({
               className="input"
               value={grpDesc}
               onChange={(e) => setGrpDesc(e.target.value)}
-              placeholder="Équipe finance — policy stricte"
+              placeholder="Équipe finance  -  policy stricte"
             />
             <label className="field-label">Profil policy lié</label>
             <select
               className="input"
               value={grpProfile}
               onChange={(e) => setGrpProfile(e.target.value)}>
-              <option value="">(pas de policy — policy org par défaut)</option>
+              <option value="">(pas de policy  -  policy org par défaut)</option>
               {profiles.map((p) => (
                 <option key={p.id} value={p.id}>
                   {p.name}
@@ -3495,13 +3610,13 @@ function PeopleView({
               {users.map((u) => (
                 <tr key={u.id}>
                   <td>{u.displayName}</td>
-                  <td className="muted">{u.email || "—"}</td>
+                  <td className="muted">{u.email || " - "}</td>
                   <td className="muted" style={{ fontSize: 12 }}>
                     {(u.groupIds || [])
                       .map(
                         (gid) => groups.find((g) => g.id === gid)?.name || gid
                       )
-                      .join(", ") || "—"}
+                      .join(", ") || " - "}
                   </td>
                   <td>
                     <button
@@ -3653,7 +3768,7 @@ function PeopleView({
           </div>
 
           <div className="card">
-            <h2>Recovery concepteur — codes one-time</h2>
+            <h2>Recovery concepteur: codes one-time</h2>
             <div className="row" style={{ gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
               <span className="host-count-pill">
                 {rcActive} actif{rcActive !== 1 ? "s" : ""}
@@ -3688,7 +3803,7 @@ function PeopleView({
                     const r = await api.generateRecoveryCodes(rcCount)
                     setRcPlain(r.codes)
                     setInfo(
-                      `${r.created} code(s) générés — copiez-les maintenant, puis force-sync agents`
+                      `${r.created} code(s) générés  -  copiez-les maintenant, puis force-sync agents`
                     )
                     await loadRecoveryPool()
                     try {
@@ -3740,6 +3855,7 @@ function PeopleView({
                 className="btn secondary"
                 type="button"
                 disabled={busy}
+                title="Ancien secret unique OPSGATE_VENDOR_RECOVERY (transition)"
                 onClick={async () => {
                   setBusy(true)
                   try {
@@ -3751,7 +3867,13 @@ function PeopleView({
                     setBusy(false)
                   }
                 }}>
-                Secret legacy
+                Secret d'urgence (env)
+              </button>
+              <button
+                type="button"
+                className="btn secondary"
+                onClick={() => setRcShowUsed((v) => !v)}>
+                {rcShowUsed ? "Masquer utilises" : "Afficher utilises"}
               </button>
             </div>
             {rcPlain && rcPlain.length > 0 && (
@@ -3765,7 +3887,7 @@ function PeopleView({
                   border: "1px solid var(--accent)"
                 }}>
                 <strong style={{ fontSize: 13 }}>
-                  Affichage unique — stockez hors ligne
+                  Affichage unique  -  stockez hors ligne
                 </strong>
                 <pre
                   className="mono"
@@ -3795,7 +3917,7 @@ function PeopleView({
                     className="btn secondary btn-sm"
                     onClick={() => {
                       const body = [
-                        "# OpsGate recovery codes — usage unique",
+                        "# OpsGate recovery codes  -  usage unique",
                         `# Généré ${new Date().toISOString()}`,
                         "# Username agent: vendor | recovery | opsgate",
                         "# Uniquement si offline ≥ 2h",
@@ -3822,39 +3944,43 @@ function PeopleView({
             )}
             {recoveryHint && (
               <p className="muted" style={{ marginTop: 10, fontSize: 12 }}>
-                Legacy : <code>{recoveryHint}</code>
+                Secret d'urgence (env) : <code>{recoveryHint}</code>
+                {" "}(fallback si pool vide; a remplace a terme par les codes one-time)
               </p>
             )}
-            {rcRows.length > 0 && (
+            {rcRows.filter((c) => rcShowUsed || c.active).length > 0 && (
               <div className="table-wrap" style={{ marginTop: 12 }}>
                 <table className="table">
                   <thead>
                     <tr>
-                      <th>État</th>
+                      <th>Etat</th>
                       <th>Label</th>
-                      <th>Créé</th>
-                      <th>Consommé</th>
+                      <th>Cree</th>
+                      <th>Consomme</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {rcRows.slice(0, 40).map((c) => (
+                    {rcRows
+                      .filter((c) => rcShowUsed || c.active)
+                      .slice(0, 40)
+                      .map((c) => (
                       <tr key={c.id}>
                         <td>
                           <span
                             className={`badge ${c.active ? "active" : "medium"}`}>
-                            {c.active ? "actif" : "utilisé"}
+                            {c.active ? "actif" : "utilise"}
                           </span>
                         </td>
-                        <td className="muted">{c.label || "—"}</td>
+                        <td className="muted">{c.label || " - "}</td>
                         <td className="muted" style={{ fontSize: 12 }}>
                           {c.created_at
                             ? new Date(c.created_at).toLocaleString("fr-FR")
-                            : "—"}
+                            : " - "}
                         </td>
                         <td className="muted" style={{ fontSize: 12 }}>
                           {c.consumed_at
                             ? new Date(c.consumed_at).toLocaleString("fr-FR")
-                            : "—"}
+                            : " - "}
                         </td>
                       </tr>
                     ))}
@@ -4085,7 +4211,7 @@ function AgentsView({
                     />
                   </td>
                   <td>
-                    <strong>{a.device_label || "—"}</strong>
+                    <strong>{a.device_label || " - "}</strong>
                     <div className="mono muted" style={{ fontSize: 11 }}>
                       {a.id}
                     </div>
@@ -4108,7 +4234,7 @@ function AgentsView({
                     {a.group_id
                       ? groups.find((g) => g.id === a.group_id)?.name ||
                         a.group_id
-                      : "—"}
+                      : " - "}
                   </td>
                   <td className="cell-select">
                     <select
@@ -4229,7 +4355,7 @@ function decisionLabelFr(d: string): string {
     case "unenroll":
       return "Désenrôlement"
     default:
-      return d || "—"
+      return d || " - "
   }
 }
 
@@ -4256,6 +4382,8 @@ function EventsView({
   const [severityF, setSeverityF] = useState("")
   const [sourceF, setSourceF] = useState("")
   const [labelF, setLabelF] = useState("")
+  const [dateFrom, setDateFrom] = useState("")
+  const [dateTo, setDateTo] = useState("")
   const [exportBusy, setExportBusy] = useState(false)
   const searchRef = useRef<HTMLInputElement>(null)
   const [archives, setArchives] = useState<
@@ -4346,17 +4474,25 @@ function EventsView({
 
   const filtered = useMemo(() => {
     const q = labelF.trim().toLowerCase()
+    const fromMs = dateFrom ? Date.parse(dateFrom + "T00:00:00") : null
+    const toMs = dateTo ? Date.parse(dateTo + "T23:59:59.999") : null
     return events.filter((e) => {
       if (decisionF && e.decision !== decisionF) return false
       if (severityF && e.highest_severity !== severityF) return false
       if (sourceF && e.source !== sourceF) return false
+      if (fromMs != null || toMs != null) {
+        const t = Date.parse(e.ts)
+        if (!Number.isFinite(t)) return false
+        if (fromMs != null && t < fromMs) return false
+        if (toMs != null && t > toMs) return false
+      }
       if (q) {
         const hay = `${e.device_label || ""} ${e.hostname || ""} ${(e.types || []).join(" ")} ${(e.file_names || []).join(" ")}`.toLowerCase()
         if (!hay.includes(q)) return false
       }
       return true
     })
-  }, [events, decisionF, severityF, sourceF, labelF])
+  }, [events, decisionF, severityF, sourceF, labelF, dateFrom, dateTo])
 
   const doExport = async (range: "week" | "all") => {
     setExportBusy(true)
@@ -4506,9 +4642,23 @@ function EventsView({
             <input
               ref={searchRef}
               className="input"
-              placeholder="Label / host / type… (/)"
+              placeholder="Label / host / type... (/)"
               value={labelF}
               onChange={(e) => setLabelF(e.target.value)}
+            />
+            <input
+              className="input"
+              type="date"
+              value={dateFrom}
+              onChange={(e) => setDateFrom(e.target.value)}
+              title="Du"
+            />
+            <input
+              className="input"
+              type="date"
+              value={dateTo}
+              onChange={(e) => setDateTo(e.target.value)}
+              title="Au"
             />
             <button
               className="btn secondary btn-sm"
@@ -4518,6 +4668,8 @@ function EventsView({
                 setSeverityF("")
                 setSourceF("")
                 setLabelF("")
+                setDateFrom("")
+                setDateTo("")
               }}>
               Reset
             </button>
@@ -4544,10 +4696,10 @@ function EventsView({
                   {filtered.map((e) => (
                     <tr key={e.id}>
                       <td className="muted">
-                        {e.ts ? new Date(e.ts).toLocaleString("fr-FR") : "—"}
+                        {e.ts ? new Date(e.ts).toLocaleString("fr-FR") : " - "}
                       </td>
                       <td>
-                        <strong>{e.device_label || "—"}</strong>
+                        <strong>{e.device_label || " - "}</strong>
                         {e.hostname && e.hostname !== "opsgate-agent" ? (
                           <div className="muted" style={{ fontSize: 11 }}>
                             site · {e.hostname}
@@ -4582,8 +4734,8 @@ function EventsView({
                                   t.startsWith("admin:") ||
                                   t === "vendor_recovery" ||
                                   t === "free"
-                              ) || "—"
-                            : "—")}
+                              ) || " - "
+                            : " - ")}
                       </td>
                       <td>
                         <span className={`badge ${e.highest_severity}`}>
@@ -4763,10 +4915,10 @@ function AuditView({ isPrincipal }: { isPrincipal: boolean }) {
                   <td className="muted">
                     {r.createdAt
                       ? new Date(r.createdAt).toLocaleString("fr-FR")
-                      : "—"}
+                      : " - "}
                   </td>
                   <td>
-                    {r.adminLabel || "—"}
+                    {r.adminLabel || " - "}
                     {r.adminEmail ? (
                       <div className="muted" style={{ fontSize: 11 }}>
                         {r.adminEmail}
@@ -4776,7 +4928,7 @@ function AuditView({ isPrincipal }: { isPrincipal: boolean }) {
                   <td>
                     <code>{r.action}</code>
                   </td>
-                  <td className="muted">{r.detail || "—"}</td>
+                  <td className="muted">{r.detail || " - "}</td>
                 </tr>
               ))}
             </tbody>
@@ -5089,7 +5241,7 @@ function MovingRulesView({
                 onChange={(e) => setName(e.target.value)}
               />
               <label className="field-label">
-                Conditions (AND — toutes doivent matcher)
+                Conditions (AND  -  toutes doivent matcher)
               </label>
               {conds.map((c, i) => (
                 <div
@@ -5165,7 +5317,7 @@ function MovingRulesView({
                 className="input"
                 value={groupId}
                 onChange={(e) => setGroupId(e.target.value)}>
-                <option value="">—</option>
+                <option value=""> - </option>
                 {groups.map((g) => (
                   <option key={g.id} value={g.id}>
                     {g.name}

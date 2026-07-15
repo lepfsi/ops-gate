@@ -1,82 +1,90 @@
-# Packs de règles — à quoi ça sert ?
+# Packs de regles: role reel (exemples)
 
 ## En une phrase
 
-Un **pack de règles** est la liste des signatures de détection (secrets, configs réseau, PII…) que les **agents enrollés** appliquent, **sans reconstruire** l’extension.
+Un **pack** est le fichier de signatures de detection (secrets, configs, PII...)
+que l'extension applique. L'admin le change depuis la console **sans reconstruire**
+l'extension ni la redistribuer.
 
-## Problème résolu
+## Analogie
 
-Sans packs :
+Imagine un antivirus:
+- le **moteur** (extension) reste installe;
+- les **definitions** (pack) se mettent a jour via le serveur.
 
-1. Tu modifies `rules.json` dans le code  
-2. Tu rebuild l’extension  
-3. Tu redistribues à tous les postes  
+Publier un pack = pousser de nouvelles definitions.
 
-Avec packs :
+## Ce que tu vois quand tu "crees" des packs
 
-1. L’admin **publie** un pack depuis la console (ou l’API)  
-2. Les agents **synchronisent** (poll ~2 min ou force-sync)  
-3. Nouvelle détection **active** sur les postes  
+A chaque **Publier et activer**, le systeme:
+1. clone le pack actif (ou le moteur de base);
+2. retire eventuellement des regles dont tu as saisi les IDs;
+3. cree une **nouvelle version** (ex. 1.0.0 -> 1.0.1);
+4. la marque **active**;
+5. les agents la telechargent au prochain sync (<= 2 min ou Force sync).
 
-## Vocabulaire
+Tu ne "crees" pas un pack vide separe: tu **versions** la liste de regles.
+L'historique s'allonge: d'ou **Suppr.** sur les versions non actives et
+**prune auto** (garde l'active + 12 inactives recentes).
 
-| Terme | Signification |
-|--------|----------------|
-| **Pack** | Snapshot versionné de règles (`1.0.0`, `1.0.1`…) |
-| **Pack actif** | Version servie aux agents au `/config` |
-| **Publier** | Créer une **nouvelle version** (souvent clone de l’active − règles désactivées) |
-| **Activer** | Choisir quelle version publiée devient **active** |
-| **Signature ed25519** | Garantit que le pack vient de ton control plane (anti-tamper) |
+## Exemples basiques
 
-## Onglet console « Packs de règles »
+### Exemple A: trop de faux positifs "email"
 
-### Voir la liste
-- Versions publiées, checksum, notes, laquelle est **active**
+1. Note la version active (ex. `1.0.0`).
+2. Dans "IDs a desactiver", saisis: `email-address`.
+3. Notes: `pilote RH moins de bruit email`.
+4. **Publier et activer** -> version `1.0.1` active, sans cette regle.
+5. Extension Options: **Synchroniser**.
+6. Un prompt avec un email ne declenche plus (ou moins) cette regle.
 
-### Publier un pack
-1. Optionnel : IDs de règles à **désactiver** (ex. `email-address` si trop de faux positifs)  
-2. Notes libres (ex. « désactive email pour pilote RH »)  
-3. **Publier** → nouvelle version (ex. `1.0.0` → `1.0.1`) **activée** par défaut  
+### Exemple B: revenir en arriere
 
-Cas d’usage typiques :
-- Réduire les faux positifs sur un département  
-- Ajouter temporairement des règles plus strictes (via API / JSON avancé)  
-- Rollback : **Activer** une ancienne version  
+1. Liste historique: `1.0.0` (inactive), `1.0.1` (active).
+2. Sur `1.0.0`, cliquer **Activer**.
+3. Force-sync: les agents reprennent `1.0.0`.
 
-### Ce que ce n’est **pas**
-- Ce n’est **pas** un éditeur no-code de regex (V2+)  
-- Ce n’est **pas** lié au Chrome Web Store  
-- Ce n’est **pas** obligatoire en mode `local_only` (règles embarquées dans l’extension)
+### Exemple C: nettoyer l'historique
 
-## Lien avec l’agent
+1. Versions mortes inutiles: **Suppr.** (impossible sur l'active).
+2. Ou laisse le prune: apres plusieurs publications, les plus vieilles
+   inactives disparaissent automatiquement.
 
-```
-Console « Publier pack 1.0.2 »
-        │
-        ▼
-API stocke pack signé + met à jour policy.rulesPackVersion
-        │
-        ▼  (sync agent ≤ 2 min ou force-sync)
-Extension vérifie signature + checksum
-        │
-        ▼
-Détection utilise les nouvelles règles
-```
+## Ce que le pack ne change **pas**
 
-## Mode personnel vs org
+| Element | Ou ca se regle |
+|---------|----------------|
+| Sites IA (chatgpt, claude...) | **Policy** / profils |
+| Action warn / mask / block | **Policy** |
+| Messages banner | **Policy** |
+| Qui a une licence | **Groupes / agents** |
+| Horaires d'alerte offline | **Monitoring** org ou **horaires policy** |
 
-| Mode | Source des règles |
-|------|-------------------|
-| **Organisation** | Pack actif de l’org (console) |
-| **Personnel** | Pack de l’org `PERSONAL` (seed API) |
-| **local_only** | Règles embarquées dans l’extension |
+Si tu publies 10 packs sans changer les IDs desactives, le contenu des regles
+est quasi identique: d'ou l'impression que "rien ne change". Il faut soit
+desactiver des regles bruyantes, soit (V2) enrichir le pack autrement.
 
-## Pour les testeurs
+## Lien technique (fichiers)
 
-1. Console → **Packs de règles** → noter la version active  
-2. Publier en désactivant une règle bruyante  
-3. Extension Options → **Synchroniser**  
-4. Vérifier que le pack affiché a changé  
-5. Retester un prompt qui déclenchait cette règle  
+| Role | Emplacement |
+|------|-------------|
+| Moteur de regles de base | packages/engine + API rules-pack.ts |
+| Stockage versions | table `rule_packs` / memory packs |
+| Activer version | update `policies.rules_pack_version` + epoch |
+| Agent recoit le pack | GET `/v1/agents/me/config` + verify signature |
+| Console UI | packages/console PacksView |
 
-Voir aussi : [`architecture/RULEPACK-SCHEMA.md`](./architecture/RULEPACK-SCHEMA.md)
+## Mode local_only (pas d'enroll)
+
+L'extension utilise ses regles **embarquees**. Les packs console ne s'appliquent
+qu'aux agents **enrolles** sur l'API.
+
+## Checklist test rapide
+
+1. Pack actif affiche dans Options agent apres sync.
+2. Publier en desactivant une regle connue.
+3. Sync agent: le numero de pack change.
+4. Retester le meme type de contenu.
+5. Activer l'ancienne version si besoin.
+
+Voir aussi: GUIDE-UTILISATEUR.md, CAHIER-CONCEPTEUR.md.

@@ -1,4 +1,4 @@
-# OpsGate — Guide utilisateur (V1)
+# OpsGate  -  Guide utilisateur (V1)
 
 **Public** : administrateurs console, pilotes, support  
 **Version produit** : 1.2  
@@ -145,7 +145,7 @@ Appliquées à l’enroll et via « Ré-évaluer ».
 
 ---
 
-## 11. Données & base — pourquoi tout peut « disparaître »
+## 11. Données & base  -  pourquoi tout peut « disparaître »
 
 | Cause | Effet | Prévention |
 |-------|--------|------------|

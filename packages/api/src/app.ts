@@ -1454,6 +1454,7 @@ export function createApp() {
       assigned_group_ids?: string[]
       assigned_user_ids?: string[]
       user_messages?: Partial<import("./types").PolicyUserMessages>
+      work_schedule?: import("./types").WorkSchedule | null
     }
     try {
       body = await c.req.json()
@@ -1471,7 +1472,8 @@ export function createApp() {
       protectUnenroll: body.protect_unenroll,
       assignedGroupIds: body.assigned_group_ids,
       assignedUserIds: body.assigned_user_ids,
-      userMessages: body.user_messages
+      userMessages: body.user_messages,
+      workSchedule: body.work_schedule
     })
     if (!profile) return c.json({ error: "profile_create_failed" }, 500)
     await audit(
@@ -1503,6 +1505,7 @@ export function createApp() {
       assigned_group_ids?: string[]
       assigned_user_ids?: string[]
       user_messages?: Partial<import("./types").PolicyUserMessages>
+      work_schedule?: import("./types").WorkSchedule | null
     }
     try {
       body = await c.req.json()
@@ -1535,6 +1538,10 @@ export function createApp() {
         body.user_messages !== undefined
           ? body.user_messages
           : existing.userMessages,
+      workSchedule:
+        body.work_schedule !== undefined
+          ? body.work_schedule
+          : existing.workSchedule,
       assignedGroupIds: body.assigned_group_ids ?? existing.assignedGroupIds,
       assignedUserIds: body.assigned_user_ids ?? existing.assignedUserIds
     })
@@ -2216,7 +2223,8 @@ export function createApp() {
       event_reporting?: boolean
       protect_unenroll?: boolean
       user_messages?: Partial<import("./types").PolicyUserMessages>
-      /** Mot de passe admin en clair — stocké en hash uniquement (legacy / admin1) */
+      work_schedule?: import("./types").WorkSchedule | null
+      /** Mot de passe admin en clair (hash only en base) */
       management_password?: string
     }
     try {
@@ -2237,6 +2245,8 @@ export function createApp() {
       patch.protectUnenroll = body.protect_unenroll
     if (body.user_messages !== undefined)
       patch.userMessages = body.user_messages
+    if (body.work_schedule !== undefined)
+      patch.workSchedule = body.work_schedule
     // string non vide ≥6 → active le mdp ; string vide → retire le mdp (sortie libre)
     if (typeof body.management_password === "string") {
       if (body.management_password.length === 0) {
@@ -2446,6 +2456,25 @@ export function createApp() {
       policy_version: result.policy.version,
       rules_count: result.pack.rules.length
     })
+  })
+
+  v1.delete("/org/rules/packs/:version", async (c) => {
+    const _gate = await requireConsoleAuth(c, "console_access")
+    if (!_gate.ok) return c.json({ error: _gate.error }, _gate.status)
+    const org = await store.getOrg(_gate.orgId)
+    if (!org) return c.json({ error: "no_org" }, 404)
+    const version = c.req.param("version")
+    const result = await store.deletePack(org.id, version)
+    if (!result.ok) {
+      return c.json({ error: result.error || "delete_failed" }, 400)
+    }
+    await audit(
+      _gate,
+      "pack_publish",
+      `Suppression pack non actif ${version}`,
+      { version }
+    )
+    return c.json({ ok: true, version })
   })
 
   app.route("/v1", v1)

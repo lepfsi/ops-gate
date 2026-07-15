@@ -127,17 +127,24 @@ function rowOrg(r: pg.QueryResultRow): Organization {
   }
 }
 
-function rowPolicy(r: pg.QueryResultRow): Policy {
-  let userMessages: Policy["userMessages"]
+function parseJsonObj<T>(raw: unknown): T | undefined {
   try {
-    const raw = r.user_messages_json
-    if (raw) {
-      const j = typeof raw === "string" ? JSON.parse(raw) : raw
-      if (j && typeof j === "object") userMessages = j
-    }
+    if (!raw) return undefined
+    const j = typeof raw === "string" ? JSON.parse(raw) : raw
+    if (j && typeof j === "object") return j as T
   } catch {
     /* ignore */
   }
+  return undefined
+}
+
+function rowPolicy(r: pg.QueryResultRow): Policy {
+  const userMessages = parseJsonObj<Policy["userMessages"]>(
+    r.user_messages_json
+  )
+  const workSchedule = parseJsonObj<Policy["workSchedule"]>(
+    r.work_schedule_json
+  )
   return {
     id: r.id,
     orgId: r.org_id,
@@ -152,6 +159,7 @@ function rowPolicy(r: pg.QueryResultRow): Policy {
     configEpoch:
       typeof r.config_epoch === "number" ? r.config_epoch : r.version || 1,
     userMessages,
+    workSchedule: workSchedule ?? null,
     updatedAt: new Date(r.updated_at).toISOString()
   }
 }
@@ -285,16 +293,12 @@ function rowGroup(r: pg.QueryResultRow): UserGroup {
 }
 
 function rowProfile(r: pg.QueryResultRow): PolicyProfile {
-  let userMessages: PolicyProfile["userMessages"]
-  try {
-    const raw = r.user_messages_json
-    if (raw) {
-      const j = typeof raw === "string" ? JSON.parse(raw) : raw
-      if (j && typeof j === "object") userMessages = j
-    }
-  } catch {
-    /* ignore */
-  }
+  const userMessages = parseJsonObj<PolicyProfile["userMessages"]>(
+    r.user_messages_json
+  )
+  const workSchedule = parseJsonObj<PolicyProfile["workSchedule"]>(
+    r.work_schedule_json
+  )
   return {
     id: r.id,
     orgId: r.org_id,
@@ -308,6 +312,7 @@ function rowProfile(r: pg.QueryResultRow): PolicyProfile {
     assignedGroupIds: r.assigned_group_ids || [],
     assignedUserIds: r.assigned_user_ids || [],
     userMessages,
+    workSchedule: workSchedule ?? null,
     updatedAt: new Date(r.updated_at).toISOString()
   }
 }
@@ -361,6 +366,8 @@ export class PgStore implements OpsGateStore {
       `ALTER TABLE agents ALTER COLUMN license_assigned SET DEFAULT FALSE`,
       `ALTER TABLE policies ADD COLUMN IF NOT EXISTS user_messages_json TEXT NOT NULL DEFAULT '{}'`,
       `ALTER TABLE policy_profiles ADD COLUMN IF NOT EXISTS user_messages_json TEXT NOT NULL DEFAULT '{}'`,
+      `ALTER TABLE policies ADD COLUMN IF NOT EXISTS work_schedule_json TEXT NOT NULL DEFAULT '{}'`,
+      `ALTER TABLE policy_profiles ADD COLUMN IF NOT EXISTS work_schedule_json TEXT NOT NULL DEFAULT '{}'`,
       `ALTER TABLE agents ADD COLUMN IF NOT EXISTS device_fingerprint TEXT`,
       `ALTER TABLE organizations ADD COLUMN IF NOT EXISTS monitoring_json TEXT NOT NULL DEFAULT '{}'`,
       `CREATE TABLE IF NOT EXISTS log_exports (
@@ -864,6 +871,7 @@ export class PgStore implements OpsGateStore {
         | "protectUnenroll"
         | "configEpoch"
         | "userMessages"
+        | "workSchedule"
       >
     >
   ) {
@@ -881,6 +889,10 @@ export class PgStore implements OpsGateStore {
       ...current,
       ...patch,
       userMessages: nextUserMessages,
+      workSchedule:
+        patch.workSchedule !== undefined
+          ? patch.workSchedule
+          : current.workSchedule,
       version: current.version + 1,
       configEpoch: nextConfigEpoch,
       updatedAt: new Date().toISOString()
@@ -897,7 +909,8 @@ export class PgStore implements OpsGateStore {
         updated_at = $9,
         config_epoch = $10,
         protect_unenroll = $11,
-        user_messages_json = $12
+        user_messages_json = $12,
+        work_schedule_json = $13
        WHERE org_id = $1`,
       [
         orgId,
@@ -911,7 +924,8 @@ export class PgStore implements OpsGateStore {
         next.updatedAt,
         next.configEpoch,
         !!next.protectUnenroll,
-        JSON.stringify(next.userMessages || {})
+        JSON.stringify(next.userMessages || {}),
+        JSON.stringify(next.workSchedule || {})
       ]
     )
     return next
@@ -1379,6 +1393,7 @@ export class PgStore implements OpsGateStore {
       assignedGroupIds?: string[]
       assignedUserIds?: string[]
       userMessages?: Partial<import("./types").PolicyUserMessages>
+      workSchedule?: import("./types").WorkSchedule | null
     }
   ) {
     const org = await this.getOrg(orgId)
@@ -1413,14 +1428,18 @@ export class PgStore implements OpsGateStore {
             : prev.protectUnenroll,
         assignedGroupIds: input.assignedGroupIds ?? prev.assignedGroupIds,
         assignedUserIds: input.assignedUserIds ?? prev.assignedUserIds,
-        userMessages: nextMsgs
+        userMessages: nextMsgs,
+        workSchedule:
+          input.workSchedule !== undefined
+            ? input.workSchedule
+            : prev.workSchedule
       }
       const { rows: updated } = await this.pool.query(
         `UPDATE policy_profiles SET
           name=$3, department=$4, default_action=$5, enabled_hosts=$6::jsonb,
           scan_uploads=$7, event_reporting=$8, protect_unenroll=$9,
           assigned_group_ids=$10::jsonb, assigned_user_ids=$11::jsonb,
-          user_messages_json=$12, updated_at=$13
+          user_messages_json=$12, work_schedule_json=$13, updated_at=$14
          WHERE org_id=$1 AND id=$2 RETURNING *`,
         [
           orgId,
@@ -1435,6 +1454,7 @@ export class PgStore implements OpsGateStore {
           JSON.stringify(next.assignedGroupIds),
           JSON.stringify(next.assignedUserIds),
           JSON.stringify(next.userMessages || {}),
+          JSON.stringify(next.workSchedule || {}),
           now
         ]
       )
@@ -1446,8 +1466,8 @@ export class PgStore implements OpsGateStore {
 
     const id = newId("prof")
     const { rows } = await this.pool.query(
-      `INSERT INTO policy_profiles (id, org_id, name, department, default_action, enabled_hosts, scan_uploads, event_reporting, protect_unenroll, assigned_group_ids, assigned_user_ids, user_messages_json, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7,$8,$9,$10::jsonb,$11::jsonb,$12,$13) RETURNING *`,
+      `INSERT INTO policy_profiles (id, org_id, name, department, default_action, enabled_hosts, scan_uploads, event_reporting, protect_unenroll, assigned_group_ids, assigned_user_ids, user_messages_json, work_schedule_json, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7,$8,$9,$10::jsonb,$11::jsonb,$12,$13,$14) RETURNING *`,
       [
         id,
         orgId,
@@ -1461,6 +1481,7 @@ export class PgStore implements OpsGateStore {
         JSON.stringify(input.assignedGroupIds || []),
         JSON.stringify(input.assignedUserIds || []),
         JSON.stringify(input.userMessages || {}),
+        JSON.stringify(input.workSchedule || {}),
         now
       ]
     )
@@ -1603,7 +1624,13 @@ export class PgStore implements OpsGateStore {
           userMessages: {
             ...(policy.userMessages || {}),
             ...(profile.userMessages || {})
-          }
+          },
+          workSchedule:
+            profile.workSchedule?.enabled
+              ? profile.workSchedule
+              : policy.workSchedule?.enabled
+                ? policy.workSchedule
+                : profile.workSchedule || policy.workSchedule || null
         }
       : {
           defaultAction: policy.defaultAction,
@@ -1611,7 +1638,8 @@ export class PgStore implements OpsGateStore {
           scanUploads: policy.scanUploads,
           eventReporting: policy.eventReporting,
           protectUnenroll: policy.protectUnenroll,
-          userMessages: policy.userMessages || {}
+          userMessages: policy.userMessages || {},
+          workSchedule: policy.workSchedule || null
         }
 
     const unenroll = await this.listUnenrollAdmins(orgId)
@@ -1913,6 +1941,9 @@ export class PgStore implements OpsGateStore {
         )
       }
       await client.query("COMMIT")
+      if (activate) {
+        await this.prunePacks(input.orgId, 12)
+      }
       return { ok: true, pack, policy: nextPolicy }
     } catch (e) {
       await client.query("ROLLBACK")
@@ -1920,6 +1951,34 @@ export class PgStore implements OpsGateStore {
     } finally {
       client.release()
     }
+  }
+
+  async deletePack(orgId: string, version: string) {
+    const pack = await this.getPack(orgId, version)
+    if (!pack) return { ok: false, error: "not_found" }
+    if (pack.active) return { ok: false, error: "cannot_delete_active" }
+    await this.pool.query(
+      `DELETE FROM rule_packs WHERE org_id = $1 AND version = $2 AND active = FALSE`,
+      [orgId, version]
+    )
+    return { ok: true }
+  }
+
+  async prunePacks(orgId: string, keep = 12) {
+    const n = Math.max(3, Math.min(50, keep))
+    const { rows } = await this.pool.query(
+      `SELECT version FROM rule_packs
+       WHERE org_id = $1 AND active = FALSE
+       ORDER BY published_at DESC`,
+      [orgId]
+    )
+    const toDrop = rows.slice(n).map((r) => r.version as string)
+    let deleted = 0
+    for (const v of toDrop) {
+      const r = await this.deletePack(orgId, v)
+      if (r.ok) deleted++
+    }
+    return { deleted }
   }
 
   async activatePack(
@@ -2929,13 +2988,20 @@ export class PgStore implements OpsGateStore {
     let graceN = 0
     let unlicensedN = 0
     const licMap = new Map<string, boolean>()
+    const scheduleMap = new Map<
+      string,
+      import("./types").WorkSchedule | null | undefined
+    >()
     for (const a of agents) {
       licMap.set(a.id, await this.isAgentLicensed(orgId, a.id))
+      const eff = await this.getEffectivePolicyForAgent(orgId, a.id)
+      scheduleMap.set(a.id, eff?.effective.workSchedule)
     }
     const conn = connectivityBuckets(
       agents,
       orgMon?.monitoring,
-      (a) => !!licMap.get(a.id)
+      (a) => !!licMap.get(a.id),
+      (a) => scheduleMap.get(a.id)
     )
     const offlineThreshold = conn.offline_long_ms
     for (const a of agents) {

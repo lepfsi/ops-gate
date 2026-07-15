@@ -1,4 +1,4 @@
-/* OpsGate Console — V1.2 enterprise shell (DailyOps-inspired: sober navy + teal accent) */
+/* OpsGate Console  -  V1.2 enterprise shell (DailyOps-inspired: sober navy + teal accent) */
 
 @import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap");
 
@@ -1482,7 +1482,7 @@ html[data-theme="dark"] .dash-context-panel {
   min-width: 0;
 }
 
-/* Host picker — catalogue chips (product UI, pas textarea brouillon) */
+/* Host picker  -  catalogue chips (product UI, pas textarea brouillon) */
 .host-picker {
   border: 1px solid var(--line);
   border-radius: 12px;

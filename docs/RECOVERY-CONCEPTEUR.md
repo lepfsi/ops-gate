@@ -1,4 +1,4 @@
-# Recovery concepteur — sécurisation (offline)
+# Recovery concepteur  -  sécurisation (offline)
 
 ## Problème actuel
 
@@ -23,7 +23,7 @@ Les OTP « cloud » purs (SMS, TOTP serveur) ne marchent **pas** sans réseau au
 
 ### A. Codes à usage unique pré-provisionnés (**recommandé V1.x**)
 
-1. Console (principal) génère **N codes** (ex. 10–50) affichés **une fois** → stockés **hashés** (argon2id / scrypt).
+1. Console (principal) génère **N codes** (ex. 10-50) affichés **une fois** → stockés **hashés** (argon2id / scrypt).
 2. Au **sync / force-sync**, chaque agent reçoit la **liste des hashes actifs** (pas les codes en clair).
 3. Unenroll recovery : saisie d’un code → match local d’un hash → **splice** du hash du store local + journal `recovery_code_id` + event en file d’attente.
 4. Au prochain online : event `recovery_code_consumed` → API marque le code **consumed** (ne repart plus aux autres agents).
@@ -38,7 +38,7 @@ Les OTP « cloud » purs (SMS, TOTP serveur) ne marchent **pas** sans réseau au
 
 - Agent offline **longtemps** peut encore avoir d’anciens hashes jusqu’au prochain poll.
 - Pool fini : regénérer + force-sync après usage intensif.
-- Si un attaquant copie le store agent avant unenroll, il voit des hashes (pas les codes) — OK.
+- Si un attaquant copie le store agent avant unenroll, il voit des hashes (pas les codes)  -  OK.
 
 **Mitigations complémentaires :**
 
@@ -69,7 +69,7 @@ Les OTP « cloud » purs (SMS, TOTP serveur) ne marchent **pas** sans réseau au
 | Phase | Action |
 |-------|--------|
 | **Maintenant** | Secret fort `OPSGATE_VENDOR_RECOVERY` (≥24, **unique par client/deploy**) ; offline delay ≥ 2 h ; ne jamais committer le secret |
-| **V1.x (implémenté)** | **Option A** : pool one-time — console Admins → Générer / Invalider ; hashes sync agent ; burn local + `consumeRecoveryCode` à l’unenroll |
+| **V1.x (implémenté)** | **Option A** : pool one-time  -  console Admins → Générer / Invalider ; hashes sync agent ; burn local + `consumeRecoveryCode` à l’unenroll |
 | **V2** | Option **C** (ou D) pour break-glass enterprise |
 
 **Usage agent** : username `vendor` (ou `recovery` / `opsgate`) + code `XXXX-XXXX-XXXX-XXXX`, uniquement si offline ≥ 2 h.
@@ -95,7 +95,7 @@ Sans cadre, un pool mal géré = encore un SPOF (fuite de la feuille de codes) o
 
 | Règle | Détail |
 |-------|--------|
-| **Génération** | Principal uniquement · 10–50 codes · entropie ≥ 80 bits · format `XXXX-XXXX-XXXX-XXXX` |
+| **Génération** | Principal uniquement · 10-50 codes · entropie ≥ 80 bits · format `XXXX-XXXX-XXXX-XXXX` |
 | **Affichage** | **Une seule fois** à la génération · export PDF chiffré / coffre-fort · jamais re-affichable |
 | **Stockage API** | Hash argon2id seulement · `active` / `consumed_at` / `consumed_agent_id` |
 | **Distribution agent** | Hashes actifs dans le pack/policy sync (pas les codes) |
