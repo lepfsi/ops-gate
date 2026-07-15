@@ -1,0 +1,25 @@
+{
+  "name": "@opsgate/proxy",
+  "version": "0.1.0-p0",
+  "description": "OpsGate local HTTPS proxy spike (P0) — PAC + allowlist + engine path",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "opsgate-proxy": "./src/index.ts"
+  },
+  "scripts": {
+    "dev": "tsx src/index.ts serve",
+    "serve": "tsx src/index.ts serve",
+    "pac": "tsx src/index.ts pac",
+    "inspect": "tsx src/index.ts inspect",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@opsgate/engine": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "20.11.5",
+    "tsx": "4.19.2",
+    "typescript": "5.3.3"
+  }
+}
