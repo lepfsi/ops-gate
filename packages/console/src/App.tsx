@@ -1204,7 +1204,8 @@ function SummaryView({
   const riskN = decisions.send_anyway || 0
   const cancelN = decisions.cancel || 0
   const observeN = decisions.observe || 0
-  const totalDec = maskN + riskN + cancelN + observeN
+  const blockN = decisions.block || 0
+  const totalDec = maskN + riskN + cancelN + observeN + blockN
   const maxRule = Math.max(
     1,
     ...(summary.top_rules || []).map((r) => r.count)
@@ -1714,7 +1715,8 @@ function SummaryView({
                 ["mask_send", t("dash.mask"), maskN, "ok"],
                 ["send_anyway", t("dash.risky"), riskN, "crit"],
                 ["cancel", t("dash.cancel"), cancelN, "warn"],
-                ["observe", t("dash.observe"), observeN, "ok"]
+                ["observe", t("dash.observe"), observeN, "ok"],
+                ["block", t("dash.block"), blockN, "crit"]
               ] as const
             ).map(([k, label, n, tone]) => (
               <button
@@ -1781,6 +1783,7 @@ function SummaryView({
                   ["send_anyway", t("dash.sendAnyway")],
                   ["cancel", t("dash.cancel")],
                   ["observe", t("dash.observe")],
+                  ["block", t("dash.block")],
                   ["enroll", t("dash.enroll")],
                   ["unenroll", t("dash.unenroll")]
                 ] as const
@@ -1856,6 +1859,7 @@ function SummaryView({
               ["send_anyway", t("dash.sendAnyway")],
               ["cancel", t("dash.cancel")],
               ["observe", t("dash.observe")],
+              ["block", t("dash.block")],
               ["enroll", t("dash.enroll")],
               ["unenroll", t("dash.unenroll")]
             ] as const
@@ -5569,6 +5573,8 @@ function decisionLabelFr(d: string): string {
       return "Désenrôlement"
     case "observe":
       return "Observé (proxy)"
+    case "block":
+      return "Bloqué (proxy)"
     default:
       return d || " - "
   }

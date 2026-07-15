@@ -1,5 +1,5 @@
 /**
- * Client control plane pour le proxy — enroll + events batch (P2).
+ * Client control plane pour le proxy — enroll + events batch (P2/P3).
  */
 import { log } from "./log.js"
 import {
@@ -41,9 +41,7 @@ export async function enrollProxy(opts: EnrollOpts): Promise<AgentState> {
     org_name?: string
   }
   if (!res.ok) {
-    throw new Error(
-      data.message || data.error || `enroll HTTP ${res.status}`
-    )
+    throw new Error(data.message || data.error || `enroll HTTP ${res.status}`)
   }
   if (!data.agent_token || !data.agent_id || !data.org_id) {
     throw new Error("enroll_incomplete_response")
@@ -75,12 +73,13 @@ export type ProxyDetectionEvent = {
   ts: string
   source: "proxy"
   hostname: string
-  decision: "observe"
+  decision: "observe" | "block"
   detection_count: number
   highest_severity: "low" | "medium" | "high"
   rule_ids: string[]
   types: string[]
-  masked: false
+  masked: boolean
+  file_names?: string[] | null
   redacted_matches: Array<{ rule_id: string; preview: string }>
   device_label?: string
 }
@@ -91,18 +90,20 @@ let flushing = false
 
 export function queueProxyEvent(
   state: AgentState,
-  ev: Omit<ProxyDetectionEvent, "schema_version" | "source" | "decision" | "masked" | "device_label">
+  ev: Omit<
+    ProxyDetectionEvent,
+    "schema_version" | "source" | "masked" | "device_label"
+  > & { decision: "observe" | "block" }
 ) {
   const full: ProxyDetectionEvent = {
     schema_version: 1,
     source: "proxy",
-    decision: "observe",
-    masked: false,
+    masked: ev.decision === "block",
     device_label: state.device_label,
+    file_names: ev.file_names ?? null,
     ...ev
   }
   queue.push(full)
-  // Flush rapide pour que la console (MMC) voie l’event sans attendre longtemps
   if (queue.length >= 5) {
     void flushEvents(state)
     return
@@ -142,7 +143,6 @@ export async function flushEvents(state: AgentState): Promise<void> {
         error: data.error || res.statusText,
         n: batch.length
       })
-      // remets en file (cap)
       queue = [...batch, ...queue].slice(0, 80)
     } else {
       log("info", "events_batch_ok", {

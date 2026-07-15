@@ -1,12 +1,12 @@
 /**
- * MITM TLS borné allowlist — mode observe (P1).
- * Hors allowlist : ne pas appeler (tunnel transparent P0).
+ * MITM TLS borné allowlist — observe + enforce block (P3).
  */
 import * as net from "node:net"
 import * as tls from "node:tls"
 import { getHostCert } from "./certs.js"
 import { log } from "./log.js"
 import { createStreamObserver } from "./observe.js"
+import { getProxyRemoteConfig } from "./sync.js"
 
 export function mitmConnect(opts: {
   clientSocket: net.Socket
@@ -67,7 +67,6 @@ export function mitmConnect(opts: {
     return
   }
 
-  // Si des octets sont déjà dans head (rare), on les injecte via un push après handshake
   const pendingHead = head?.length ? head : null
 
   try {
@@ -101,6 +100,13 @@ export function mitmConnect(opts: {
         ? tlsClient!.alpnProtocol
         : "http/1.1"
 
+    const cfg = getProxyRemoteConfig()
+    const modeLabel =
+      (process.env.OPSGATE_PROXY_MODE || cfg.mode || "observe").toLowerCase() ===
+      "enforce"
+        ? "enforce_mitm"
+        : "observe_mitm"
+
     upstream = tls.connect(
       {
         host: targetHost,
@@ -115,7 +121,7 @@ export function mitmConnect(opts: {
           port: targetPort,
           alpn_client: tlsClient?.alpnProtocol || null,
           alpn_upstream: upstream?.alpnProtocol || null,
-          mode: "observe_mitm"
+          mode: modeLabel
         })
       }
     )
@@ -130,9 +136,17 @@ export function mitmConnect(opts: {
 
     upstream.on("close", () => cleanup("upstream_close"))
 
-    // Client → upstream
+    // Client → upstream : scan ; en enforce, coupe si détection medium/high
     tlsClient!.on("data", (chunk: Buffer) => {
-      observer.onClientData(chunk)
+      const block = observer.onClientData(chunk)
+      if (block) {
+        log("warn", "mitm_request_blocked", {
+          host: targetHost,
+          reason: "sensitive_data_detected"
+        })
+        cleanup("enforce_block")
+        return
+      }
       if (upstream && !upstream.destroyed) {
         try {
           upstream.write(chunk)
@@ -142,7 +156,6 @@ export function mitmConnect(opts: {
       }
     })
 
-    // Upstream → client
     upstream.on("data", (chunk: Buffer) => {
       if (tlsClient && !tlsClient.destroyed) {
         try {
@@ -153,10 +166,7 @@ export function mitmConnect(opts: {
       }
     })
 
-    if (pendingHead && tlsClient && !tlsClient.destroyed) {
-      // Normalement le handshake TLS démarre depuis le client, head est vide.
-      void pendingHead
-    }
+    void pendingHead
   })
 
   tlsClient.on("close", () => cleanup("client_close"))
