@@ -5402,8 +5402,23 @@ function AgentsView({
                   </td>
                   <td>
                     <strong>{a.device_label || " - "}</strong>
+                    {a.device_type === "proxy" ||
+                    (a.app_version || "").startsWith("proxy") ? (
+                      <span
+                        className="meta-tag"
+                        style={{
+                          marginLeft: 8,
+                          background: "rgba(37, 99, 235, 0.12)",
+                          color: "#1d4ed8",
+                          border: "1px solid rgba(37, 99, 235, 0.25)"
+                        }}
+                        title="Agent proxy local (data-plane)">
+                        Proxy
+                      </span>
+                    ) : null}
                     <div className="mono muted" style={{ fontSize: 11 }}>
                       {a.id}
+                      {a.app_version ? ` · ${a.app_version}` : ""}
                     </div>
                   </td>
                   <td>

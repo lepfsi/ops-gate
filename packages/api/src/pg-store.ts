@@ -185,7 +185,9 @@ function rowAgent(r: pg.QueryResultRow): Agent {
     lastConfigEpoch:
       typeof r.last_config_epoch === "number" ? r.last_config_epoch : undefined,
     groupId: r.group_id ?? undefined,
-    deviceFingerprint: r.device_fingerprint ?? undefined
+    deviceFingerprint: r.device_fingerprint ?? undefined,
+    deviceType:
+      r.device_type === "proxy" ? "proxy" : r.device_type === "extension" ? "extension" : undefined
   }
 }
 
@@ -378,6 +380,7 @@ export class PgStore implements OpsGateStore {
       `ALTER TABLE policy_profiles ADD COLUMN IF NOT EXISTS enabled BOOLEAN NOT NULL DEFAULT TRUE`,
       `ALTER TABLE policy_profiles ADD COLUMN IF NOT EXISTS priority INT NOT NULL DEFAULT 100`,
       `ALTER TABLE agents ADD COLUMN IF NOT EXISTS device_fingerprint TEXT`,
+      `ALTER TABLE agents ADD COLUMN IF NOT EXISTS device_type TEXT NOT NULL DEFAULT 'extension'`,
       `ALTER TABLE org_admins ADD COLUMN IF NOT EXISTS failed_login_count INT NOT NULL DEFAULT 0`,
       `ALTER TABLE org_admins ADD COLUMN IF NOT EXISTS locked_at TIMESTAMPTZ`,
       `CREATE TABLE IF NOT EXISTS issued_licenses (
@@ -2462,11 +2465,14 @@ export class PgStore implements OpsGateStore {
     userId?: string
     personalLicenseKey?: string
     deviceFingerprint?: string
+    deviceType?: "extension" | "proxy"
   }): Promise<Agent & { replaced?: boolean }> {
     const now = new Date().toISOString()
     const tokenHash = hashToken(input.token)
     const label = (input.deviceLabel || "").trim()
     const fp = (input.deviceFingerprint || "").trim()
+    const dtype =
+      input.deviceType === "proxy" ? "proxy" : "extension"
     const org = await this.getOrg(input.orgId)
     const personal = !!org?.isPersonal
 
@@ -2488,6 +2494,7 @@ export class PgStore implements OpsGateStore {
            last_seen_at = $7,
            personal_account = $8,
            device_fingerprint = COALESCE(NULLIF($11, ''), device_fingerprint),
+           device_type = COALESCE($12, device_type),
            license_assigned = CASE
              WHEN $9 THEN $10
              ELSE license_assigned
@@ -2510,7 +2517,8 @@ export class PgStore implements OpsGateStore {
           personal,
           personal,
           assignLicense,
-          fp || null
+          fp || null,
+          dtype
         ]
       )
       const agent = { ...rowAgent(rows[0]), replaced: true as const }
@@ -2541,8 +2549,8 @@ export class PgStore implements OpsGateStore {
       `INSERT INTO agents (
          id, org_id, device_label, host_name, enrolled_at, token_hash, app_version,
          last_seen_at, user_id, license_assigned, unlicensed_since, personal_account,
-         device_fingerprint
-       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$5,$8,$9,$10,$11,$12) RETURNING *`,
+         device_fingerprint, device_type
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$5,$8,$9,$10,$11,$12,$13) RETURNING *`,
       [
         agentId,
         input.orgId,
@@ -2555,7 +2563,8 @@ export class PgStore implements OpsGateStore {
         personal ? assignLicense : false,
         personal && assignLicense ? null : now,
         personal,
-        fp || null
+        fp || null,
+        dtype
       ]
     )
     const agent = { ...rowAgent(rows[0]), replaced: false as const }

@@ -1,7 +1,7 @@
 {
   "name": "@opsgate/proxy",
-  "version": "0.3.0-p2",
-  "description": "OpsGate local HTTPS proxy — P2 enroll + events source=proxy",
+  "version": "0.4.0-p3-foundations",
+  "description": "OpsGate local HTTPS proxy — P3 foundations (badge, sync, enforce stub)",
   "private": true,
   "type": "module",
   "bin": {

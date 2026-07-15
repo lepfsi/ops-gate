@@ -208,6 +208,8 @@ export type AgentRow = {
   license_status?: "licensed" | "grace" | "unlicensed"
   unlicensed_since?: string | null
   device_fingerprint?: string | null
+  /** extension | proxy (P3) */
+  device_type?: "extension" | "proxy"
 }
 
 export type EventRow = {

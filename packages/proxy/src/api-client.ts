@@ -24,7 +24,7 @@ export async function enrollProxy(opts: EnrollOpts): Promise<AgentState> {
     device_type: "proxy",
     device_label: opts.deviceLabel || `OpsGate Proxy (${os.hostname()})`,
     host_name: os.hostname(),
-    app_version: "proxy-0.2.0-p2",
+    app_version: "proxy-0.4.0-p3",
     device_fingerprint: fp
   }
   const res = await fetch(`${base}/v1/enroll`, {

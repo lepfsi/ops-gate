@@ -366,6 +366,8 @@ export interface OpsGateStore {
     personalLicenseKey?: string
     /** Empreinte installation (anti-doublon) */
     deviceFingerprint?: string
+    /** extension | proxy (P3) */
+    deviceType?: "extension" | "proxy"
   }): Promise<Agent & { replaced?: boolean }>
   resolveAgentByToken(token: string): Promise<Agent | undefined>
   revokeAgentByToken(token: string): Promise<boolean>

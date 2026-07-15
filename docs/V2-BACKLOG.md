@@ -12,7 +12,7 @@ Mis à jour : 13 juillet 2026
 | **Réglages système console** | Thème, durée idle custom, timezone, rétention logs, **langue UI** |
 | **LDAP / AD sync** | Champs prêts ; sync groupes AD → policy |
 | **SSO + MFA** | PLATFORM-v2 |
-| **Proxy local** | **Saut data-plane** — P0–P2 dans `packages/proxy` : PAC, MITM observe, enroll, events `source=proxy`. P3 = installer + console badge + enforce. |
+| **Proxy local** | **Saut data-plane** — P0–P2 livrés ; **P3 foundations** (`PROXY-P3.md`) : `device_type`, badge console, flags observe/enforce, sync config, helper PS1. Suite = enforce réel + MSI. |
 | **Chrome Web Store** | PLATFORM-v2 |
 | **Multi-navigateur (Firefox / Safari)** | Chromium (Chrome/Edge/Brave/Opera) = Plasmo MV3 aujourd’hui. Firefox = manifest V2/V3 adapté + build `plasmo --target=firefox-mv3`. Safari = port Xcode / App Store (lourd). Voir `docs/CAHIER-CONCEPTEUR.md` § multi-browser |
 | **Portal personnel cloud** | Billing / multi-device |

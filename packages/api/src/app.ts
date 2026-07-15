@@ -152,13 +152,14 @@ export function createApp() {
       hostName: body.host_name,
       appVersion:
         body.app_version ||
-        (isProxy ? "proxy-p2" : undefined),
+        (isProxy ? "proxy-p3" : undefined),
       personalLicenseKey: body.personal_license_key,
       deviceFingerprint:
         body.device_fingerprint ||
         (isProxy
           ? `proxy:${body.host_name || "local"}:${org.id.slice(0, 8)}`
-          : undefined)
+          : undefined),
+      deviceType: isProxy ? "proxy" : "extension"
     })
 
     if (org.isPersonal && !agent.licenseAssigned) {
@@ -340,6 +341,9 @@ export function createApp() {
     const requireUnenroll =
       !!effective.protectUnenroll && admins.length > 0
 
+    const { mergeMonitoringSettings } = await import("./types")
+    const mon = mergeMonitoringSettings(org.monitoring)
+
     return c.json({
       etag,
       org: {
@@ -348,6 +352,11 @@ export function createApp() {
         mode: org.modeDefault,
         event_payload_policy: org.eventPayloadPolicy,
         personal: !!org.isPersonal
+      },
+      /** P3 — flags proxy org (agents proxy / futur enforce) */
+      proxy: {
+        enabled: mon.proxy?.enabled !== false,
+        mode: mon.proxy?.mode === "enforce" ? "enforce" : "observe"
       },
       policy: {
         id: policy.id,
@@ -986,7 +995,8 @@ export function createApp() {
           license_assigned: a.licenseAssigned,
           license_status,
           unlicensed_since: a.unlicensedSince || null,
-          device_fingerprint: a.deviceFingerprint || null
+          device_fingerprint: a.deviceFingerprint || null,
+          device_type: a.deviceType === "proxy" ? "proxy" : "extension"
         }
       })
     )
