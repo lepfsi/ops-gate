@@ -1,95 +1,87 @@
-# @opsgate/proxy — P0 spike
+# @opsgate/proxy — P1 (MITM observe)
 
-**Phase** : P0 (design + spike)  
-**Doc** : [`docs/architecture/PROXY-P0.md`](../../docs/architecture/PROXY-P0.md)
+**Phase** : P1  
+**Docs** : [`PROXY-P0.md`](../../docs/architecture/PROXY-P0.md) · [`PROXY-P1.md`](../../docs/architecture/PROXY-P1.md)
 
 Proxy HTTP(S) **local** OpsGate :
 
-- Bind **`127.0.0.1`** uniquement (défaut)
-- **Allowlist** hosts IA (chatgpt, claude, gemini, grok, …)
-- **CONNECT** tunnel (observe passif) — pas de MITM TLS en P0
-- **PAC** généré
-- **`inspect`** : même `@opsgate/engine` que l’extension
+| Mode | Comportement |
+|------|----------------|
+| Host **allowlist** + MITM | TLS déchiffré, **observe** engine, pas de rewrite |
+| Host hors allowlist | Tunnel transparent (P0) |
+| `OPSGATE_PROXY_MITM=0` | Tunnel partout (P0) |
 
-## Prérequis
+## Important — répertoire de travail
 
-```bash
-# depuis la racine monorepo
-pnpm install
+Toujours depuis la **racine monorepo** :
+
+```powershell
+cd C:\Users\Utilisateur\ops-gate
 ```
+
+Sinon : `ERR_PNPM_NO_PKG_MANIFEST`.
+
+## Setup (une fois)
+
+```powershell
+cd C:\Users\Utilisateur\ops-gate
+pnpm install
+pnpm proxy:gen-ca
+pnpm proxy:ca-path
+# Installer la CA dans le magasin utilisateur Windows :
+certutil -addstore -user Root "C:\Users\Utilisateur\ops-gate\packages\proxy\data\ca\ca-cert.pem"
+```
+
+Redémarrer Chrome/Edge après install CA.
 
 ## Commandes
 
-```bash
-# Démarrer le proxy (JSON logs sur stdout)
-pnpm proxy:dev
+```powershell
+cd C:\Users\Utilisateur\ops-gate
 
-# Générer le PAC
-pnpm proxy:pac
-# → packages/proxy/opsgate-proxy.pac
-
-# Prouver le chemin engine (détection)
-echo "api_key=sk-abcdefghijklmnopqrstuv" | pnpm proxy:inspect
-# ou
-pnpm --filter @opsgate/proxy inspect -- ../../docs/demo/samples/01-secrets-app.txt
+pnpm proxy:dev          # 127.0.0.1:8888
+pnpm proxy:pac          # génère opsgate-proxy.pac
+pnpm proxy:inspect      # engine partagé (stdin/fichier)
+pnpm proxy:gen-ca       # (re)génère CA
+pnpm proxy:ca-path      # chemins + hint certutil
 ```
 
-Health local (sans PAC) :
+Health :
 
-```bash
+```powershell
 curl http://127.0.0.1:8888/opsgate-proxy/health
 ```
 
-## Config
+## Brancher le navigateur
 
-| Variable | Défaut | Rôle |
-|----------|--------|------|
-| `OPSGATE_PROXY_HOST` | `127.0.0.1` | Bind |
-| `OPSGATE_PROXY_PORT` | `8888` | Port |
-| `OPSGATE_PROXY_ALLOWLIST` | (vide) | Hosts **en plus** (CSV) |
-
-## Brancher Chrome (dev)
-
-### Option A — PAC (recommandé)
-
-1. `pnpm proxy:pac`  
-2. `pnpm proxy:dev`  
-3. Chrome flags (chemin absolu du `.pac`) :
+**PAC (recommandé)** :
 
 ```text
-chrome.exe --proxy-pac-url=file:///C:/Users/.../ops-gate/packages/proxy/opsgate-proxy.pac
+chrome.exe --proxy-pac-url=file:///C:/Users/Utilisateur/ops-gate/packages/proxy/opsgate-proxy.pac
 ```
 
-### Option B — proxy global navigateur
+**Proxy global** :
 
 ```text
 chrome.exe --proxy-server=127.0.0.1:8888
 ```
 
-Tout le trafic passe au process ; hors allowlist = tunnel direct **sans** inspect.
+## Variables d’environnement
 
-## Ce que vous devez voir (P0)
-
-Logs JSON quand le navigateur ouvre un site allowlist :
-
-```json
-{"msg":"connect","host":"chatgpt.com","allowlisted":true,"mode":"observe_tunnel"}
-```
-
-Hors allowlist :
-
-```json
-{"msg":"connect","host":"example.com","allowlisted":false,"mode":"direct_tunnel"}
-```
-
-## P1 (suivant)
-
-- CA locale + MITM **uniquement** allowlist  
-- Parse corps JSON chat (1 host)  
-- Mode observe avec détections engine sur le wire  
+| Variable | Défaut | Rôle |
+|----------|--------|------|
+| `OPSGATE_PROXY_HOST` | `127.0.0.1` | Bind |
+| `OPSGATE_PROXY_PORT` | `8888` | Port |
+| `OPSGATE_PROXY_ALLOWLIST` | — | Hosts extra (CSV) |
+| `OPSGATE_PROXY_MITM` | `1` | `0` = tunnel only |
 
 ## Sécurité
 
-- Ne pas exposer le port hors machine  
-- Ne pas committer de certificats MITM  
-- Events futurs = metadata only (`source: "proxy"`)
+- CA **dev uniquement** — ne pas committer `data/ca/ca-key.pem`
+- Bind loopback only
+- Logs : metadata + previews redactées, **pas** le prompt brut
+- Pas de MITM hors allowlist
+
+## P2 (suivant)
+
+Enroll proxy, events API `source=proxy`, pack sync, mode enforce.

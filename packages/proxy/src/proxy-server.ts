@@ -1,18 +1,19 @@
 /**
- * Proxy HTTP(S) P0 — CONNECT tunnel + classification allowlist.
- * HTTPS body inspection = P1 (MITM borné).
+ * Proxy HTTP(S) — P0 tunnel + P1 MITM observe (allowlist only).
  */
 import * as net from "node:net"
 import * as http from "node:http"
 import { isAllowlisted } from "./allowlist.js"
+import { caExists } from "./certs.js"
 import type { ProxyConfig } from "./config.js"
 import { log } from "./log.js"
+import { mitmConnect } from "./mitm.js"
+import { createStreamObserver } from "./observe.js"
 
 function parseHostPort(
   hostHeader: string,
   defaultPort: number
 ): { host: string; port: number } {
-  // IPv6 [addr]:port or host:port
   if (hostHeader.startsWith("[")) {
     const end = hostHeader.indexOf("]")
     const host = hostHeader.slice(1, end)
@@ -33,7 +34,6 @@ function parseHostPort(
 }
 
 function tunnel(
-  clientReq: http.IncomingMessage,
   clientSocket: net.Socket,
   head: Buffer,
   targetHost: string,
@@ -70,10 +70,6 @@ function tunnel(
   })
 }
 
-/**
- * HTTP plain (rare pour les sites IA) — on log + optionnellement inspecte body en observe.
- * P0 : log only, pas de rewrite.
- */
 function handleHttp(
   req: http.IncomingMessage,
   res: http.ServerResponse,
@@ -82,7 +78,6 @@ function handleHttp(
   const url = req.url || "/"
   let target: URL
   try {
-    // Absolute-form for proxy requests
     target = new URL(url)
   } catch {
     res.writeHead(400)
@@ -104,38 +99,58 @@ function handleHttp(
   delete headers["proxy-connection"]
   delete headers["Proxy-Connection"]
 
-  const preq = http.request(
-    {
-      protocol: target.protocol,
-      hostname: target.hostname,
-      port: target.port || 80,
-      path: target.pathname + target.search,
-      method: req.method,
-      headers
-    },
-    (pres) => {
-      res.writeHead(pres.statusCode || 502, pres.headers)
-      pres.pipe(res)
-    }
-  )
-  preq.on("error", (err) => {
-    log("warn", "http_relay_error", { host, error: String(err.message || err) })
-    if (!res.headersSent) res.writeHead(502)
-    res.end("Bad Gateway")
+  const chunks: Buffer[] = []
+  const observer =
+    allowlisted && cfg.mitm
+      ? createStreamObserver({ host })
+      : null
+
+  req.on("data", (c: Buffer) => {
+    chunks.push(c)
+    observer?.onClientData(c)
   })
-  req.pipe(preq)
+
+  req.on("end", () => {
+    observer?.flush()
+    const body = Buffer.concat(chunks)
+    const preq = http.request(
+      {
+        protocol: target.protocol,
+        hostname: target.hostname,
+        port: target.port || 80,
+        path: target.pathname + target.search,
+        method: req.method,
+        headers
+      },
+      (pres) => {
+        res.writeHead(pres.statusCode || 502, pres.headers)
+        pres.pipe(res)
+      }
+    )
+    preq.on("error", (err) => {
+      log("warn", "http_relay_error", {
+        host,
+        error: String(err.message || err)
+      })
+      if (!res.headersSent) res.writeHead(502)
+      res.end("Bad Gateway")
+    })
+    if (body.length) preq.write(body)
+    preq.end()
+  })
 }
 
 export function startProxyServer(cfg: ProxyConfig): http.Server {
   const server = http.createServer((req, res) => {
-    // Health local (jamais via PAC vers l’extérieur)
     if (req.url === "/opsgate-proxy/health" || req.url === "/healthz") {
       res.writeHead(200, { "content-type": "application/json" })
       res.end(
         JSON.stringify({
           ok: true,
-          phase: "P0",
+          phase: "P1",
           mode: cfg.mode,
+          mitm: cfg.mitm,
+          ca_ready: caExists(),
           allowlist: cfg.allowlist,
           listen: `${cfg.host}:${cfg.port}`
         })
@@ -148,21 +163,39 @@ export function startProxyServer(cfg: ProxyConfig): http.Server {
   server.on("connect", (req, clientSocket, head) => {
     const { host, port } = parseHostPort(req.url || "", 443)
     const allowlisted = isAllowlisted(host, cfg.allowlist)
+    const sock = clientSocket as net.Socket
+    const headBuf = (head as Buffer) || Buffer.alloc(0)
+
+    if (allowlisted && cfg.mitm) {
+      if (!caExists()) {
+        log("error", "mitm_skipped_no_ca", {
+          host,
+          hint: "pnpm --filter @opsgate/proxy gen-ca"
+        })
+        tunnel(sock, headBuf, host, port, {
+          allowlisted: true,
+          mode: "observe_tunnel_fallback_no_ca"
+        })
+        return
+      }
+      log("info", "connect", {
+        host,
+        port,
+        allowlisted: true,
+        mode: "observe_mitm"
+      })
+      mitmConnect({
+        clientSocket: sock,
+        head: headBuf,
+        targetHost: host,
+        targetPort: port
+      })
+      return
+    }
+
     const mode = allowlisted ? "observe_tunnel" : "direct_tunnel"
-
-    log("info", "connect", {
-      host,
-      port,
-      allowlisted,
-      mode
-    })
-
-    // P0 : tunnel dans tous les cas (pas de MITM).
-    // P1 : si allowlisted → TLS terminate + inspect JSON.
-    tunnel(req, clientSocket as net.Socket, head as Buffer, host, port, {
-      allowlisted,
-      mode
-    })
+    log("info", "connect", { host, port, allowlisted, mode })
+    tunnel(sock, headBuf, host, port, { allowlisted, mode })
   })
 
   server.on("clientError", (err, socket) => {
@@ -178,9 +211,14 @@ export function startProxyServer(cfg: ProxyConfig): http.Server {
     log("info", "listening", {
       host: cfg.host,
       port: cfg.port,
+      phase: "P1",
+      mitm: cfg.mitm,
+      ca_ready: caExists(),
       allowlist_count: cfg.allowlist.length,
       allowlist: cfg.allowlist,
-      note: "P0 CONNECT tunnel only — HTTPS body inspect = P1"
+      note: cfg.mitm
+        ? "MITM observe on allowlist — install CA (gen-ca + certutil)"
+        : "MITM off — tunnel only (OPSGATE_PROXY_MITM=0)"
     })
   })
 

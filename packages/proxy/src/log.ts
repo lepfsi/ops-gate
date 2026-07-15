@@ -10,7 +10,7 @@ export function log(
     level,
     msg,
     component: "opsgate-proxy",
-    phase: "P0",
+    phase: "P1",
     ...fields
   })
   if (level === "error") console.error(line)

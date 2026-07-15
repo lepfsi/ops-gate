@@ -3,3 +3,5 @@ dist/
 opsgate-proxy.pac
 .smoke-*.txt
 *.log
+# CA privée + cache — ne jamais committer
+data/

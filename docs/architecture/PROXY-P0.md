@@ -26,7 +26,7 @@ Poser le **socle** du saut data-plane **proxy HTTPS local**, sans encore l’ins
 - [x] CONNECT : hors allowlist = tunnel ; allowlist = log *observe_tunnel*  
 - [x] Fichier PAC généré (`pnpm proxy:pac`)  
 - [x] `inspect` texte → détections `@opsgate/engine` (prouvé)  
-- [ ] (P1) Inspection corps HTTPS sur 1 host (MITM borné)
+- [x] (P1) Inspection corps HTTPS allowlist (MITM borné) — voir [`PROXY-P1.md`](./PROXY-P1.md)
 
 ---
 
