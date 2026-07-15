@@ -1203,7 +1203,8 @@ function SummaryView({
   const maskN = decisions.mask_send || 0
   const riskN = decisions.send_anyway || 0
   const cancelN = decisions.cancel || 0
-  const totalDec = maskN + riskN + cancelN
+  const observeN = decisions.observe || 0
+  const totalDec = maskN + riskN + cancelN + observeN
   const maxRule = Math.max(
     1,
     ...(summary.top_rules || []).map((r) => r.count)
@@ -1712,7 +1713,8 @@ function SummaryView({
               [
                 ["mask_send", t("dash.mask"), maskN, "ok"],
                 ["send_anyway", t("dash.risky"), riskN, "crit"],
-                ["cancel", t("dash.cancel"), cancelN, "warn"]
+                ["cancel", t("dash.cancel"), cancelN, "warn"],
+                ["observe", t("dash.observe"), observeN, "ok"]
               ] as const
             ).map(([k, label, n, tone]) => (
               <button
@@ -1778,6 +1780,7 @@ function SummaryView({
                   ["mask_send", t("dash.maskSend")],
                   ["send_anyway", t("dash.sendAnyway")],
                   ["cancel", t("dash.cancel")],
+                  ["observe", t("dash.observe")],
                   ["enroll", t("dash.enroll")],
                   ["unenroll", t("dash.unenroll")]
                 ] as const
@@ -1852,6 +1855,7 @@ function SummaryView({
               ["mask_send", t("dash.maskSend")],
               ["send_anyway", t("dash.sendAnyway")],
               ["cancel", t("dash.cancel")],
+              ["observe", t("dash.observe")],
               ["enroll", t("dash.enroll")],
               ["unenroll", t("dash.unenroll")]
             ] as const
@@ -5563,8 +5567,26 @@ function decisionLabelFr(d: string): string {
       return "Enrôlement"
     case "unenroll":
       return "Désenrôlement"
+    case "observe":
+      return "Observé (proxy)"
     default:
       return d || " - "
+  }
+}
+
+function sourceLabelFr(s: string): string {
+  switch (s) {
+    case "proxy":
+      return "proxy"
+    case "file":
+      return "fichier"
+    case "system":
+      return "système"
+    case "prompt":
+    case "text":
+      return "prompt"
+    default:
+      return s || ""
   }
 }
 
@@ -5930,7 +5952,16 @@ function EventsView({
         </div>
       )}
       {events.length === 0 ? (
-        <div className="empty">Aucun événement</div>
+        <div className="empty">
+          <p style={{ marginTop: 0 }}>Aucun événement.</p>
+          <p className="muted" style={{ fontSize: 12, maxWidth: 520 }}>
+            Les détections proxy apparaissent en décision{" "}
+            <strong>observe</strong> / source <strong>proxy</strong>. Avec API
+            en mémoire, un redémarrage API efface tout : gardez API + proxy +
+            console allumés, puis <strong>Refresh</strong> après un{" "}
+            <code>events_batch_ok</code>.
+          </p>
+        </div>
       ) : (
         <>
           <div className="filters-bar" role="search" aria-label="Filtres events">
@@ -6043,6 +6074,19 @@ function EventsView({
                       </td>
                       <td>
                         <strong>{e.device_label || " - "}</strong>
+                        {e.source === "proxy" ? (
+                          <span
+                            className="meta-tag"
+                            style={{
+                              marginLeft: 6,
+                              background: "rgba(37, 99, 235, 0.12)",
+                              color: "#1d4ed8",
+                              border: "1px solid rgba(37, 99, 235, 0.25)",
+                              fontSize: 10
+                            }}>
+                            Proxy
+                          </span>
+                        ) : null}
                         {e.hostname && e.hostname !== "opsgate-agent" ? (
                           <div className="muted" style={{ fontSize: 11 }}>
                             site · {e.hostname}
@@ -6057,28 +6101,24 @@ function EventsView({
                         <strong>{decisionLabelFr(e.decision)}</strong>
                         <div className="muted" style={{ fontSize: 11 }}>
                           {e.decision}
-                          {e.source === "system"
-                            ? " · système"
-                            : e.source === "file"
-                              ? " · fichier"
-                              : e.source === "prompt" || e.source === "text"
-                                ? " · prompt"
-                                : e.source
-                                  ? ` · ${e.source}`
-                                  : ""}
+                          {sourceLabelFr(e.source)
+                            ? ` · ${sourceLabelFr(e.source)}`
+                            : ""}
                         </div>
                       </td>
                       <td className="mono" style={{ fontSize: 12 }}>
                         {e.exit_actor ||
                           e.exit_admin_label ||
-                          (e.decision === "unenroll"
-                            ? (e.types || []).find(
-                                (t) =>
-                                  t.startsWith("admin:") ||
-                                  t === "vendor_recovery" ||
-                                  t === "free"
-                              ) || " - "
-                            : " - ")}
+                          (e.source === "proxy"
+                            ? "proxy"
+                            : e.decision === "unenroll"
+                              ? (e.types || []).find(
+                                  (t) =>
+                                    t.startsWith("admin:") ||
+                                    t === "vendor_recovery" ||
+                                    t === "free"
+                                ) || " - "
+                              : " - ")}
                       </td>
                       <td>
                         <span className={`badge ${e.highest_severity}`}>
@@ -6087,6 +6127,11 @@ function EventsView({
                       </td>
                       <td className="muted">
                         {(e.types || []).join(", ")}
+                        {e.rule_ids?.length ? (
+                          <div className="mono" style={{ fontSize: 10 }}>
+                            {e.rule_ids.slice(0, 4).join(", ")}
+                          </div>
+                        ) : null}
                         {e.file_names?.length ? (
                           <div style={{ fontSize: 11 }}>
                             fichiers · {e.file_names.slice(0, 3).join(", ")}

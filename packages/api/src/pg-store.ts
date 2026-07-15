@@ -2766,6 +2766,16 @@ export class PgStore implements OpsGateStore {
         accepted++
         if (rowCount === 0) {
           /* duplicate — ok */
+        } else {
+          // Heartbeat last_seen (proxy / extension)
+          try {
+            await this.pool.query(
+              `UPDATE agents SET last_seen_at = $2 WHERE id = $1 AND org_id = $3`,
+              [agentId, now, orgId]
+            )
+          } catch {
+            /* ignore */
+          }
         }
       } catch (e) {
         const msg = String(e)
