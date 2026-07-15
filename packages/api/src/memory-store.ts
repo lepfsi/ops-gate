@@ -379,6 +379,85 @@ export class MemoryStore implements OpsGateStore {
     return this.orgs.get(id)
   }
 
+  async setOrgLicenseSeats(orgId: string, seats: number) {
+    const org = this.orgs.get(orgId)
+    if (!org) return undefined
+    org.licenseSeats = Math.max(0, Math.floor(seats) || 0)
+    return org
+  }
+
+  private issuedLicenses: import("./license-keys").IssuedLicenseRecord[] = []
+
+  async ensureDefaultPack(
+    orgId: string
+  ): Promise<import("./types").StoredRulePack | undefined> {
+    const list = this.packs.get(orgId) || []
+    const existing = list.find((p) => p.active) || list[list.length - 1]
+    if (existing) {
+      existing.active = true
+      return existing
+    }
+    const { buildGlobalRulesPack, materializePack } = await import(
+      "./rules-pack"
+    )
+    const global = buildGlobalRulesPack("1.0.0")
+    const pack = materializePack({
+      orgId,
+      version: global.version,
+      rules: global.rules,
+      notes: "default-pack-auto",
+      publishedBy: "system-ensure",
+      active: true
+    })
+    for (const p of list) p.active = false
+    list.push(pack)
+    this.packs.set(orgId, list)
+    const pol = this.policies.get(orgId)
+    if (pol) {
+      pol.rulesPackVersion = pack.version
+      this.policies.set(orgId, pol)
+    }
+    return pack
+  }
+
+  async issueShortLicense(input: {
+    orgCode: string
+    companyName: string
+    address: string
+    contactEmail: string
+    seats: number
+    expiresAt: string
+  }) {
+    const {
+      generateShortLicenseKey,
+      buildPayloadFromInput
+    } = await import("./license-keys")
+    const payload = buildPayloadFromInput(input)
+    const key = generateShortLicenseKey()
+    this.issuedLicenses.push({
+      id: `lic_${Date.now()}`,
+      licenseKey: key,
+      ...payload,
+      revokedAt: null
+    })
+    return { licenseKey: key, payload }
+  }
+
+  async lookupIssuedLicense(licenseKey: string) {
+    const { normalizeLicenseKey } = await import("./license-keys")
+    const key = normalizeLicenseKey(licenseKey)
+    return this.issuedLicenses.find((l) => l.licenseKey === key)
+  }
+
+  async revokeIssuedLicense(licenseKey: string) {
+    const { normalizeLicenseKey } = await import("./license-keys")
+    const key = normalizeLicenseKey(licenseKey)
+    const rec = this.issuedLicenses.find((l) => l.licenseKey === key)
+    if (!rec || rec.revokedAt) return false
+    rec.revokedAt = new Date().toISOString()
+    return true
+  }
+
   async updateOrgMonitoring(
     orgId: string,
     monitoring: Partial<import("./types").OrgMonitoringSettings>
@@ -504,6 +583,7 @@ export class MemoryStore implements OpsGateStore {
       isPrincipal?: boolean
       permissions?: AdminPermission[]
       mustChangePassword?: boolean
+      unlock?: boolean
     }
   ) {
     if (!this.orgs.has(orgId)) return undefined
@@ -516,27 +596,30 @@ export class MemoryStore implements OpsGateStore {
       const idx = list.findIndex((a) => a.id === input.id)
       if (idx < 0) return undefined
       const prev = list[idx]
-      // email unique
       if (list.some((a) => a.id !== prev.id && a.email === email)) {
         return undefined
       }
+      const isPrincipal =
+        input.isPrincipal !== undefined ? !!input.isPrincipal : prev.isPrincipal
       const next: OrgAdmin = {
         ...prev,
         label: input.label.trim() || prev.label,
         email,
         active: input.active !== undefined ? input.active : prev.active,
-        permissions: prev.isPrincipal
+        isPrincipal,
+        permissions: isPrincipal
           ? [...ALL_ADMIN_PERMISSIONS]
           : input.permissions ?? prev.permissions,
         mustChangePassword:
           input.mustChangePassword !== undefined
             ? input.mustChangePassword
             : prev.mustChangePassword,
+        failedLoginCount: input.unlock ? 0 : prev.failedLoginCount ?? 0,
+        lockedAt: input.unlock ? null : prev.lockedAt ?? null,
         updatedAt: now
       }
-      // Principal mdp peut être court (0000) ; secondaires ≥6
       if (input.password) {
-        const min = prev.isPrincipal ? 4 : 6
+        const min = isPrincipal ? 4 : 6
         if (input.password.length < min) return undefined
         next.passwordHash = hashManagementPassword(input.password)
         if (input.mustChangePassword === undefined) {
@@ -550,27 +633,30 @@ export class MemoryStore implements OpsGateStore {
       return next
     }
 
-    // Nouveau secondaire — pas de second principal
-    if (input.isPrincipal) return undefined
     if (!input.password || input.password.length < 6) return undefined
     if (list.some((a) => a.email === email)) return undefined
 
+    const asPrincipal = !!input.isPrincipal
     const created: OrgAdmin = {
       id: newId("adm"),
       orgId,
       label: input.label.trim() || `admin${list.length + 1}`,
       email,
       passwordHash: hashManagementPassword(input.password),
-      isPrincipal: false,
-      permissions: input.permissions?.length
-        ? input.permissions
-        : ["console_access"],
+      isPrincipal: asPrincipal,
+      permissions: asPrincipal
+        ? [...ALL_ADMIN_PERMISSIONS]
+        : input.permissions?.length
+          ? input.permissions
+          : ["console_access"],
       active: input.active !== false,
       mustChangePassword: false,
+      failedLoginCount: 0,
+      lockedAt: null,
       createdAt: now,
       updatedAt: now
     }
-    if (!created.permissions.includes("console_access")) {
+    if (!created.isPrincipal && !created.permissions.includes("console_access")) {
       created.permissions = ["console_access", ...created.permissions]
     }
     list.push(created)
@@ -580,13 +666,78 @@ export class MemoryStore implements OpsGateStore {
     return created
   }
 
+  async recordAdminLoginFailure(adminId: string, threshold: number) {
+    const thr = Math.max(3, Math.min(50, Math.floor(threshold) || 5))
+    for (const [orgId, list] of this.admins) {
+      const idx = list.findIndex((a) => a.id === adminId)
+      if (idx < 0) continue
+      const prev = list[idx]
+      const count = (prev.failedLoginCount || 0) + 1
+      const locked = count >= thr
+      const next: OrgAdmin = {
+        ...prev,
+        failedLoginCount: count,
+        lockedAt: locked ? prev.lockedAt || new Date().toISOString() : prev.lockedAt,
+        updatedAt: new Date().toISOString()
+      }
+      list[idx] = next
+      this.admins.set(orgId, list)
+      return { locked: !!next.lockedAt, count, admin: next }
+    }
+    return { locked: false, count: 0 }
+  }
+
+  async clearAdminLoginFailures(adminId: string) {
+    for (const [orgId, list] of this.admins) {
+      const idx = list.findIndex((a) => a.id === adminId)
+      if (idx < 0) continue
+      list[idx] = {
+        ...list[idx],
+        failedLoginCount: 0,
+        lockedAt: null,
+        updatedAt: new Date().toISOString()
+      }
+      this.admins.set(orgId, list)
+      return
+    }
+  }
+
+  async unlockAdmin(orgId: string, adminId: string) {
+    const list = this.admins.get(orgId) || []
+    const idx = list.findIndex((a) => a.id === adminId)
+    if (idx < 0) return undefined
+    list[idx] = {
+      ...list[idx],
+      failedLoginCount: 0,
+      lockedAt: null,
+      updatedAt: new Date().toISOString()
+    }
+    this.admins.set(orgId, list)
+    return list[idx]
+  }
+
+  async findAdminsByEmail(email: string) {
+    const emailNorm = email.trim().toLowerCase()
+    const out: OrgAdmin[] = []
+    for (const [orgId, list] of this.admins) {
+      if (this.orgs.get(orgId)?.isPersonal) continue
+      for (const a of list) {
+        if (a.active && a.email === emailNorm) out.push(a)
+      }
+    }
+    return out
+  }
+
   async deleteAdmin(orgId: string, adminId: string) {
     const list = this.admins.get(orgId) || []
     const target = list.find((a) => a.id === adminId)
-    if (!target || target.isPrincipal) return false // jamais supprimer le principal
+    if (!target) return false
+    if (target.isPrincipal) {
+      const principals = list.filter((a) => a.isPrincipal && a.active)
+      if (principals.length <= 1) return false
+    }
     const next = list.filter((a) => a.id !== adminId)
     this.admins.set(orgId, next)
-    // revoke sessions
     for (const [tok, s] of this.sessions) {
       if (s.adminId === adminId) this.sessions.delete(tok)
     }
@@ -631,6 +782,10 @@ export class MemoryStore implements OpsGateStore {
     candidates.sort((a, b) => Number(a.personal) - Number(b.personal))
     const hit = candidates[0]
     if (!hit) return { ok: false as const, error: "invalid_credentials" }
+    if (hit.admin.lockedAt) {
+      return { ok: false as const, error: "account_locked" }
+    }
+    await this.clearAdminLoginFailures(hit.admin.id)
     const now = Date.now()
     const idleMs = MemoryStore.SESSION_IDLE_MS
     let forced = false
@@ -840,7 +995,11 @@ export class MemoryStore implements OpsGateStore {
   }
 
   async listProfiles(orgId: string) {
-    return [...(this.profiles.get(orgId) || [])]
+    return [...(this.profiles.get(orgId) || [])].sort(
+      (a, b) =>
+        (a.priority ?? 100) - (b.priority ?? 100) ||
+        a.name.localeCompare(b.name)
+    )
   }
 
   async upsertProfile(
@@ -854,6 +1013,8 @@ export class MemoryStore implements OpsGateStore {
       scanUploads?: boolean
       eventReporting?: boolean
       protectUnenroll?: boolean
+      enabled?: boolean
+      priority?: number
       assignedGroupIds?: string[]
       assignedUserIds?: string[]
       userMessages?: Partial<import("./types").PolicyUserMessages>
@@ -883,6 +1044,12 @@ export class MemoryStore implements OpsGateStore {
           input.protectUnenroll !== undefined
             ? input.protectUnenroll
             : prev.protectUnenroll,
+        enabled:
+          input.enabled !== undefined ? input.enabled : prev.enabled !== false,
+        priority:
+          input.priority !== undefined
+            ? Math.max(1, Math.floor(input.priority) || 100)
+            : prev.priority ?? 100,
         assignedGroupIds: input.assignedGroupIds ?? prev.assignedGroupIds,
         assignedUserIds: input.assignedUserIds ?? prev.assignedUserIds,
         userMessages:
@@ -916,6 +1083,11 @@ export class MemoryStore implements OpsGateStore {
       scanUploads: input.scanUploads !== false,
       eventReporting: input.eventReporting !== false,
       protectUnenroll: !!input.protectUnenroll,
+      enabled: input.enabled !== false,
+      priority:
+        input.priority !== undefined
+          ? Math.max(1, Math.floor(input.priority) || 100)
+          : 100,
       assignedGroupIds: input.assignedGroupIds || [],
       assignedUserIds: input.assignedUserIds || [],
       userMessages: input.userMessages,
@@ -1001,34 +1173,42 @@ export class MemoryStore implements OpsGateStore {
     orgId: string,
     agent: Agent | undefined
   ): PolicyProfile | null {
-    const list = this.profiles.get(orgId) || []
+    const list = (this.profiles.get(orgId) || []).filter(
+      (p) => p.enabled !== false
+    )
     if (!agent) return null
+    const byPrio = (a: PolicyProfile, b: PolicyProfile) =>
+      (a.priority ?? 100) - (b.priority ?? 100)
 
-    // 1. Override manuel agent
+    // 1. Override manuel agent (si profil encore actif)
     if (agent.policyProfileId) {
       return list.find((p) => p.id === agent.policyProfileId) || null
     }
 
-    // 2. Via user → groupes / assignation directe user
+    // 2. Via user → groupes / assignation directe user (priorité firewall)
     if (agent.userId) {
       const user = (this.users.get(orgId) || []).find(
         (u) => u.id === agent.userId
       )
       if (user) {
-        const byUser = list.find((p) =>
-          (p.assignedUserIds || []).includes(user.id)
-        )
+        const byUser = list
+          .filter((p) => (p.assignedUserIds || []).includes(user.id))
+          .sort(byPrio)[0]
         if (byUser) return byUser
+        const candidates: PolicyProfile[] = []
         for (const gid of user.groupIds || []) {
-          const byGroup = list.find((p) =>
-            (p.assignedGroupIds || []).includes(gid)
-          )
-          if (byGroup) return byGroup
+          for (const p of list) {
+            if ((p.assignedGroupIds || []).includes(gid)) candidates.push(p)
+          }
           const g = (this.groups.get(orgId) || []).find((x) => x.id === gid)
           if (g?.policyProfileId) {
             const p = list.find((x) => x.id === g.policyProfileId)
-            if (p) return p
+            if (p) candidates.push(p)
           }
+        }
+        if (candidates.length) {
+          candidates.sort(byPrio)
+          return candidates[0]
         }
       }
     }
@@ -1113,7 +1293,7 @@ export class MemoryStore implements OpsGateStore {
     let licensed_agents = 0
     let unlicensed_agents = 0
     let grace_agents = 0
-    const graceMs = 5 * 60 * 1000
+    const { LICENSE_GRACE_MS: graceMs } = await import("./summary-helpers")
     for (const a of agents) {
       const ok = await this.isAgentLicensed(orgId, a.id)
       if (ok) {
@@ -1268,9 +1448,16 @@ export class MemoryStore implements OpsGateStore {
     return (this.packs.get(orgId) || []).find((p) => p.version === version)
   }
 
-  async getActivePack(orgId: string) {
+  async getActivePack(
+    orgId: string
+  ): Promise<import("./types").StoredRulePack | undefined> {
     const list = this.packs.get(orgId) || []
-    return list.find((p) => p.active) || list[list.length - 1]
+    const active = list.find((p) => p.active) || list[list.length - 1]
+    if (active) {
+      if (!active.active) active.active = true
+      return active
+    }
+    return this.ensureDefaultPack(orgId)
   }
 
   async getActivePackPayload(
@@ -1290,10 +1477,17 @@ export class MemoryStore implements OpsGateStore {
       if (!v.ok) return { ok: false, errors: v.errors }
       rules = input.rules
     } else {
-      const active = await this.getActivePack(input.orgId)
-      if (!active) return { ok: false, errors: ["no_active_pack_to_clone"] }
-      const disable = new Set(input.disableRuleIds || [])
-      rules = active.rules.filter((r) => !disable.has(r.id))
+      let active = await this.getActivePack(input.orgId)
+      if (!active) active = await this.ensureDefaultPack(input.orgId)
+      if (!active) {
+        const { buildGlobalRulesPack } = await import("./rules-pack")
+        rules = buildGlobalRulesPack("1.0.0").rules
+      } else {
+        const disable = new Set(input.disableRuleIds || [])
+        rules = active.rules.filter(
+          (r: import("@opsgate/engine").DetectionRule) => !disable.has(r.id)
+        )
+      }
       const v = validateRules(rules)
       if (!v.ok) return { ok: false, errors: v.errors }
     }
@@ -1703,9 +1897,10 @@ export class MemoryStore implements OpsGateStore {
   }
 
   async listRecoveryCodes(orgId: string) {
-    return [...(this.recoveryCodes.get(orgId) || [])].sort(
-      (a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt)
-    )
+    // Actifs (pool valide) + consommés (audit). Invalidés non utilisés exclus.
+    return [...(this.recoveryCodes.get(orgId) || [])]
+      .filter((c) => c.consumedAt || (c.active && !c.consumedAt))
+      .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
   }
 
   async generateRecoveryCodes(orgId: string, count: number, label?: string) {
@@ -1753,16 +1948,10 @@ export class MemoryStore implements OpsGateStore {
   }
 
   async revokeRecoveryPool(orgId: string) {
+    // Invalider le pool = effacer TOUS les codes (actifs + utilisés).
     const list = this.recoveryCodes.get(orgId) || []
-    let revoked = 0
-    const now = new Date().toISOString()
-    for (let i = 0; i < list.length; i++) {
-      if (list[i].active && !list[i].consumedAt) {
-        list[i] = { ...list[i], active: false, consumedAt: now }
-        revoked++
-      }
-    }
-    this.recoveryCodes.set(orgId, list)
+    const revoked = list.length
+    this.recoveryCodes.set(orgId, [])
     return { revoked }
   }
 

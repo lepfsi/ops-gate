@@ -340,7 +340,7 @@ export async function syncConfig(
       unlicensedSince: body.policy.unlicensed_since
         ? Date.parse(body.policy.unlicensed_since)
         : undefined,
-      licenseGraceMs: body.policy.license_grace_ms || 5 * 60 * 1000,
+      licenseGraceMs: body.policy.license_grace_ms || 24 * 60 * 60 * 1000,
       securityActive: body.policy.security_active !== false,
       defaultAction: (body.policy.default_action as OpsGateSettings["defaultAction"]) ||
         "mask_recommend",

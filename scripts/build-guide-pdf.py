@@ -19,21 +19,32 @@ INK = (15, 23, 42)
 
 class GuidePDF(FPDF):
     def header(self) -> None:
-        self.set_font("Helvetica", "B", 9)
-        self.set_text_color(*GRAY)
-        self.cell(0, 8, "OpsGate  |  Guide utilisateur V1", align="L")
-        self.ln(4)
+        # Bandeau haut : navy + accent teal sous le titre (séparateur toujours visible)
+        x0 = self.l_margin
+        x1 = self.w - self.r_margin
+        band_h = 14
+        self.set_fill_color(*NAVY)
+        self.rect(0, 0, self.w, band_h, "F")
+        self.set_xy(x0, 3.5)
+        self.set_font("Helvetica", "B", 10)
+        self.set_text_color(255, 255, 255)
+        self.cell(0, 6, "OpsGate  |  Guide utilisateur V1", align="L")
+        # Trait teal net sous le bandeau (contraste fort)
         self.set_draw_color(*TEAL)
-        self.set_line_width(0.4)
-        y = self.get_y()
-        self.line(self.l_margin, y, self.w - self.r_margin, y)
-        self.ln(6)
+        self.set_line_width(1.1)
+        self.line(0, band_h, self.w, band_h)
+        self.set_y(band_h + 8)
 
     def footer(self) -> None:
-        self.set_y(-12)
+        self.set_y(-14)
+        self.set_draw_color(*TEAL)
+        self.set_line_width(0.5)
+        y = self.get_y()
+        self.line(self.l_margin, y, self.w - self.r_margin, y)
+        self.set_y(-11)
         self.set_font("Helvetica", "", 8)
         self.set_text_color(*GRAY)
-        self.cell(0, 8, f"Page {self.page_no()}/{{nb}}", align="C")
+        self.cell(0, 8, f"Page {self.page_no()}/{{nb}}  -  DailyOps.Tech", align="C")
 
 
 def clean(s: str) -> str:
@@ -60,10 +71,9 @@ def main() -> None:
     text = MD.read_text(encoding="utf-8")
     pdf = GuidePDF(format="A4")
     pdf.alias_nb_pages()
+    pdf.set_margins(16, 24, 16)
     pdf.set_auto_page_break(auto=True, margin=18)
     pdf.add_page()
-    pdf.set_margins(16, 18, 16)
-    pdf.set_auto_page_break(auto=True, margin=18)
 
     in_code = False
     for raw in text.splitlines():

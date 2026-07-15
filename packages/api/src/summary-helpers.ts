@@ -9,7 +9,8 @@ import {
 } from "./types"
 import type { SummaryAgentBrief } from "./store-types"
 
-export const LICENSE_GRACE_MS = 5 * 60 * 1000
+/** Grace unlicensed : 24 h pour laisser le temps aux admins d'agir */
+export const LICENSE_GRACE_MS = 24 * 60 * 60 * 1000
 
 /** Parse "HH:MM" → minutes from midnight */
 function hmToMin(hm: string): number {

@@ -1,0 +1,16 @@
+{
+  "key": "OPS-SMPL-ENTR-PRSE-TEST",
+  "paper_format": "OPS-SMPL-ENTR-PRSE-TEST",
+  "org_code": "SAMPLE-OPSGATE",
+  "login": {
+    "email": "admin@sample.local",
+    "password": "0000"
+  },
+  "payload": {
+    "companyName": "Sample Enterprise",
+    "address": "42 Avenue Sample, 75008 Paris",
+    "contactEmail": "licence@sample.enterprise",
+    "seats": 50
+  },
+  "note": "Clé upsertée automatiquement au démarrage API (Postgres). Login Sample, Paramètres > Licences > Ajouter la licence, coller OPS-SMPL-ENTR-PRSE-TEST."
+}

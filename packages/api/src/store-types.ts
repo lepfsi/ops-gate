@@ -134,6 +134,27 @@ export interface OpsGateStore {
   findOrgByCode(code: string): Promise<Organization | undefined>
   getOrg(id: string): Promise<Organization | undefined>
   /** Met à jour monitoring (seuils offline + schedule) */
+  setOrgLicenseSeats(orgId: string, seats: number): Promise<Organization | undefined>
+
+  /** Pack de règles par défaut si aucun actif (évite agent 404) */
+  ensureDefaultPack(orgId: string): Promise<import("./types").StoredRulePack | undefined>
+
+  /** Licences courtes OPS-XXXX… préprogrammées */
+  issueShortLicense(input: {
+    orgCode: string
+    companyName: string
+    address: string
+    contactEmail: string
+    seats: number
+    expiresAt: string
+  }): Promise<{ licenseKey: string; payload: import("./license-keys").IssuedLicensePayload }>
+
+  lookupIssuedLicense(
+    licenseKey: string
+  ): Promise<import("./license-keys").IssuedLicenseRecord | undefined>
+
+  revokeIssuedLicense(licenseKey: string): Promise<boolean>
+
   updateOrgMonitoring(
     orgId: string,
     monitoring: Partial<import("./types").OrgMonitoringSettings>
@@ -178,9 +199,17 @@ export interface OpsGateStore {
       isPrincipal?: boolean
       permissions?: AdminPermission[]
       mustChangePassword?: boolean
+      unlock?: boolean
     }
   ): Promise<OrgAdmin | undefined>
   deleteAdmin(orgId: string, adminId: string): Promise<boolean>
+  recordAdminLoginFailure(
+    adminId: string,
+    threshold: number
+  ): Promise<{ locked: boolean; count: number; admin?: OrgAdmin }>
+  clearAdminLoginFailures(adminId: string): Promise<void>
+  unlockAdmin(orgId: string, adminId: string): Promise<OrgAdmin | undefined>
+  findAdminsByEmail(email: string): Promise<OrgAdmin[]>
   /**
    * Login console.
    * @param force si true, révoque la session existante du même compte (prise de contrôle).
@@ -247,6 +276,8 @@ export interface OpsGateStore {
       scanUploads?: boolean
       eventReporting?: boolean
       protectUnenroll?: boolean
+      enabled?: boolean
+      priority?: number
       assignedGroupIds?: string[]
       assignedUserIds?: string[]
     }

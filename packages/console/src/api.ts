@@ -57,14 +57,23 @@ async function request<T>(
         error?: string
         message?: string
         details?: string[]
+        remaining_attempts?: number
       }) || {}
     // Préférer le message humain (ex. e-mail déjà inscrit)
-    if (err.message) throw new Error(err.message)
-    throw new Error(
-      err.error
+    const msg = err.message
+      ? err.message
+      : err.error
         ? `${err.error}${err.details ? ": " + err.details.join(", ") : ""}`
         : `HTTP ${res.status}`
-    )
+    const e = new Error(msg) as Error & {
+      code?: string
+      remaining_attempts?: number
+    }
+    e.code = err.error
+    if (typeof err.remaining_attempts === "number") {
+      e.remaining_attempts = err.remaining_attempts
+    }
+    throw e
   }
   return data as T
 }
@@ -127,6 +136,31 @@ export type Summary = {
   }>
 }
 
+export type LogCategories = {
+  detectionEvents: boolean
+  adminLogin: boolean
+  adminAudit: boolean
+  agentLifecycle: boolean
+}
+
+export type NotificationSettings = {
+  licenseExpiring: boolean
+  licenseExpiringDays: number
+  loginBruteForce: boolean
+  loginBruteForceThreshold: number
+}
+
+export type LicenseDisplay = {
+  companyName: string
+  address: string
+  contactEmail: string
+  expiresAt?: string | null
+  mode?: "trial" | "full"
+  seats?: number
+  activatedAt?: string | null
+  licenseKeyFingerprint?: string | null
+}
+
 export type MonitoringSettings = {
   onlineMs: number
   offlineLongMs: number
@@ -142,6 +176,9 @@ export type MonitoringSettings = {
   logRetentionDays?: number
   weeklyExportEnabled?: boolean
   lastWeeklyExportAt?: string | null
+  logCategories?: LogCategories
+  notifications?: NotificationSettings
+  licenseDisplay?: LicenseDisplay
 }
 
 export type PackListItem = {
@@ -246,6 +283,8 @@ export type ProfileRow = {
   scanUploads: boolean
   eventReporting: boolean
   protectUnenroll?: boolean
+  enabled?: boolean
+  priority?: number
   assignedGroupIds?: string[]
   assignedUserIds?: string[]
   userMessages?: PolicyUserMessages
@@ -268,6 +307,9 @@ export type AdminRow = {
   permissions: AdminPermission[]
   active: boolean
   must_change_password?: boolean
+  locked?: boolean
+  locked_at?: string | null
+  failed_login_count?: number
   created_at?: string
   updated_at?: string
 }
@@ -541,6 +583,8 @@ export const api = {
     scan_uploads?: boolean
     event_reporting?: boolean
     protect_unenroll?: boolean
+    enabled?: boolean
+    priority?: number
     assigned_group_ids?: string[]
     user_messages?: PolicyUserMessages
     work_schedule?: WorkScheduleDoc | null
@@ -561,6 +605,8 @@ export const api = {
       event_reporting?: boolean
       user_messages?: PolicyUserMessages
       protect_unenroll?: boolean
+      enabled?: boolean
+      priority?: number
       assigned_group_ids?: string[]
       work_schedule?: WorkScheduleDoc | null
     }
@@ -605,11 +651,18 @@ export const api = {
     email: string
     password: string
     permissions?: AdminPermission[]
+    is_principal?: boolean
   }) =>
     request<{ ok: boolean; admin: AdminRow }>("/v1/org/admins", {
       method: "POST",
       body: JSON.stringify(body)
     }),
+
+  unlockAdmin: (id: string) =>
+    request<{ ok: boolean; admin: AdminRow }>(
+      `/v1/org/admins/${encodeURIComponent(id)}/unlock`,
+      { method: "POST", body: "{}" }
+    ),
 
   updateAdmin: (
     id: string,
@@ -665,7 +718,47 @@ export const api = {
       seats: number
       seats_used: number
       seats_available: number | null
+      license?: {
+        mode?: "trial" | "full"
+        company_name: string
+        address: string
+        contact_email: string
+        org_code?: string
+        license_key_hash: string
+        seats_total: number
+        seats_used: number
+        seats_available: number | null
+        expires_at: string | null
+        days_left?: number
+        trial?: boolean
+        activated_at?: string | null
+      }
     }>("/v1/org/licenses"),
+
+  activateLicense: (licenseKey: string) =>
+    request<{
+      ok: boolean
+      license: {
+        mode: string
+        company_name: string
+        address: string
+        contact_email: string
+        org_code: string
+        seats_total: number
+        seats_used: number
+        expires_at: string
+        license_key_display?: string
+      }
+    }>("/v1/org/license/activate", {
+      method: "POST",
+      body: JSON.stringify({ license_key: licenseKey })
+    }),
+
+  revokeLicense: () =>
+    request<{ ok: boolean; mode: string }>("/v1/org/license/revoke", {
+      method: "POST",
+      body: "{}"
+    }),
 
   eventsByDecision: (decision: string) =>
     request<{ org_id: string; decision: string; events: EventRow[] }>(
@@ -686,8 +779,15 @@ export const api = {
       }
     }>("/v1/org/events"),
 
-  exportEvents: (range: "week" | "all", format: "csv" | "json" = "csv") =>
-    request<{
+  exportEvents: (
+    range: "week" | "all" | "custom",
+    format: "csv" | "json" = "csv",
+    opts?: { from?: string; to?: string }
+  ) => {
+    const q = new URLSearchParams({ range, format })
+    if (opts?.from) q.set("from", opts.from)
+    if (opts?.to) q.set("to", opts.to)
+    return request<{
       ok: boolean
       filename: string
       format: string
@@ -695,9 +795,10 @@ export const api = {
       count: number
       retention_days: number
       days_until_oldest_purge: number | null
-    }>(
-      `/v1/org/events/export?range=${range}&format=${format}`
-    ),
+      from_ts?: string
+      to_ts?: string
+    }>(`/v1/org/events/export?${q.toString()}`)
+  },
 
   listEventExports: () =>
     request<{
@@ -824,6 +925,9 @@ export const api = {
     request<{
       ok: boolean
       note: string
+      mode?: string
+      legacy_env_usable?: boolean
+      legacy_env_deprecated?: boolean
       recovery_password_hint: string
       offline_after_ms: number
       env_override: string

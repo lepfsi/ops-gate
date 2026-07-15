@@ -94,6 +94,46 @@ export interface WorkSchedule {
   breaks?: WorkBreak[]
 }
 
+/** Catégories de journaux activables (false = plus enregistrées) */
+export interface OrgLogCategories {
+  /** Events de détection (prompt / fichier) */
+  detectionEvents: boolean
+  /** Connexions console (login / logout) */
+  adminLogin: boolean
+  /** Autres actions audit admin (policy, packs…) */
+  adminAudit: boolean
+  /** Cycle de vie agent (enroll / unenroll / revoke) */
+  agentLifecycle: boolean
+}
+
+/** Notifications org (console + audit) */
+export interface OrgNotificationSettings {
+  /** Alerte si licence / sièges proches de l’expiration */
+  licenseExpiring: boolean
+  /** Jours avant expiration pour notifier */
+  licenseExpiringDays: number
+  /** Alerte après N échecs de mdp admin */
+  loginBruteForce: boolean
+  /** Seuil d’échecs consécutifs (défaut 5) */
+  loginBruteForceThreshold: number
+}
+
+/** Infos licence affichées console (contrat / facturation) */
+export interface OrgLicenseDisplay {
+  companyName: string
+  address: string
+  contactEmail: string
+  /** Date d'expiration ISO ou vide */
+  expiresAt?: string | null
+  /** trial = 30 j post-création / full = clé constructeur activée */
+  mode?: "trial" | "full"
+  /** Sièges issus de la clé (full) */
+  seats?: number
+  activatedAt?: string | null
+  /** Empreinte de la clé activée (pas le secret) */
+  licenseKeyFingerprint?: string | null
+}
+
 /** Seuils monitoring dashboard (admin configurable) */
 export interface OrgMonitoringSettings {
   /** last_seen < onlineMs → online */
@@ -102,7 +142,7 @@ export interface OrgMonitoringSettings {
   offlineLongMs: number
   schedule: WorkSchedule
   /**
-   * Rétention des detection events (jours) — **définie par l’entreprise**.
+   * Rétention des detection events (jours) - définie par l'entreprise.
    * Au-delà, purge auto (export avant si weeklyExportEnabled).
    */
   logRetentionDays: number
@@ -110,6 +150,11 @@ export interface OrgMonitoringSettings {
   weeklyExportEnabled: boolean
   /** Dernière archive hebdo générée (ISO) */
   lastWeeklyExportAt?: string | null
+  /** Quels types de logs garder (désactiver = plus d'écriture) */
+  logCategories?: OrgLogCategories
+  notifications?: OrgNotificationSettings
+  /** Titulaire licence (entreprise) */
+  licenseDisplay?: OrgLicenseDisplay
 }
 
 /** Code recovery one-time (hash only en base ; clair affiché une fois) */
@@ -141,6 +186,20 @@ export interface LogExportRecord {
   expiresAt: string
 }
 
+export const DEFAULT_LOG_CATEGORIES: OrgLogCategories = {
+  detectionEvents: true,
+  adminLogin: true,
+  adminAudit: true,
+  agentLifecycle: true
+}
+
+export const DEFAULT_NOTIFICATION_SETTINGS: OrgNotificationSettings = {
+  licenseExpiring: true,
+  licenseExpiringDays: 30,
+  loginBruteForce: true,
+  loginBruteForceThreshold: 5
+}
+
 export const DEFAULT_MONITORING_SETTINGS: OrgMonitoringSettings = {
   onlineMs: 15 * 60 * 1000,
   offlineLongMs: 2 * 60 * 60 * 1000,
@@ -154,13 +213,31 @@ export const DEFAULT_MONITORING_SETTINGS: OrgMonitoringSettings = {
   },
   logRetentionDays: 90,
   weeklyExportEnabled: true,
-  lastWeeklyExportAt: null
+  lastWeeklyExportAt: null,
+  logCategories: { ...DEFAULT_LOG_CATEGORIES },
+  notifications: { ...DEFAULT_NOTIFICATION_SETTINGS },
+  licenseDisplay: {
+    companyName: "",
+    address: "",
+    contactEmail: "",
+    expiresAt: null,
+    mode: "trial",
+    seats: 0,
+    activatedAt: null,
+    licenseKeyFingerprint: null
+  }
 }
 
 export function mergeMonitoringSettings(
   partial?: Partial<OrgMonitoringSettings> | null
 ): OrgMonitoringSettings {
-  const base = { ...DEFAULT_MONITORING_SETTINGS }
+  const base: OrgMonitoringSettings = {
+    ...DEFAULT_MONITORING_SETTINGS,
+    schedule: { ...DEFAULT_MONITORING_SETTINGS.schedule },
+    logCategories: { ...DEFAULT_LOG_CATEGORIES },
+    notifications: { ...DEFAULT_NOTIFICATION_SETTINGS },
+    licenseDisplay: { ...DEFAULT_MONITORING_SETTINGS.licenseDisplay! }
+  }
   if (!partial || typeof partial !== "object") return base
   if (typeof partial.onlineMs === "number" && partial.onlineMs >= 60_000) {
     base.onlineMs = partial.onlineMs
@@ -173,7 +250,7 @@ export function mergeMonitoringSettings(
   }
   if (
     typeof partial.logRetentionDays === "number" &&
-    partial.logRetentionDays >= 7 &&
+    partial.logRetentionDays >= 1 &&
     partial.logRetentionDays <= 3650
   ) {
     base.logRetentionDays = Math.floor(partial.logRetentionDays)
@@ -183,6 +260,73 @@ export function mergeMonitoringSettings(
   }
   if (partial.lastWeeklyExportAt !== undefined) {
     base.lastWeeklyExportAt = partial.lastWeeklyExportAt
+  }
+  if (partial.logCategories && typeof partial.logCategories === "object") {
+    base.logCategories = {
+      ...DEFAULT_LOG_CATEGORIES,
+      ...partial.logCategories
+    }
+  }
+  if (partial.notifications && typeof partial.notifications === "object") {
+    base.notifications = {
+      ...DEFAULT_NOTIFICATION_SETTINGS,
+      ...partial.notifications
+    }
+    if (
+      typeof partial.notifications.licenseExpiringDays === "number" &&
+      partial.notifications.licenseExpiringDays >= 1 &&
+      partial.notifications.licenseExpiringDays <= 365
+    ) {
+      base.notifications.licenseExpiringDays = Math.floor(
+        partial.notifications.licenseExpiringDays
+      )
+    }
+    if (
+      typeof partial.notifications.loginBruteForceThreshold === "number" &&
+      partial.notifications.loginBruteForceThreshold >= 3 &&
+      partial.notifications.loginBruteForceThreshold <= 50
+    ) {
+      base.notifications.loginBruteForceThreshold = Math.floor(
+        partial.notifications.loginBruteForceThreshold
+      )
+    }
+  }
+  if (partial.licenseDisplay && typeof partial.licenseDisplay === "object") {
+    base.licenseDisplay = {
+      companyName:
+        typeof partial.licenseDisplay.companyName === "string"
+          ? partial.licenseDisplay.companyName
+          : base.licenseDisplay!.companyName,
+      address:
+        typeof partial.licenseDisplay.address === "string"
+          ? partial.licenseDisplay.address
+          : base.licenseDisplay!.address,
+      contactEmail:
+        typeof partial.licenseDisplay.contactEmail === "string"
+          ? partial.licenseDisplay.contactEmail
+          : base.licenseDisplay!.contactEmail,
+      expiresAt:
+        partial.licenseDisplay.expiresAt !== undefined
+          ? partial.licenseDisplay.expiresAt
+          : base.licenseDisplay!.expiresAt,
+      mode:
+        partial.licenseDisplay.mode === "full" ||
+        partial.licenseDisplay.mode === "trial"
+          ? partial.licenseDisplay.mode
+          : base.licenseDisplay!.mode,
+      seats:
+        typeof partial.licenseDisplay.seats === "number"
+          ? partial.licenseDisplay.seats
+          : base.licenseDisplay!.seats,
+      activatedAt:
+        partial.licenseDisplay.activatedAt !== undefined
+          ? partial.licenseDisplay.activatedAt
+          : base.licenseDisplay!.activatedAt,
+      licenseKeyFingerprint:
+        partial.licenseDisplay.licenseKeyFingerprint !== undefined
+          ? partial.licenseDisplay.licenseKeyFingerprint
+          : base.licenseDisplay!.licenseKeyFingerprint
+    }
   }
   if (partial.schedule && typeof partial.schedule === "object") {
     base.schedule = {
@@ -240,7 +384,7 @@ export const ALL_ADMIN_PERMISSIONS: AdminPermission[] = [
 
 /**
  * Administrateur org.
- * - Principal : créé au setup, tous les droits, OTP reset sur primaryEmail.
+ * - Principal(s) : full access (plusieurs autorisés).
  * - Secondaires : email + rôles spécifiques.
  */
 export interface OrgAdmin {
@@ -250,7 +394,7 @@ export interface OrgAdmin {
   label: string
   email: string
   passwordHash: string
-  /** Super-admin setup — un seul par org */
+  /** Super-admin : tous les droits (plusieurs par org possibles) */
   isPrincipal: boolean
   /** Rôles (principal ignore et a tout) */
   permissions: AdminPermission[]
@@ -259,6 +403,10 @@ export interface OrgAdmin {
   updatedAt: string
   /** Forcer changement mdp après setup (mdp défaut 0000) */
   mustChangePassword?: boolean
+  /** Compteur échecs login consécutifs */
+  failedLoginCount?: number
+  /** Verrouillage après seuil d’échecs (ISO) — null = non verrouillé */
+  lockedAt?: string | null
 }
 
 export interface AdminSession {
@@ -331,6 +479,13 @@ export interface PolicyProfile {
    * Si false : sortie libre même si des admins existent.
    */
   protectUnenroll: boolean
+  /** false = profil désactivé (non appliqué, conservé) */
+  enabled?: boolean
+  /**
+   * Priorité type firewall : plus petit = prioritaire (1 avant 100).
+   * En cas de multi-match groupes, le plus bas gagne.
+   */
+  priority?: number
   /** Groupes soumis à cette policy */
   assignedGroupIds: string[]
   /** Users soumis directement (hors groupe) */
@@ -525,6 +680,10 @@ export type AdminAuditAction =
   | "recovery_code_consumed"
   | "recovery_pool_revoked"
   | "events_export"
+  | "login_failed"
+  | "login_brute_force"
+  | "account_locked"
+  | "account_unlocked"
 
 export interface AdminAuditEvent {
   id: string

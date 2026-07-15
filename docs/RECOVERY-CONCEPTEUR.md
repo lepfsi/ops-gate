@@ -68,11 +68,13 @@ Les OTP « cloud » purs (SMS, TOTP serveur) ne marchent **pas** sans réseau au
 
 | Phase | Action |
 |-------|--------|
-| **Maintenant** | Secret fort `OPSGATE_VENDOR_RECOVERY` (≥24, **unique par client/deploy**) ; offline delay ≥ 2 h ; ne jamais committer le secret |
-| **V1.x (implémenté)** | **Option A** : pool one-time  -  console Admins → Générer / Invalider ; hashes sync agent ; burn local + `consumeRecoveryCode` à l’unenroll |
-| **V2** | Option **C** (ou D) pour break-glass enterprise |
+| **V1.x (mode principal)** | **Pool one-time** : console Admins → Générer / Invalider ; hashes sync agent ; burn local + `consumeRecoveryCode` à l’unenroll |
+| **Transition** | Secret env `OPSGATE_VENDOR_RECOVERY` encore accepté en **secours** offline si pool vide (déprécié) |
+| **V2** | Retrait secret env ; option **C** (ou D) break-glass enterprise |
 
 **Usage agent** : username `vendor` (ou `recovery` / `opsgate`) + code `XXXX-XXXX-XXXX-XXXX`, uniquement si offline ≥ 2 h.
+
+**Invalidation pool** : **tous** les codes du pool sont **effacés** (actifs et déjà utilisés).
 
 ## Checklist pilote réel (validation)
 
@@ -84,7 +86,7 @@ Les OTP « cloud » purs (SMS, TOTP serveur) ne marchent **pas** sans réseau au
 | 4 | Désinscription Options : user `vendor` + **un** code | |
 | 5 | Agent désenrôlé · code **utilisé** en console | |
 | 6 | Même code rejoué → **échec** | |
-| 7 | **Invalider le pool** · force-sync · anciens codes morts | |
+| 7 | **Invalider le pool** · **tous** les codes effacés · force-sync | |
 | 8 | Stock bas (&lt;5) affiché · regénérer | |
 
 Fallback : mdp admin local si `protect_unenroll` ; secret legacy `OPSGATE_VENDOR_RECOVERY` encore poussé (transition).
@@ -104,12 +106,24 @@ Sans cadre, un pool mal géré = encore un SPOF (fuite de la feuille de codes) o
 | **Rate-limit local** | 5 essais / 15 min + lockout progressif |
 | **Delay offline** | Toujours ≥ 2 h sans sync avant d’accepter recovery |
 | **Seuil bas** | Alerte console si &lt; 5 codes actifs · regénération + force-sync |
-| **Rotation** | Possibilité d’**invalider tout le pool** (principal) → bump epoch |
+| **Rotation** | **Invalider le pool** (principal) : DELETE tous les codes du pool ; bump epoch |
 | **Audit** | `recovery_codes_generated`, `recovery_code_consumed`, `recovery_pool_revoked` |
 | **Fallback** | Admin mdp local (protect_unenroll) si pool vide + online bientôt |
 
 **Console :** ne montrer les codes en clair **qu’à la génération** (principal + audit fort).  
 Ensuite : compteurs « restants / consommés », jamais re-affichage du secret.
+
+## Licences constructeur (console)
+
+| Élément | Détail |
+|---------|--------|
+| **Trial** | 30 jours depuis création org · mode `trial` |
+| **Activation** | Paramètres → Gestion des licences → **Ajouter une licence** |
+| **Clé** | `OG1.<payload>.<hmac>` liée à un **orgCode** (mismatch → refus) |
+| **Champs client** | Lecture seule (entreprise, adresse, email, exp, sièges) remplis par la clé |
+| **Émission** | `node scripts/issue-license.mjs --org CODE --company "…" --address "…" --email … --seats N --expires YYYY-MM-DD` |
+| **Secret** | `OPSGATE_LICENSE_SECRET` (prod) |
+| **Portail constructeur** | UI d’émission multi-client → **V2** |
 
 ## Schéma futur
 
