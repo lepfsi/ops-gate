@@ -1832,6 +1832,12 @@ export class MemoryStore implements OpsGateStore {
         receivedAt: now
       })
       accepted++
+      // Heartbeat agent (proxy / extension) sur chaque batch accepté
+      const ag = this.agents.get(agentId)
+      if (ag && ag.orgId === orgId) {
+        ag.lastSeenAt = now
+        this.agents.set(agentId, ag)
+      }
     })
 
     if (this.events.length > 5000) {

@@ -102,16 +102,16 @@ export function queueProxyEvent(
     ...ev
   }
   queue.push(full)
-  if (queue.length >= 10) {
+  // Flush rapide pour que la console (MMC) voie l’event sans attendre longtemps
+  if (queue.length >= 5) {
     void flushEvents(state)
     return
   }
-  if (!flushTimer) {
-    flushTimer = setTimeout(() => {
-      flushTimer = null
-      void flushEvents(state)
-    }, 2000)
-  }
+  if (flushTimer) clearTimeout(flushTimer)
+  flushTimer = setTimeout(() => {
+    flushTimer = null
+    void flushEvents(state)
+  }, 400)
 }
 
 export async function flushEvents(state: AgentState): Promise<void> {
