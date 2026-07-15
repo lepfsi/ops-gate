@@ -1,12 +1,11 @@
 #!/usr/bin/env node
 /**
- * OpsGate Proxy CLI — P0/P1
+ * OpsGate Proxy CLI — P0/P1/P2
  *
  *   cd ops-gate
  *   pnpm proxy:gen-ca
+ *   pnpm proxy:enroll          # API doit tourner
  *   pnpm proxy:dev
- *   pnpm proxy:pac
- *   echo "sk-..." | pnpm proxy:inspect
  */
 import * as fs from "node:fs"
 import * as path from "node:path"
@@ -24,6 +23,13 @@ import { generatePac } from "./pac.js"
 import { inspectText } from "./inspect.js"
 import { startProxyServer } from "./proxy-server.js"
 import { log } from "./log.js"
+import { enrollProxy, flushEvents, getOrLoadState } from "./api-client.js"
+import {
+  clearAgentState,
+  loadAgentState,
+  AGENT_STATE_PATH
+} from "./agent-state.js"
+import { setAgentStateGetter } from "./observe.js"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const pkgRoot = path.resolve(__dirname, "..")
@@ -35,23 +41,29 @@ async function readStdin(): Promise<string> {
 }
 
 function printHelp() {
-  console.log(`OpsGate Proxy P1 (MITM observe allowlist)
+  console.log(`OpsGate Proxy P2 (MITM observe + control plane)
 
-IMPORTANT: run from monorepo root (ops-gate/), not your home folder.
+Run from monorepo root (ops-gate/).
 
 Usage:
   opsgate-proxy serve              Start proxy 127.0.0.1:8888
+  opsgate-proxy enroll             Enroll as proxy agent (API)
+  opsgate-proxy status             Show CA + enroll state
+  opsgate-proxy logout             Clear local agent token
   opsgate-proxy gen-ca [--force]   Generate local Dev CA
-  opsgate-proxy ca-path            Print CA cert path + install hint
-  opsgate-proxy pac [outfile]      Write PAC file
-  opsgate-proxy inspect [file|-]   Run @opsgate/engine on text
+  opsgate-proxy ca-path
+  opsgate-proxy pac [outfile]
+  opsgate-proxy inspect [file|-]
   opsgate-proxy health-url
 
 Env:
   OPSGATE_PROXY_HOST=127.0.0.1
   OPSGATE_PROXY_PORT=8888
   OPSGATE_PROXY_ALLOWLIST=extra.com
-  OPSGATE_PROXY_MITM=1             # 0 = tunnel only (P0 behavior)
+  OPSGATE_PROXY_MITM=1
+  OPSGATE_API_URL=http://127.0.0.1:8787
+  OPSGATE_ORG_CODE=DEMO-OPSGATE
+  OPSGATE_PROXY_AUTO_ENROLL=1      # enroll on serve if no token
 `)
 }
 
@@ -67,7 +79,7 @@ async function main() {
 
   if (cmd === "gen-ca") {
     const force = argv.includes("--force")
-    const pair = generateCa({ force })
+    generateCa({ force })
     log("info", "ca_ready", {
       dir: DATA_DIR,
       cert: CA_CERT_PATH,
@@ -76,7 +88,6 @@ async function main() {
     })
     console.log(CA_CERT_PATH)
     console.log("\n" + caInstallHint())
-    void pair
     return
   }
 
@@ -85,6 +96,57 @@ async function main() {
     console.log("key: ", caExists() ? CA_KEY_PATH : "(missing)")
     console.log("dir: ", DATA_DIR)
     if (caExists()) console.log("\n" + caInstallHint())
+    return
+  }
+
+  if (cmd === "enroll") {
+    const state = await enrollProxy({
+      apiBase: cfg.apiBase,
+      orgCode: cfg.orgCode
+    })
+    console.log(
+      JSON.stringify(
+        {
+          ok: true,
+          agent_id: state.agent_id,
+          org_id: state.org_id,
+          org_code: state.org_code,
+          api_base: state.api_base,
+          state_file: AGENT_STATE_PATH
+        },
+        null,
+        2
+      )
+    )
+    return
+  }
+
+  if (cmd === "logout") {
+    clearAgentState()
+    log("info", "proxy_logout", { path: AGENT_STATE_PATH })
+    console.log("Local agent token cleared.")
+    return
+  }
+
+  if (cmd === "status") {
+    const st = loadAgentState()
+    console.log(
+      JSON.stringify(
+        {
+          ca_ready: caExists(),
+          ca_cert: caExists() ? CA_CERT_PATH : null,
+          enrolled: !!st,
+          agent_id: st?.agent_id || null,
+          org_id: st?.org_id || null,
+          org_code: st?.org_code || null,
+          api_base: st?.api_base || cfg.apiBase,
+          device_label: st?.device_label || null,
+          state_file: AGENT_STATE_PATH
+        },
+        null,
+        2
+      )
+    )
     return
   }
 
@@ -101,7 +163,53 @@ async function main() {
           "Ou désactiver : $env:OPSGATE_PROXY_MITM=0\n"
       )
     }
-    startProxyServer(cfg)
+
+    let agent = getOrLoadState()
+    if (!agent && cfg.autoEnroll) {
+      try {
+        agent = await enrollProxy({
+          apiBase: cfg.apiBase,
+          orgCode: cfg.orgCode
+        })
+        console.log(
+          `[OpsGate] Proxy enrolled → agent_id=${agent.agent_id} org=${agent.org_code}`
+        )
+      } catch (e) {
+        log("warn", "auto_enroll_failed", {
+          error: String((e as Error).message || e),
+          api: cfg.apiBase,
+          org: cfg.orgCode,
+          hint: "Start API (pnpm api:dev) then: pnpm proxy:enroll"
+        })
+        console.error(
+          `\n[OpsGate] Auto-enroll échoué (${cfg.apiBase} / ${cfg.orgCode}).\n` +
+            `  Démarrez l’API puis : pnpm proxy:enroll\n` +
+            `  Le proxy tourne quand même en observe local (sans events console).\n`
+        )
+      }
+    } else if (agent) {
+      log("info", "proxy_agent_loaded", {
+        agent_id: agent.agent_id,
+        org_id: agent.org_id
+      })
+    }
+
+    setAgentStateGetter(() => getOrLoadState())
+
+    const server = startProxyServer(cfg)
+
+    const shutdown = () => {
+      const st = getOrLoadState()
+      if (st) void flushEvents(st)
+      try {
+        server.close()
+      } catch {
+        /* ignore */
+      }
+      process.exit(0)
+    }
+    process.on("SIGINT", shutdown)
+    process.on("SIGTERM", shutdown)
     return
   }
 

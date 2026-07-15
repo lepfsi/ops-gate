@@ -149,12 +149,14 @@ export function startProxyServer(cfg: ProxyConfig): http.Server {
       res.end(
         JSON.stringify({
           ok: true,
-          phase: "P1",
+          phase: "P2",
           mode: cfg.mode,
           mitm: cfg.mitm,
           ca_ready: caExists(),
           allowlist: cfg.allowlist,
-          listen: `${cfg.host}:${cfg.port}`
+          listen: `${cfg.host}:${cfg.port}`,
+          api_base: cfg.apiBase,
+          org_code: cfg.orgCode
         })
       )
       return
@@ -255,13 +257,15 @@ export function startProxyServer(cfg: ProxyConfig): http.Server {
     log("info", "listening", {
       host: cfg.host,
       port: cfg.port,
-      phase: "P1",
+      phase: "P2",
       mitm: cfg.mitm,
       ca_ready: caExists(),
       allowlist_count: cfg.allowlist.length,
       allowlist: cfg.allowlist,
+      api_base: cfg.apiBase,
+      org_code: cfg.orgCode,
       note: cfg.mitm
-        ? "MITM observe on allowlist — install CA (gen-ca + certutil)"
+        ? "MITM observe + optional control-plane events (enroll)"
         : "MITM off — tunnel only (OPSGATE_PROXY_MITM=0)"
     })
   })

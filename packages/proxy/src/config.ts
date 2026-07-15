@@ -1,4 +1,4 @@
-/** Config proxy — P0 tunnel + P1 MITM observe. */
+/** Config proxy — P0 tunnel + P1 MITM + P2 control plane. */
 
 export type ProxyConfig = {
   host: string
@@ -12,6 +12,11 @@ export type ProxyConfig = {
    * false = tunnel pur (P0). true = déchiffrement + observe engine.
    */
   mitm: boolean
+  /** Control plane (P2) */
+  apiBase: string
+  orgCode: string
+  /** Auto-enroll au démarrage serve si pas de token local */
+  autoEnroll: boolean
 }
 
 export const DEFAULT_ALLOWLIST = [
@@ -21,6 +26,8 @@ export const DEFAULT_ALLOWLIST = [
   "openai.com",
   "ab.chatgpt.com",
   "cdn.oaistatic.com",
+  "auth-cdn.oaistatic.com",
+  "cdn.openai.com",
   "claude.ai",
   "www.claude.ai",
   "gemini.google.com",
@@ -39,15 +46,27 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ProxyConfig {
   const allowlist = [
     ...new Set([...DEFAULT_ALLOWLIST.map((h) => h.toLowerCase()), ...extra])
   ]
-  // MITM on par défaut en P1 ; OPSGATE_PROXY_MITM=0 pour revenir au tunnel P0
   const mitmRaw = (env.OPSGATE_PROXY_MITM ?? "1").toLowerCase()
   const mitm = !(mitmRaw === "0" || mitmRaw === "false" || mitmRaw === "off")
+
+  const autoRaw = (env.OPSGATE_PROXY_AUTO_ENROLL ?? "1").toLowerCase()
+  const autoEnroll = !(
+    autoRaw === "0" ||
+    autoRaw === "false" ||
+    autoRaw === "off"
+  )
 
   return {
     host,
     port: Number.isFinite(port) && port > 0 ? port : 8888,
     allowlist,
     mode: "observe",
-    mitm
+    mitm,
+    apiBase: (env.OPSGATE_API_URL || env.OPSGATE_API_BASE || "http://127.0.0.1:8787").replace(
+      /\/$/,
+      ""
+    ),
+    orgCode: (env.OPSGATE_ORG_CODE || "DEMO-OPSGATE").trim(),
+    autoEnroll
   }
 }
