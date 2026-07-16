@@ -301,12 +301,23 @@ Prod future : services Windows / silent scripts ; pas 3 terminaux ouverts.
 | Status | flags dans `/auth/oidc/status` | console SSO-only UI |
 | Docs | `AUTH-MFA-SSO.md` | |
 
-## 20. Suite recommandée
+## 20. V2 batch — Safari · WebAuthn · SAML · LDAP cron · docs décideurs (16 juillet 2026)
 
-1. Safari  
-2. Publication CWS / AMO réelles  
-3. WebAuthn / SAML  
-4. LDAP : cron, prune, map auto profil  
+| Sujet | Détail | Fichiers |
+|-------|--------|----------|
+| Safari | `plasmo --target=safari-mv3`, doc Xcode | `SAFARI-MV3.md`, `pnpm build:safari` |
+| WebAuthn | register/login passkeys, store process | `webauthn.ts`, endpoints app |
+| SAML SP | metadata, AuthnRequest, ACS | `saml.ts`, `/auth/saml/*` |
+| LDAP cron | `OPSGATE_LDAP_CRON_MINUTES` | `ldap-cron.ts`, `index.ts` |
+| Docs décideurs | FR/EN + guide user V2 + guide test | `DECIDEURS-V2-*.md`, `GUIDE-*-V2*.md` |
+| PDF brandés | `pnpm docs:pdf:v2` | `scripts/build-v2-docs-pdf.py` |
+
+## 21. Suite recommandée
+
+1. Publication CWS / AMO / Apple réelles  
+2. WebAuthn persisté en Postgres  
+3. SAML C14N exclusive stricte  
+4. LDAP prune + map auto profil  
 5. OIDC state multi-instance (Redis)  
 
 Détail : `docs/V2-BACKLOG.md` · `docs/architecture/PLATFORM-v2.md`.

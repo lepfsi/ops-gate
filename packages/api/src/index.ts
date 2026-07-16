@@ -53,6 +53,17 @@ async function main() {
     )
   }
 
+  // LDAP cron multi-org (optionnel)
+  try {
+    const { startLdapCron } = await import("./ldap-cron")
+    startLdapCron(store)
+  } catch (e) {
+    console.warn(
+      "[opsgate-api] LDAP cron init skipped:",
+      e instanceof Error ? e.message : e
+    )
+  }
+
   serve({ fetch: app.fetch, port, hostname: "127.0.0.1" })
 }
 

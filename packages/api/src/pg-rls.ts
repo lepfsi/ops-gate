@@ -100,6 +100,8 @@ export function pathNeedsRlsBypass(path: string): boolean {
     "/v1/auth/login",
     "/v1/auth/setup-info",
     "/v1/auth/oidc/",
+    "/v1/auth/saml/",
+    "/v1/auth/webauthn/",
     "/v1/auth/password-reset",
     "/v1/enroll"
   ]
