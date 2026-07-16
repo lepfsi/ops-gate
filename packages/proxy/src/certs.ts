@@ -1,16 +1,18 @@
 /**
  * CA locale + certificats dynamiques par host (MITM allowlist — P1).
- * Stockage : packages/proxy/data/ca/ (gitignored).
+ * Stockage : <dataRoot>/ca/ (dev monorepo ou ProgramData en install MSI).
  */
 import * as fs from "node:fs"
 import * as path from "node:path"
-import { fileURLToPath } from "node:url"
 import forge from "node-forge"
+import { ensureProxyDataDirs, resolveProxyDataRoot } from "./paths.js"
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
-export const DATA_DIR = path.resolve(__dirname, "..", "data", "ca")
+export const DATA_DIR = path.join(resolveProxyDataRoot(), "ca")
 export const CA_KEY_PATH = path.join(DATA_DIR, "ca-key.pem")
 export const CA_CERT_PATH = path.join(DATA_DIR, "ca-cert.pem")
+
+// Crée le dossier ca au premier import utile
+ensureProxyDataDirs()
 
 export type PemPair = { key: string; cert: string }
 

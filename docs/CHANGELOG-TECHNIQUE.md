@@ -192,10 +192,21 @@ Prod future : services Windows / silent scripts ; pas 3 terminaux ouverts.
 | Health | `soft_mask` dans `/opsgate-proxy/health` | `proxy-server.ts` |
 | Docs | `PROXY-PROD-WINDOWS.md` | |
 
-## 10. Suite recommandée
+## 10. V2 P1 suite — MSI proxy Windows (16 juillet 2026)
 
-1. Proxy MSI packagé / install service polish  
-2. HTTP/2 stream-aware enforce  
+| Sujet | Détail | Fichiers |
+|-------|--------|----------|
+| Bundle | esbuild ESM standalone `opsgate-proxy.mjs` | `scripts/package-proxy-stage.ps1` |
+| Paths install | ProgramData / `OPSGATE_PROXY_DATA_DIR` | `packages/proxy/src/paths.ts` |
+| Stage + ZIP | `dist/proxy-stage`, `opsgate-proxy-*-win-x64.zip` | package script |
+| MSI WiX 3.14 | heat+candle+light, auto-download tools | `scripts/build-proxy-msi.ps1`, `packaging/proxy/` |
+| Post-install | CA + trust + enroll + tâche planifiée | `scripts/post-install.ps1` (dans le stage) |
+| npm scripts | `pnpm proxy:package` · `pnpm proxy:msi` | `package.json` |
+
+## 11. Suite recommandée
+
+1. HTTP/2 stream-aware enforce  
+2. MSI : Node portable embarqué (option)  
 3. Firefox MV3  
 4. Chrome Web Store / MDM force-install  
 5. Redis pour rate-limit multi-instance  

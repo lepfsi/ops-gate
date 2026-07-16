@@ -1,18 +1,16 @@
 /**
  * Persistance locale enroll proxy (token agent) — P2.
- * Fichier : packages/proxy/data/agent.json (gitignored via data/)
+ * Fichier : <dataRoot>/agent.json (dev monorepo ou ProgramData MSI).
  */
 import * as fs from "node:fs"
 import * as path from "node:path"
-import { fileURLToPath } from "node:url"
 import * as os from "node:os"
 import * as crypto from "node:crypto"
+import { ensureProxyDataDirs, resolveProxyDataRoot } from "./paths.js"
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
-export const AGENT_STATE_PATH = path.resolve(
-  __dirname,
-  "..",
-  "data",
+ensureProxyDataDirs()
+export const AGENT_STATE_PATH = path.join(
+  resolveProxyDataRoot(),
   "agent.json"
 )
 

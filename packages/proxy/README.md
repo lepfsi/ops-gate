@@ -50,6 +50,8 @@ pnpm proxy:pac          # génère opsgate-proxy.pac
 pnpm proxy:inspect      # engine partagé (stdin/fichier)
 pnpm proxy:gen-ca       # (re)génère CA
 pnpm proxy:ca-path      # chemins + hint certutil
+pnpm proxy:package      # stage portable (dist/proxy-stage + ZIP)
+pnpm proxy:msi          # MSI WiX → dist/opsgate-proxy-<ver>.msi
 ```
 
 Health :

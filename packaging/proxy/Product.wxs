@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  OpsGate Proxy — WiX 3.x product definition.
+  Built by scripts/build-proxy-msi.ps1 (candle + light).
+  ASCII-only strings for code page 1252 compatibility.
+-->
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Product
+    Id="*"
+    Name="OpsGate Proxy"
+    Language="1033"
+    Codepage="1252"
+    Version="$(var.ProductVersion)"
+    Manufacturer="OpsGate"
+    UpgradeCode="8F3A2C1E-9B4D-4E7A-A1C0-0D5E6F7890AB">
+
+    <Package
+      InstallerVersion="500"
+      Compressed="yes"
+      InstallScope="perMachine"
+      Description="OpsGate local HTTPS MITM proxy (multi-IA)"
+      Comments="OpsGate Proxy $(var.ProductVersion)"
+      Manufacturer="OpsGate" />
+
+    <MajorUpgrade
+      DowngradeErrorMessage="A newer version of OpsGate Proxy is already installed."
+      AllowSameVersionUpgrades="yes" />
+
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+
+    <Feature Id="MainFeature" Title="OpsGate Proxy" Level="1" ConfigurableDirectory="INSTALLFOLDER">
+      <ComponentGroupRef Id="ProxyFiles" />
+      <ComponentRef Id="CmpEnvProgramData" />
+      <ComponentRef Id="CmpInstallDirReg" />
+    </Feature>
+
+    <!-- Optional UI (requires WixUIExtension) — stripped when -SkipUi -->
+    <!--WIXUI_PLACEHOLDER-->
+
+    <!-- Post-install: schedule/CA via separate script if custom action fails -->
+    <CustomAction
+      Id="RunPostInstall"
+      Directory="INSTALLFOLDER"
+      ExeCommand="powershell.exe -NoProfile -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]scripts\post-install.ps1&quot; -InstallRoot &quot;[INSTALLFOLDER]&quot;"
+      Execute="deferred"
+      Impersonate="yes"
+      Return="ignore" />
+
+    <InstallExecuteSequence>
+      <Custom Action="RunPostInstall" After="InstallFiles">NOT Installed AND NOT REMOVE</Custom>
+    </InstallExecuteSequence>
+  </Product>
+
+  <Fragment>
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="ProgramFiles64Folder">
+        <Directory Id="CompanyFolder" Name="OpsGate">
+          <Directory Id="INSTALLFOLDER" Name="Proxy" />
+        </Directory>
+      </Directory>
+      <Directory Id="CommonAppDataFolder">
+        <Directory Id="OpsGateDataRoot" Name="OpsGate">
+          <Directory Id="ProxyDataFolder" Name="Proxy" />
+        </Directory>
+      </Directory>
+      <Directory Id="ProgramMenuFolder">
+        <Directory Id="ProxyMenuFolder" Name="OpsGate" />
+      </Directory>
+    </Directory>
+  </Fragment>
+
+  <Fragment>
+    <DirectoryRef Id="INSTALLFOLDER">
+      <Component Id="CmpEnvProgramData" Guid="B2C3D4E5-F6A7-4B8C-9D0E-1F2A3B4C5D6E">
+        <RegistryValue
+          Root="HKLM"
+          Key="SOFTWARE\OpsGate\Proxy"
+          Name="UseProgramData"
+          Type="string"
+          Value="1"
+          KeyPath="yes" />
+        <RegistryValue
+          Root="HKLM"
+          Key="SOFTWARE\OpsGate\Proxy"
+          Name="Version"
+          Type="string"
+          Value="$(var.ProductVersion)" />
+      </Component>
+      <Component Id="CmpInstallDirReg" Guid="C3D4E5F6-A7B8-4C9D-0E1F-2A3B4C5D6E7F">
+        <RegistryValue
+          Root="HKLM"
+          Key="SOFTWARE\OpsGate\Proxy"
+          Name="InstallDir"
+          Type="string"
+          Value="[INSTALLFOLDER]"
+          KeyPath="yes" />
+        <RemoveFolder Id="RemoveProxyMenu" Directory="ProxyMenuFolder" On="uninstall" />
+        <Shortcut
+          Id="StartProxyShortcut"
+          Directory="ProxyMenuFolder"
+          Name="OpsGate Proxy"
+          Description="Start OpsGate local proxy"
+          Target="[System64Folder]cmd.exe"
+          Arguments="/c &quot;[INSTALLFOLDER]run-proxy.cmd&quot;"
+          WorkingDirectory="INSTALLFOLDER"
+          Advertise="no" />
+      </Component>
+    </DirectoryRef>
+  </Fragment>
+</Wix>
