@@ -709,6 +709,9 @@ export class MemoryStore implements OpsGateStore {
     const now = new Date().toISOString()
     const email = input.email.trim().toLowerCase()
     if (!email.includes("@")) return undefined
+    const { validatePasswordPolicy, pushPasswordHistory } = await import(
+      "./crypto"
+    )
 
     if (input.id) {
       const idx = list.findIndex((a) => a.id === input.id)
@@ -737,8 +740,15 @@ export class MemoryStore implements OpsGateStore {
         updatedAt: now
       }
       if (input.password) {
-        const min = isPrincipal ? 4 : 6
-        if (input.password.length < min) return undefined
+        const pol = validatePasswordPolicy(input.password, {
+          currentHash: prev.passwordHash,
+          history: prev.passwordHistory
+        })
+        if (!pol.ok) return undefined
+        next.passwordHistory = pushPasswordHistory(
+          prev.passwordHash,
+          prev.passwordHistory
+        )
         next.passwordHash = hashManagementPassword(input.password)
         if (input.mustChangePassword === undefined) {
           next.mustChangePassword = false
@@ -746,12 +756,19 @@ export class MemoryStore implements OpsGateStore {
       }
       list[idx] = next
       this.admins.set(orgId, list)
+      // Sync e-mail install org si principal
+      if (isPrincipal) {
+        const org = this.orgs.get(orgId)
+        if (org) org.primaryEmail = email
+      }
       await this.syncLegacyMgmtHash(orgId)
       await this.forceConfigSync(orgId)
       return next
     }
 
-    if (!input.password || input.password.length < 6) return undefined
+    if (!input.password) return undefined
+    const pol = validatePasswordPolicy(input.password)
+    if (!pol.ok) return undefined
     if (list.some((a) => a.email === email)) return undefined
 
     const asPrincipal = !!input.isPrincipal
@@ -761,6 +778,7 @@ export class MemoryStore implements OpsGateStore {
       label: input.label.trim() || `admin${list.length + 1}`,
       email,
       passwordHash: hashManagementPassword(input.password),
+      passwordHistory: [],
       isPrincipal: asPrincipal,
       permissions: asPrincipal
         ? [...ALL_ADMIN_PERMISSIONS]
@@ -1652,9 +1670,9 @@ export class MemoryStore implements OpsGateStore {
     if (hashManagementPassword(otp.trim()) !== ch.codeHash) {
       return { ok: false as const, error: "otp_invalid" }
     }
-    if (!newPassword || newPassword.length < 6) {
-      return { ok: false as const, error: "password_too_short" }
-    }
+    const { validatePasswordPolicy, pushPasswordHistory } = await import(
+      "./crypto"
+    )
     // Vérifie que le confirm cible le même admin que le challenge
     if (target?.adminId && target.adminId !== ch.adminId) {
       return { ok: false as const, error: "admin_mismatch" }
@@ -1668,11 +1686,22 @@ export class MemoryStore implements OpsGateStore {
     const list = this.admins.get(orgId) || []
     const admin = list.find((a) => a.id === ch.adminId)
     if (!admin) return { ok: false as const, error: "admin_not_found" }
+    const pol = validatePasswordPolicy(newPassword, {
+      currentHash: admin.passwordHash,
+      history: admin.passwordHistory
+    })
+    if (!pol.ok) return { ok: false as const, error: pol.error }
+    admin.passwordHistory = pushPasswordHistory(
+      admin.passwordHash,
+      admin.passwordHistory
+    )
     const hash = hashManagementPassword(newPassword)
     admin.passwordHash = hash
     admin.mustChangePassword = false
     admin.updatedAt = new Date().toISOString()
     if (admin.isPrincipal) {
+      const org = this.orgs.get(orgId)
+      if (org) org.primaryEmail = admin.email
       await this.syncLegacyMgmtHash(orgId)
       await this.updatePolicy(orgId, { managementPasswordHash: hash })
     }

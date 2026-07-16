@@ -8,9 +8,11 @@ import type { DetectionRule } from "@opsgate/engine"
 import {
   getVendorRecoveryHash,
   hashManagementPassword,
+  MIN_PASSWORD_LENGTH,
   newToken,
   PRINCIPAL_DEFAULT_PASSWORD,
   PRINCIPAL_SETUP_EMAIL,
+  validatePasswordPolicy,
   VENDOR_RECOVERY_PASSWORD
 } from "./crypto"
 import { toPayload, validateRules } from "./rules-pack"
@@ -2516,14 +2518,19 @@ export function createApp() {
     } catch {
       return c.json({ error: "invalid_json" }, 400)
     }
-    if (
-      !body.label?.trim() ||
-      !body.email?.trim() ||
-      !body.password ||
-      body.password.length < 6
-    ) {
+    if (!body.label?.trim() || !body.email?.trim() || !body.password) {
+      return c.json({ error: "label_email_password_required" }, 400)
+    }
+    const polCreate = validatePasswordPolicy(body.password)
+    if (!polCreate.ok) {
       return c.json(
-        { error: "label_email_password_min6_required" },
+        {
+          error: polCreate.error,
+          message:
+            polCreate.error === "password_too_short"
+              ? `Mot de passe trop court (min. ${MIN_PASSWORD_LENGTH} caractères).`
+              : "Mot de passe déjà utilisé récemment."
+        },
         400
       )
     }
@@ -2632,8 +2639,21 @@ export function createApp() {
         if (body.password !== body.password_confirm) {
           return c.json({ error: "password_confirm_mismatch" }, 400)
         }
-        if (body.password.length < 6) {
-          return c.json({ error: "password_too_short" }, 400)
+        const polS = validatePasswordPolicy(body.password, {
+          currentHash: existing.passwordHash,
+          history: existing.passwordHistory
+        })
+        if (!polS.ok) {
+          return c.json(
+            {
+              error: polS.error,
+              message:
+                polS.error === "password_too_short"
+                  ? `Mot de passe trop court (min. ${MIN_PASSWORD_LENGTH} caractères).`
+                  : "Mot de passe déjà utilisé récemment."
+            },
+            400
+          )
         }
       }
       const admin = await store.upsertAdmin(org.id, {
@@ -2643,13 +2663,14 @@ export function createApp() {
         password: body.password,
         mustChangePassword: false
       })
+      if (!admin) return c.json({ error: "admin_update_failed" }, 400)
       await audit(
         _gate,
         "admin_update",
         `Self-update admin « ${admin?.label || existing.label} »`,
         { admin_id: existing.id, self: true }
       )
-      return c.json({ ok: true, admin: admin ? publicAdminView(admin) : null })
+      return c.json({ ok: true, admin: publicAdminView(admin) })
     }
 
     if (!canManage) {
@@ -2709,12 +2730,25 @@ export function createApp() {
     if (body.new_password !== body.new_password_confirm) {
       return c.json({ error: "password_confirm_mismatch" }, 400)
     }
-    if (body.new_password.length < 6) {
-      return c.json({ error: "password_too_short" }, 400)
-    }
     const curHash = hashManagementPassword(body.current_password)
     if (curHash !== _gate.admin.passwordHash) {
       return c.json({ error: "current_password_invalid" }, 400)
+    }
+    const pol = validatePasswordPolicy(body.new_password, {
+      currentHash: _gate.admin.passwordHash,
+      history: _gate.admin.passwordHistory
+    })
+    if (!pol.ok) {
+      return c.json(
+        {
+          error: pol.error,
+          message:
+            pol.error === "password_too_short"
+              ? `Mot de passe trop court (min. ${MIN_PASSWORD_LENGTH} caractères).`
+              : "Ce mot de passe a déjà été utilisé. Choisissez-en un nouveau."
+        },
+        400
+      )
     }
     const admin = await store.upsertAdmin(_gate.orgId, {
       id: _gate.admin.id,
@@ -2723,12 +2757,21 @@ export function createApp() {
       password: body.new_password,
       mustChangePassword: false
     })
+    if (!admin) {
+      return c.json({ error: "password_update_failed" }, 400)
+    }
     await audit(
       _gate,
       "password_change",
       `Changement de mot de passe (self)${body.email ? " + email" : ""}`
     )
-    return c.json({ ok: true, admin: admin ? publicAdminView(admin) : null })
+    // Rafraîchir primary_email côté réponse me
+    const org = await store.getOrg(_gate.orgId)
+    return c.json({
+      ok: true,
+      admin: publicAdminView(admin),
+      org_primary_email: org?.primaryEmail || null
+    })
   })
 
   /**
@@ -2749,8 +2792,8 @@ export function createApp() {
     } catch {
       return c.json({ error: "invalid_json" }, 400)
     }
-    if (!body.new_password || body.new_password.length < 6) {
-      return c.json({ error: "password_too_short" }, 400)
+    if (!body.new_password) {
+      return c.json({ error: "password_required" }, 400)
     }
     const existing = (await store.listAdmins(org.id)).find(
       (a) => a.id === c.req.param("adminId")
@@ -2764,6 +2807,22 @@ export function createApp() {
     }
     if (existing.id === _gate.admin.id) {
       return c.json({ error: "cannot_reset_self" }, 400)
+    }
+    const polR = validatePasswordPolicy(body.new_password, {
+      currentHash: existing.passwordHash,
+      history: existing.passwordHistory
+    })
+    if (!polR.ok) {
+      return c.json(
+        {
+          error: polR.error,
+          message:
+            polR.error === "password_too_short"
+              ? `Mot de passe trop court (min. ${MIN_PASSWORD_LENGTH} caractères).`
+              : "Mot de passe déjà utilisé récemment."
+        },
+        400
+      )
     }
     const admin = await store.upsertAdmin(org.id, {
       id: existing.id,
@@ -3806,22 +3865,13 @@ export function createApp() {
     if (!org) return c.json({ error: "no_org" }, 404)
     const { mergeMonitoringSettings } = await import("./types")
     const mon = mergeMonitoringSettings(org.monitoring)
-    const {
-      getMailStatus,
-      verifySmtpConnection,
-      isMailConfigured,
-      publicSmtpView
-    } = await import("./mail")
+    const { getMailStatus, publicSmtpView } = await import("./mail")
+    // Pas de verify SMTP ici (lent) — uniquement via POST /org/mail/test
     const status = getMailStatus(mon.smtp)
-    let verify: { ok: boolean; error?: string; source?: string } | null = null
-    if (isMailConfigured(mon.smtp) && gate.admin.isPrincipal) {
-      verify = await verifySmtpConnection(mon.smtp)
-    }
     return c.json({
       org_id: org.id,
       ...status,
-      smtp: publicSmtpView(mon.smtp),
-      verify: gate.admin.isPrincipal ? verify : undefined
+      smtp: publicSmtpView(mon.smtp)
     })
   })
 
@@ -3903,14 +3953,29 @@ export function createApp() {
     if (to.includes("@")) {
       const r = await sendMail({
         to,
-        subject: "OpsGate — test SMTP",
+        subject: "OpsGate — test de configuration SMTP",
         text: [
-          "Ceci est un e-mail de test OpsGate.",
-          `Org : ${org.name}`,
+          "OpsGate — test SMTP",
+          "",
+          "Ceci est un e-mail de test.",
+          `Organisation : ${org.name}`,
           `Source SMTP : ${verify.source || "—"}`,
-          "Si vous lisez ceci, la configuration e-mail fonctionne.",
+          "",
+          "Si vous lisez ce message, la configuration e-mail fonctionne.",
+          "",
           "— DailyOps.Tech / OpsGate"
         ].join("\n"),
+        html: `<!DOCTYPE html><html><body style="margin:0;padding:0;background:#f1f5f9;font-family:Segoe UI,Arial,sans-serif">
+<table width="100%" cellpadding="0" cellspacing="0" style="padding:32px 12px"><tr><td align="center">
+<table width="480" style="background:#0A1128;border-radius:12px 12px 0 0;padding:20px 24px">
+<tr><td style="color:#2BD9C5;font-weight:700;font-size:18px">OpsGate</td></tr>
+<tr><td style="color:#94a3b8;font-size:12px">DailyOps.Tech</td></tr>
+</table>
+<table width="480" style="background:#ffffff;border-radius:0 0 12px 12px;padding:24px;border:1px solid #e2e8f0;border-top:0">
+<tr><td style="color:#0f172a;font-size:16px;font-weight:600;padding-bottom:12px">Test de configuration SMTP</td></tr>
+<tr><td style="color:#334155;font-size:14px;line-height:1.5">Si vous lisez ce message, l'envoi d'e-mails OpsGate fonctionne pour <strong>${org.name.replace(/</g, "")}</strong>.</td></tr>
+<tr><td style="color:#64748b;font-size:12px;padding-top:16px">Source : ${verify.source || "—"} · ne pas répondre</td></tr>
+</table></td></tr></table></body></html>`,
         smtp: mon.smtp
       })
       sent = {
