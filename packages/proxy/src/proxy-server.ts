@@ -10,6 +10,7 @@ import { log } from "./log.js"
 import { mitmConnect } from "./mitm.js"
 import { createStreamObserver } from "./observe.js"
 import { generatePac } from "./pac.js"
+import { resolveSoftMaskMode } from "./soft-mask.js"
 import { getProxyRemoteConfig } from "./sync.js"
 
 function parseHostPort(
@@ -171,14 +172,16 @@ export function startProxyServer(cfg: ProxyConfig): http.Server {
         envMode === "observe" || envMode === "enforce"
           ? envMode
           : remote.mode || "enforce"
+      const softMask = resolveSoftMaskMode()
       res.writeHead(200, { "content-type": "application/json" })
       res.end(
         JSON.stringify({
           ok: true,
           phase: "P3",
           mitm: cfg.mitm,
-          /** observe = journal seul | enforce = coupe le flux si medium/high */
+          /** observe = journal seul | enforce = coupe / mask si medium/high */
           filter_mode: filterMode,
+          soft_mask: softMask,
           filter_enabled: remote.enabled !== false,
           ca_ready: caExists(),
           allowlist: cfg.allowlist,
@@ -187,8 +190,9 @@ export function startProxyServer(cfg: ProxyConfig): http.Server {
           org_code: cfg.orgCode,
           note:
             "Le proxy ne fait PAS de banner warn (c’est l’extension). " +
-            "Proxy: observe=log MMC, enforce=coupe la requête. " +
-            "Chrome doit être lancé avec --proxy-server=127.0.0.1:8888"
+            "Proxy: observe=log MMC, enforce=block|mask. " +
+            "OPSGATE_PROXY_SOFT_MASK=1|onwire|local. " +
+            "Chrome: --proxy-server=127.0.0.1:8888"
         })
       )
       return

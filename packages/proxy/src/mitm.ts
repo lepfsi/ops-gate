@@ -3,8 +3,8 @@
  *
  * Enforce :
  * - bufferise client→serveur, scanne, ne relaie qu’après scan propre ;
- * - si sensible : 403 **sur cette requête uniquement**, TLS conservé, site restant accessible ;
- * - ne détruit plus la connexion (sauf erreur technique).
+ * - si sensible : soft-block 403, soft-mask local 422, ou soft-mask **on-wire** (rewrite) ;
+ * - TLS conservé (keep-alive) ; ne détruit plus la connexion (sauf erreur / h2).
  */
 import * as net from "node:net"
 import * as tls from "node:tls"
@@ -14,10 +14,15 @@ import {
   createStreamObserver,
   resolveFilterMode
 } from "./observe.js"
+import {
+  resolveSoftMaskMode,
+  rewriteHttpRequestMasked,
+  type SoftMaskMode
+} from "./soft-mask.js"
 import { getProxyRemoteConfig } from "./sync.js"
 
 const MAX_HOLD_BYTES = 512 * 1024
-/** Idle client → fin de rafale requête → scan final + release ou soft-block */
+/** Idle client → fin de rafale requête → scan final + release / mask / soft-block */
 const RELEASE_IDLE_MS = 100
 
 export function mitmConnect(opts: {
@@ -35,6 +40,7 @@ export function mitmConnect(opts: {
   const cfgRemote = getProxyRemoteConfig()
   const enforceMode =
     cfgRemote.enabled !== false && resolveFilterMode() === "enforce"
+  const maskMode: SoftMaskMode = resolveSoftMaskMode()
 
   /** Buffer d’une requête (reset après release / soft-block) */
   const hold: Buffer[] = []
@@ -42,6 +48,11 @@ export function mitmConnect(opts: {
   let releaseTimer: ReturnType<typeof setTimeout> | null = null
   /** Pendant soft-block : on ignore le reste de la requête courante jusqu’à idle */
   let discardingRequest = false
+  /**
+   * On-wire : détection déjà vue — continuer à bufferiser jusqu’à idle
+   * pour rewriter la requête complète (Content-Length).
+   */
+  let maskPending = false
 
   const cleanup = (why?: string) => {
     if (cleaned) return
@@ -52,6 +63,7 @@ export function mitmConnect(opts: {
     }
     hold.length = 0
     holdBytes = 0
+    maskPending = false
     if (why) {
       log("debug", "mitm_cleanup", { host: targetHost, why })
     }
@@ -85,26 +97,32 @@ export function mitmConnect(opts: {
     }
     clearHold()
     discardingRequest = false
+    maskPending = false
     observer.reset()
   }
 
   /**
-   * Soft-block : refuse cette requête, garde la session TLS ouverte.
-   * Option soft-mask (P1) : renvoie 200 avec corps neutralisé si OPSGATE_PROXY_SOFT_MASK=1
-   * (approximation — pas un rewrite JSON complet du fournisseur IA).
+   * Soft-block / soft-mask local : refuse cette requête, garde la session TLS ouverte.
+   * - preferLocal / maskMode local → 422 JSON (sans contacter l’amont)
+   * - sinon → 403 text
    */
-  const softBlockRequest = (reason: string) => {
-    const softMask =
-      (process.env.OPSGATE_PROXY_SOFT_MASK || "").toLowerCase() === "1" ||
-      (process.env.OPSGATE_PROXY_SOFT_MASK || "").toLowerCase() === "true"
-    log("warn", softMask ? "mitm_request_soft_mask" : "mitm_request_blocked", {
-      host: targetHost,
-      reason,
-      held_bytes: holdBytes,
-      mode: softMask ? "enforce_soft_mask" : "enforce_soft",
-      note: "TLS kept open — next request allowed after reset"
-    })
+  const softBlockRequest = (reason: string, preferLocal = false) => {
+    const respondLocal = maskMode === "local" || preferLocal
+
+    log(
+      "warn",
+      respondLocal ? "mitm_request_soft_mask_local" : "mitm_request_blocked",
+      {
+        host: targetHost,
+        reason,
+        held_bytes: holdBytes,
+        mask_mode: maskMode,
+        mode: respondLocal ? "enforce_soft_mask_local" : "enforce_soft",
+        note: "TLS kept open — next request allowed after reset"
+      }
+    )
     clearHold()
+    maskPending = false
     discardingRequest = true
 
     if (!tlsClient || tlsClient.destroyed) {
@@ -116,13 +134,14 @@ export function mitmConnect(opts: {
       typeof tlsClient.alpnProtocol === "string" ? tlsClient.alpnProtocol : ""
     try {
       if (!alpn || alpn === "http/1.1" || alpn === "http/1.0") {
-        if (softMask) {
-          // Corps neutre : l'API amont n'est jamais contactée ; le client reçoit un 422 applicatif
+        if (respondLocal) {
           const body = JSON.stringify({
             error: "opsgate_soft_mask",
             message:
               "OpsGate: contenu sensible retiré — renvoyez un message sans secrets.",
-            blocked: true
+            blocked: true,
+            mode:
+              maskMode === "onwire" ? "onwire_fallback_local" : "local"
           })
           tlsClient.write(
             "HTTP/1.1 422 Unprocessable Entity\r\n" +
@@ -155,7 +174,6 @@ export function mitmConnect(opts: {
         }
       } else {
         // HTTP/2 : pas de frames GOAWAY/RST propres ici — on coupe seulement ce socket
-        // (prochaine connexion navigateur = nouvel onglet/requête = OK)
         log("info", "mitm_soft_block_h2_close_socket", {
           host: targetHost,
           note: "h2 multiplex hard; socket closed, browser will open new one"
@@ -167,7 +185,6 @@ export function mitmConnect(opts: {
       /* ignore write errors */
     }
 
-    // Après un court délai, accepter à nouveau le trafic (fin de la requête abandonnée)
     if (releaseTimer) clearTimeout(releaseTimer)
     releaseTimer = setTimeout(() => {
       releaseTimer = null
@@ -179,15 +196,76 @@ export function mitmConnect(opts: {
     }, 150)
   }
 
-  const flushHoldToUpstream = (): boolean => {
-    if (cleaned || discardingRequest) return false
-    if (observer.isBlocked()) {
-      softBlockRequest("sensitive_data_detected")
+  /** Soft-mask on-wire : rewrite body masqué puis forward amont. */
+  const softMaskOnWire = (reason: string): boolean => {
+    if (!upstream || upstream.destroyed) {
+      softBlockRequest("onwire_no_upstream", true)
       return false
     }
-    if (observer.flush()) {
-      softBlockRequest("sensitive_data_detected")
+    if (holdBytes === 0) {
+      beginNextRequest()
       return false
+    }
+    const raw = Buffer.concat(hold)
+    const result = rewriteHttpRequestMasked(raw)
+    if (!result.ok) {
+      log("warn", "mitm_onwire_rewrite_failed", {
+        host: targetHost,
+        reason: result.reason,
+        trigger: reason,
+        fallback: result.fallback
+      })
+      softBlockRequest(
+        `onwire_${result.reason}`,
+        result.fallback === "local"
+      )
+      return false
+    }
+    if (!result.changed) {
+      // Rien de masquable dans le body → soft-block classique
+      softBlockRequest("onwire_nothing_masked", maskMode !== "off")
+      return false
+    }
+    try {
+      upstream.write(result.data)
+    } catch {
+      cleanup("upstream_write_masked")
+      return false
+    }
+    log("info", "mitm_request_soft_mask_onwire", {
+      host: targetHost,
+      trigger: reason,
+      detection_count: result.detectionCount,
+      rule_ids: result.ruleIds,
+      bytes_in: result.bytesIn,
+      bytes_out: result.bytesOut,
+      mode: "enforce_soft_mask_onwire",
+      note: "masked body forwarded to upstream — site UX preserved"
+    })
+    clearHold()
+    maskPending = false
+    observer.reset()
+    return true
+  }
+
+  const handleSensitive = (reason: string): boolean => {
+    if (maskMode === "onwire") {
+      return softMaskOnWire(reason)
+    }
+    softBlockRequest(reason, maskMode === "local")
+    return false
+  }
+
+  const flushHoldToUpstream = (): boolean => {
+    if (cleaned || discardingRequest) return false
+    // Scan final idle
+    if (!observer.isBlocked()) {
+      observer.flush()
+    }
+    if (observer.isBlocked() || maskPending) {
+      return handleSensitive(
+        maskPending ? "sensitive_data_mask_pending" : "sensitive_data_detected"
+      )
     }
     if (!upstream || upstream.destroyed) return false
     if (holdBytes === 0) return true
@@ -202,7 +280,6 @@ export function mitmConnect(opts: {
     }
     const n = holdBytes
     clearHold()
-    // prêt pour la requête suivante (keep-alive)
     observer.reset()
     log("debug", "mitm_hold_released", {
       host: targetHost,
@@ -299,7 +376,8 @@ export function mitmConnect(opts: {
           alpn_client: tlsClient?.alpnProtocol || null,
           alpn_upstream: upstream?.alpnProtocol || null,
           mode: modeLabel,
-          block_scope: enforceMode ? "request_soft" : "n/a"
+          block_scope: enforceMode ? "request_soft" : "n/a",
+          soft_mask: maskMode
         })
       }
     )
@@ -333,11 +411,27 @@ export function mitmConnect(opts: {
         holdBytes += chunk.length
         const block = observer.onClientData(chunk)
         if (block) {
-          softBlockRequest("sensitive_data_detected")
+          if (maskMode === "onwire") {
+            // Continuer à bufferiser jusqu’à idle pour rewrite Content-Length
+            maskPending = true
+            if (holdBytes >= MAX_HOLD_BYTES) {
+              softBlockRequest("enforce_buffer_overflow", true)
+              return
+            }
+            scheduleRelease()
+            return
+          }
+          softBlockRequest(
+            "sensitive_data_detected",
+            maskMode === "local"
+          )
           return
         }
         if (holdBytes >= MAX_HOLD_BYTES) {
-          softBlockRequest("enforce_buffer_overflow")
+          softBlockRequest(
+            "enforce_buffer_overflow",
+            maskMode !== "off"
+          )
           return
         }
         scheduleRelease()

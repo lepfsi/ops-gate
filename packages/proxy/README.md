@@ -83,7 +83,8 @@ chrome.exe --proxy-server=127.0.0.1:8888
 | `OPSGATE_API_URL` | `http://127.0.0.1:8787` | Control plane |
 | `OPSGATE_ORG_CODE` | `DEMO-OPSGATE` | Org enroll |
 | `OPSGATE_PROXY_AUTO_ENROLL` | `1` | Enroll au serve si pas de token |
-| `OPSGATE_PROXY_MODE` | `enforce` | `enforce` = coupe flux medium/high ; `observe` = journal seul |
+| `OPSGATE_PROXY_MODE` | `enforce` | `enforce` = block/mask medium/high ; `observe` = journal seul |
+| `OPSGATE_PROXY_SOFT_MASK` | off | `1`/`onwire` = rewrite body masqué + forward ; `local` = 422 sans amont |
 
 ## Chrome (test forcé — fiable sous Windows)
 

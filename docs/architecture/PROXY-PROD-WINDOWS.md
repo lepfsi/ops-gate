@@ -53,12 +53,26 @@ Le PAC est servi par le proxy lui-même : le service doit être **up** avant la 
 
 ## Soft-block vs soft-mask
 
-| Mode | Env | Comportement |
-|------|-----|----------------|
-| Soft-block (défaut enforce) | — | HTTP **403** sur la requête sensible ; TLS keep-alive ; site accessible ensuite |
-| Soft-mask (P1) | `OPSGATE_PROXY_SOFT_MASK=1` | HTTP **422** JSON `opsgate_soft_mask` sans contacter l’amont ; session conservée |
+| Mode | Env `OPSGATE_PROXY_SOFT_MASK` | Comportement |
+|------|-------------------------------|----------------|
+| Soft-block (défaut) | unset / `0` / `off` | HTTP **403** ; TLS keep-alive ; site accessible ensuite |
+| Soft-mask **on-wire** (P1) | `1` / `onwire` / `true` / `rewrite` | Rewrite du body HTTP/1.1 (JSON/texte/multipart) via engine masker → **forward amont** masqué ; header `X-OpsGate-Masked: 1` ; event `mask_send` |
+| Soft-mask **local** | `local` / `422` | HTTP **422** JSON `opsgate_soft_mask` **sans** contacter l’amont (fallback / mode strict) |
 
-> Soft-mask n’est **pas** un rewrite du JSON ChatGPT/Claude : c’est une réponse locale neutre. Un vrai mask on-wire multi-vendor reste roadmap V2.x.
+### On-wire — détails
+
+- Buffer requête complète → `detectSensitiveData` + `maskSensitiveData` sur le body  
+- Recalcule `Content-Length`, retire `Transfer-Encoding: chunked` si décodé  
+- JWT / emails session : non masqués (même filtre que soft-block)  
+- Body gzip/br ou non-HTTP/1.1 → **fallback local 422**  
+- Health : `GET /opsgate-proxy/health` → champ `soft_mask: "off"|"local"|"onwire"`  
+
+```powershell
+$env:OPSGATE_PROXY_SOFT_MASK = "1"   # on-wire
+# ou
+$env:OPSGATE_PROXY_SOFT_MASK = "local"
+pnpm proxy:dev
+```
 
 ## Logs
 

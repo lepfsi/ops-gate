@@ -12,6 +12,7 @@ import { inspectText } from "./inspect.js"
 import { log } from "./log.js"
 import { queueProxyEvent } from "./api-client.js"
 import type { AgentState } from "./agent-state.js"
+import { resolveSoftMaskMode } from "./soft-mask.js"
 import { getProxyRemoteConfig } from "./sync.js"
 
 const MAX_WINDOW = 256 * 1024
@@ -204,12 +205,18 @@ export function createStreamObserver(meta: {
       result.highest_severity,
       result.rule_ids || []
     )
-    const decision = enforce ? "block" : "observe"
+    const maskMode = resolveSoftMaskMode()
+    // on-wire / local soft-mask → décision journal mask_send ; sinon block
+    const decision = !enforce
+      ? "observe"
+      : maskMode === "off"
+        ? "block"
+        : "mask_send"
     const hasFile = fileNames.length > 0
     const rulesKey = result.rule_ids.slice().sort().join(",")
     const logKey = `${meta.host}|${rulesKey}|${decision}|${fileNames.join(",")}`
 
-    // ── BLOCK d’abord (indépendant de la dédup journal) ──
+    // ── HOLD / BLOCK d’abord (indépendant de la dédup journal) ──
     if (enforce) {
       blocked = true
     }
@@ -236,21 +243,36 @@ export function createStreamObserver(meta: {
       const types = [
         primaryType,
         ...(hasFile ? (["file_upload"] as const) : []),
-        ...(enforce ? (["proxy_block"] as const) : [])
+        ...(enforce
+          ? maskMode === "onwire"
+            ? (["proxy_mask_onwire"] as const)
+            : maskMode === "local"
+              ? (["proxy_mask_local"] as const)
+              : (["proxy_block"] as const)
+          : [])
       ]
 
-      log("info", enforce ? "enforce_block" : "observe_detection", {
-        host: meta.host,
-        mode: enforce ? "enforce_mitm" : "observe_mitm",
-        source: "proxy",
-        decision,
-        detection_count: result.detection_count,
-        highest_severity: result.highest_severity,
-        rule_ids: result.rule_ids,
-        types,
-        file_names: fileNames.length ? fileNames : undefined,
-        samples
-      })
+      log(
+        "info",
+        enforce
+          ? maskMode === "off"
+            ? "enforce_block"
+            : "enforce_mask"
+          : "observe_detection",
+        {
+          host: meta.host,
+          mode: enforce ? "enforce_mitm" : "observe_mitm",
+          soft_mask: maskMode,
+          source: "proxy",
+          decision,
+          detection_count: result.detection_count,
+          highest_severity: result.highest_severity,
+          rule_ids: result.rule_ids,
+          types,
+          file_names: fileNames.length ? fileNames : undefined,
+          samples
+        }
+      )
 
       const state = getAgentState()
       if (state?.agent_token) {
@@ -278,7 +300,7 @@ export function createStreamObserver(meta: {
     } else if (enforce) {
       log("debug", "enforce_block_deduped_log", {
         host: meta.host,
-        note: "block actif, journal déjà émis récemment"
+        note: "block/mask actif, journal déjà émis récemment"
       })
     }
 
