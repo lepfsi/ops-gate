@@ -178,6 +178,62 @@ export interface OrgMonitoringSettings {
    * 0 = illimité pour chaque champ.
    */
   quotas?: OrgQuotaSettings
+  /**
+   * LDAP / Active Directory sync (V2 P2).
+   * Bind password : préférer env OPSGATE_LDAP_BIND_PASSWORD.
+   */
+  ldap?: OrgLdapSettings
+}
+
+/** Config sync LDAP/AD → users & groups OpsGate */
+export interface OrgLdapSettings {
+  enabled: boolean
+  /** ldaps://dc.example.com:636 ou ldap://... */
+  url: string
+  bindDn: string
+  /** Optionnel si OPSGATE_LDAP_BIND_PASSWORD est défini */
+  bindPassword?: string
+  baseDn: string
+  /** Filtre users AD (défaut : users actifs) */
+  userFilter?: string
+  /** Filtre groupes (défaut objectClass=group) */
+  groupFilter?: string
+  syncUsers?: boolean
+  syncGroups?: boolean
+  /** dry-run : lit AD sans écrire le store */
+  dryRun?: boolean
+  /** rejectUnauthorized: false pour lab */
+  tlsInsecure?: boolean
+  timeoutMs?: number
+  sizeLimit?: number
+  lastSyncAt?: string | null
+  lastSyncMessage?: string | null
+  lastSyncStats?: {
+    groups_upserted?: number
+    users_upserted?: number
+    groups_seen?: number
+    users_seen?: number
+  } | null
+}
+
+export const DEFAULT_LDAP_SETTINGS: OrgLdapSettings = {
+  enabled: false,
+  url: "",
+  bindDn: "",
+  bindPassword: "",
+  baseDn: "",
+  userFilter:
+    "(&(objectCategory=person)(objectClass=user)(!(userAccountControl:1.2.840.113556.1.4.803:=2)))",
+  groupFilter: "(objectClass=group)",
+  syncUsers: true,
+  syncGroups: true,
+  dryRun: false,
+  tlsInsecure: false,
+  timeoutMs: 30_000,
+  sizeLimit: 5000,
+  lastSyncAt: null,
+  lastSyncMessage: null,
+  lastSyncStats: null
 }
 
 export interface OrgQuotaSettings {
@@ -313,7 +369,8 @@ export const DEFAULT_MONITORING_SETTINGS: OrgMonitoringSettings = {
     mode: "enforce"
   },
   siem: { ...DEFAULT_SIEM_SETTINGS },
-  quotas: { ...DEFAULT_QUOTA_SETTINGS }
+  quotas: { ...DEFAULT_QUOTA_SETTINGS },
+  ldap: { ...DEFAULT_LDAP_SETTINGS }
 }
 
 export function mergeMonitoringSettings(
@@ -454,6 +511,53 @@ export function mergeMonitoringSettings(
         typeof q.maxAgents === "number" && q.maxAgents >= 0
           ? Math.floor(q.maxAgents)
           : base.quotas?.maxAgents ?? 0
+    }
+  }
+  if (partial.ldap && typeof partial.ldap === "object") {
+    const l = partial.ldap
+    const prev = base.ldap || DEFAULT_LDAP_SETTINGS
+    base.ldap = {
+      ...DEFAULT_LDAP_SETTINGS,
+      ...prev,
+      enabled: l.enabled !== undefined ? !!l.enabled : prev.enabled,
+      url: typeof l.url === "string" ? l.url.trim() : prev.url,
+      bindDn: typeof l.bindDn === "string" ? l.bindDn.trim() : prev.bindDn,
+      // empty string keeps previous secret
+      bindPassword:
+        typeof l.bindPassword === "string" && l.bindPassword.length > 0
+          ? l.bindPassword
+          : prev.bindPassword || "",
+      baseDn: typeof l.baseDn === "string" ? l.baseDn.trim() : prev.baseDn,
+      userFilter:
+        typeof l.userFilter === "string" && l.userFilter.trim()
+          ? l.userFilter.trim()
+          : prev.userFilter,
+      groupFilter:
+        typeof l.groupFilter === "string" && l.groupFilter.trim()
+          ? l.groupFilter.trim()
+          : prev.groupFilter,
+      syncUsers: l.syncUsers !== undefined ? !!l.syncUsers : prev.syncUsers,
+      syncGroups:
+        l.syncGroups !== undefined ? !!l.syncGroups : prev.syncGroups,
+      dryRun: l.dryRun !== undefined ? !!l.dryRun : prev.dryRun,
+      tlsInsecure:
+        l.tlsInsecure !== undefined ? !!l.tlsInsecure : prev.tlsInsecure,
+      timeoutMs:
+        typeof l.timeoutMs === "number" && l.timeoutMs > 0
+          ? Math.floor(l.timeoutMs)
+          : prev.timeoutMs,
+      sizeLimit:
+        typeof l.sizeLimit === "number" && l.sizeLimit > 0
+          ? Math.floor(l.sizeLimit)
+          : prev.sizeLimit,
+      lastSyncAt:
+        l.lastSyncAt !== undefined ? l.lastSyncAt : prev.lastSyncAt,
+      lastSyncMessage:
+        l.lastSyncMessage !== undefined
+          ? l.lastSyncMessage
+          : prev.lastSyncMessage,
+      lastSyncStats:
+        l.lastSyncStats !== undefined ? l.lastSyncStats : prev.lastSyncStats
     }
   }
   if (partial.schedule && typeof partial.schedule === "object") {

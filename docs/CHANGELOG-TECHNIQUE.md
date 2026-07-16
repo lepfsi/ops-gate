@@ -269,13 +269,24 @@ Prod future : services Windows / silent scripts ; pas 3 terminaux ouverts.
 | Airgap | update.xml self-hosted template | `self-hosted-update.xml.template` |
 | Docs | CWS checklist + privacy perms | `CHROME-WEB-STORE-MDM.md`, `PRIVACY.md` |
 
-## 17. Suite recommandée
+## 17. V2 P2 — LDAP / Active Directory sync (16 juillet 2026)
 
-1. LDAP / AD sync  
-2. Firefox AMO (signature)  
-3. Safari  
-4. OIDC : JIT, JWKS, `sso_enforce`  
-5. Publication CWS réelle (compte dev + review)  
+| Sujet | Détail | Fichiers |
+|-------|--------|----------|
+| Client | `ldapts` bind + search | `packages/api/src/ldap.ts` |
+| Config | `monitoring.ldap` + env bind password | `types.ts`, merge |
+| API | status / test / sync (dry-run) | `app.ts` |
+| Mapping | groups `ldapExternalId`, users `externalId` + memberOf | store upsert |
+| Console | onglet Paramètres → LDAP / AD | App.tsx, i18n, api.ts |
+| Docs | `LDAP-AD-SYNC.md` | |
+
+## 18. Suite recommandée
+
+1. Firefox AMO (signature)  
+2. Safari  
+3. OIDC : JIT, JWKS, `sso_enforce`  
+4. Publication CWS réelle  
+5. LDAP : sync planifiée, prune absents, map auto profil  
 
 Détail : `docs/V2-BACKLOG.md` · `docs/architecture/PLATFORM-v2.md`.
 

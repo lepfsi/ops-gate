@@ -247,6 +247,31 @@ export type MonitoringSettings = {
     maxEventsPerMinute?: number
     maxAgents?: number
   }
+  ldap?: LdapSettings
+}
+
+export type LdapSettings = {
+  enabled: boolean
+  url: string
+  bindDn: string
+  bindPassword?: string
+  baseDn: string
+  userFilter?: string
+  groupFilter?: string
+  syncUsers?: boolean
+  syncGroups?: boolean
+  dryRun?: boolean
+  tlsInsecure?: boolean
+  timeoutMs?: number
+  sizeLimit?: number
+  lastSyncAt?: string | null
+  lastSyncMessage?: string | null
+  lastSyncStats?: {
+    groups_upserted?: number
+    users_upserted?: number
+    groups_seen?: number
+    users_seen?: number
+  } | null
 }
 
 export type PackListItem = {
@@ -1103,6 +1128,37 @@ export const api = {
     request<{ org_id: string; monitoring: MonitoringSettings }>(
       "/v1/org/monitoring"
     ),
+
+  ldapStatus: () =>
+    request<{
+      org_id: string
+      ldap: LdapSettings & { bind_password_set?: boolean; ready?: boolean }
+      ready: boolean
+      ready_reason?: string | null
+    }>("/v1/org/ldap/status"),
+
+  ldapTest: (body?: Partial<LdapSettings>) =>
+    request<{ ok: boolean; message: string; entry_count?: number }>(
+      "/v1/org/ldap/test",
+      { method: "POST", body: JSON.stringify(body || {}) }
+    ),
+
+  ldapSync: (dryRun?: boolean) =>
+    request<{
+      ok: boolean
+      dry_run: boolean
+      groups_seen: number
+      groups_upserted: number
+      users_seen: number
+      users_upserted: number
+      message?: string
+      errors?: string[]
+      sample_groups?: string[]
+      sample_users?: string[]
+    }>("/v1/org/ldap/sync", {
+      method: "POST",
+      body: JSON.stringify({ dry_run: !!dryRun })
+    }),
 
   updateMonitoring: (body: Partial<MonitoringSettings>) =>
     request<{ ok: boolean; monitoring: MonitoringSettings }>(

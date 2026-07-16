@@ -144,7 +144,8 @@ export function createApp() {
         "security-report-pdf",
         "redis-rate-limit",
         "multi-tenant-quotas",
-        "postgres-rls"
+        "postgres-rls",
+        "ldap-ad-sync"
       ]
     })
   })
@@ -1647,9 +1648,19 @@ export function createApp() {
     const org = await store.getOrg(_gate.orgId)
     if (!org) return c.json({ error: "no_org" }, 404)
     const { mergeMonitoringSettings } = await import("./types")
+    const { publicLdapView } = await import("./ldap")
+    const monitoring = mergeMonitoringSettings(org.monitoring)
+    // Ne jamais renvoyer le bind password en clair
+    if (monitoring.ldap) {
+      monitoring.ldap = {
+        ...monitoring.ldap,
+        bindPassword: undefined
+      } as typeof monitoring.ldap
+    }
     return c.json({
       org_id: org.id,
-      monitoring: mergeMonitoringSettings(org.monitoring)
+      monitoring,
+      ldap_public: publicLdapView(monitoring.ldap)
     })
   })
 
@@ -1678,10 +1689,130 @@ export function createApp() {
       detail: `Monitoring : offline ${Math.round((updated?.monitoring as { offlineLongMs?: number })?.offlineLongMs || 0) / 60000} min · schedule ${(updated?.monitoring as { schedule?: { enabled?: boolean } })?.schedule?.enabled ? "ON" : "OFF"}`
     })
     const { mergeMonitoringSettings } = await import("./types")
+    const mon = mergeMonitoringSettings(updated?.monitoring)
+    if (mon.ldap) mon.ldap = { ...mon.ldap, bindPassword: undefined } as typeof mon.ldap
     return c.json({
       ok: true,
-      monitoring: mergeMonitoringSettings(updated?.monitoring)
+      monitoring: mon
     })
+  })
+
+  /** LDAP / AD — statut (sans secret) */
+  v1.get("/org/ldap/status", async (c) => {
+    const gate = await requireConsoleAuth(c, "console_access")
+    if (!gate.ok) return c.json({ error: gate.error }, gate.status)
+    const org = await store.getOrg(gate.orgId)
+    if (!org) return c.json({ error: "no_org" }, 404)
+    const { mergeMonitoringSettings } = await import("./types")
+    const { publicLdapView, ldapConfigReady } = await import("./ldap")
+    const mon = mergeMonitoringSettings(org.monitoring)
+    const cfg = mon.ldap
+    const ready = ldapConfigReady(cfg)
+    return c.json({
+      org_id: org.id,
+      ldap: publicLdapView(cfg),
+      ready: ready.ready,
+      ready_reason: ready.reason || null
+    })
+  })
+
+  /** LDAP / AD — test bind + search léger */
+  v1.post("/org/ldap/test", async (c) => {
+    const gate = await requireConsoleAuth(c, "manage_policies")
+    if (!gate.ok) return c.json({ error: gate.error }, gate.status)
+    const org = await store.getOrg(gate.orgId)
+    if (!org) return c.json({ error: "no_org" }, 404)
+    const { mergeMonitoringSettings, DEFAULT_LDAP_SETTINGS } = await import(
+      "./types"
+    )
+    let body: Partial<import("./types").OrgLdapSettings> = {}
+    try {
+      body = await c.req.json()
+    } catch {
+      body = {}
+    }
+    const mon = mergeMonitoringSettings(org.monitoring)
+    const cfg = {
+      ...DEFAULT_LDAP_SETTINGS,
+      ...mon.ldap,
+      ...body,
+      // si body.bindPassword vide, garder le stocké
+      bindPassword:
+        body.bindPassword && body.bindPassword.length > 0
+          ? body.bindPassword
+          : mon.ldap?.bindPassword || ""
+    }
+    const { testLdapConnection } = await import("./ldap")
+    const result = await testLdapConnection(cfg)
+    return c.json(result, result.ok ? 200 : 400)
+  })
+
+  /** LDAP / AD — sync groupes + users */
+  v1.post("/org/ldap/sync", async (c) => {
+    const gate = await requireConsoleAuth(c, "manage_policies")
+    if (!gate.ok) return c.json({ error: gate.error }, gate.status)
+    const org = await store.getOrg(gate.orgId)
+    if (!org) return c.json({ error: "no_org" }, 404)
+    const { mergeMonitoringSettings, DEFAULT_LDAP_SETTINGS } = await import(
+      "./types"
+    )
+    let body: { dry_run?: boolean } = {}
+    try {
+      body = await c.req.json()
+    } catch {
+      body = {}
+    }
+    const mon = mergeMonitoringSettings(org.monitoring)
+    const cfg = {
+      ...DEFAULT_LDAP_SETTINGS,
+      ...mon.ldap
+    }
+    const { syncLdapToStore, ldapConfigReady } = await import("./ldap")
+    const ready = ldapConfigReady(cfg)
+    if (!ready.ready) {
+      return c.json(
+        { error: "ldap_not_ready", message: ready.reason },
+        400
+      )
+    }
+    const result = await syncLdapToStore({
+      store,
+      orgId: org.id,
+      cfg,
+      dryRun: !!body.dry_run
+    })
+    // Persister last sync meta (sans écraser le password)
+    if (!body.dry_run || result.ok) {
+      await store.updateOrgMonitoring(org.id, {
+        ldap: {
+          ...cfg,
+          lastSyncAt: new Date().toISOString(),
+          lastSyncMessage: result.message || null,
+          lastSyncStats: {
+            groups_seen: result.groups_seen,
+            groups_upserted: result.groups_upserted,
+            users_seen: result.users_seen,
+            users_upserted: result.users_upserted
+          }
+        }
+      })
+    }
+    await store.appendAdminAudit({
+      orgId: org.id,
+      adminId: gate.admin.id,
+      adminEmail: gate.admin.email,
+      adminLabel: gate.admin.label,
+      action: "org_settings_update",
+      detail: result.dry_run
+        ? `LDAP dry-run : ${result.message}`
+        : `LDAP sync : ${result.message}`,
+      meta: {
+        dry_run: result.dry_run,
+        groups: result.groups_upserted,
+        users: result.users_upserted
+      }
+    })
+    return c.json(result, result.ok ? 200 : 502)
   })
 
   /** Fusionner agents doublons */

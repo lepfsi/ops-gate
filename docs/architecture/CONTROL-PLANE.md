@@ -18,21 +18,21 @@
 - Accepté **seulement** si last sync agent **≥ 2h** (poll 15 min).  
 - Postes encore synchronisés reçoivent les nouveaux mdp via sync → pas de wipe massif si fuite du secret vendor.
 
-## Groupes & users (pré-LDAP)
+## Groupes & users (+ LDAP)
 
 - **Groupes** → optionnellement liés à un profil policy.  
 - **Users** → membres de groupes.  
 - **Agents** → liés à un user (hérite policy du groupe) ou override profil manuel.  
 - À la création d’un profil : sélection groupes / users soumis.
 
-### Roadmap LDAP
+### LDAP / Active Directory (V2 P2)
 
-Sync AD/LDAP pour :
-- importer groupes AD (`ldapExternalId`) ;
-- mapper groupe AD → policy profil ;
-- assigner automatiquement l’agent au user/groupe AD au enroll.
+Sync AD/LDAP livrée :
+- importer groupes AD (`ldapExternalId`) + users (`externalId`) ;
+- membership via `memberOf` ;
+- mapper groupe OpsGate → **policy profil** (manuel, console People).
 
-Champs déjà prévus : `OrgUser.externalId`, `UserGroup.ldapExternalId`.
+Config : **Paramètres → LDAP / AD** · API `/v1/org/ldap/*` · doc [`LDAP-AD-SYNC.md`](./LDAP-AD-SYNC.md).
 
 ## Force-sync (pas de visite poste par poste)
 
