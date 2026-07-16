@@ -70,6 +70,12 @@ const fr: Dict = {
   "login.ssoNotConfigured": "SSO OIDC non configuré sur l’API.",
   "login.ssoRateLimited": "Trop de tentatives SSO. Réessayez plus tard.",
   "login.ssoError": "Échec SSO ({code}){detail}",
+  "login.ssoEnforceHint":
+    "Votre organisation impose le SSO. Le mot de passe local est désactivé.",
+  "login.ssoRequired": "Utilisez le bouton SSO pour vous connecter.",
+  "login.ssoEmailUnverified": "Email non vérifié auprès de l’IdP.",
+  "login.ssoJitFailed": "Provisionnement SSO impossible ({detail}).",
+  "login.ssoJwks": "Jeton OIDC rejeté ({code}).",
 
   // ── Top bar ──
   "top.apply": "Appliquer",
@@ -489,6 +495,12 @@ const en: Dict = {
   "login.ssoNotConfigured": "OIDC SSO is not configured on the API.",
   "login.ssoRateLimited": "Too many SSO attempts. Try again later.",
   "login.ssoError": "SSO failed ({code}){detail}",
+  "login.ssoEnforceHint":
+    "Your organization requires SSO. Local password sign-in is disabled.",
+  "login.ssoRequired": "Use the SSO button to sign in.",
+  "login.ssoEmailUnverified": "Email not verified with the identity provider.",
+  "login.ssoJitFailed": "SSO provisioning failed ({detail}).",
+  "login.ssoJwks": "OIDC token rejected ({code}).",
 
   // ── Top bar ──
   "top.apply": "Apply",

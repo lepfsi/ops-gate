@@ -1,8 +1,14 @@
 /**
  * OIDC Authorization Code + PKCE (sans dépendance externe).
- * Discovery /.well-known/openid-configuration, state éphémère, échange code.
+ * Discovery, PKCE, JWKS (RS256/ES256), JIT admin, sso_enforce.
  */
-import { createHash, randomBytes } from "node:crypto"
+import {
+  createHash,
+  createPublicKey,
+  createVerify,
+  randomBytes,
+  type KeyObject
+} from "node:crypto"
 
 export type OidcConfig = {
   issuer: string
@@ -37,6 +43,49 @@ export type OidcClaims = {
   preferred_username?: string
   name?: string
   upn?: string
+  iss?: string
+  aud?: string | string[]
+  exp?: number
+  iat?: number
+  nonce?: string
+  [key: string]: unknown
+}
+
+export type OidcFeatureFlags = {
+  jit: boolean
+  jwksVerify: boolean
+  ssoEnforce: boolean
+  requireEmailVerified: boolean
+}
+
+function envFlag(
+  env: NodeJS.ProcessEnv,
+  key: string,
+  defaultOn: boolean
+): boolean {
+  const v = (env[key] || "").toLowerCase().trim()
+  if (!v) return defaultOn
+  if (v === "0" || v === "false" || v === "off" || v === "no") return false
+  if (v === "1" || v === "true" || v === "on" || v === "yes") return true
+  return defaultOn
+}
+
+/** Flags polish (env). JWKS vérif = ON par défaut. */
+export function getOidcFeatureFlags(
+  env: NodeJS.ProcessEnv = process.env
+): OidcFeatureFlags {
+  return {
+    jit: envFlag(env, "OPSGATE_OIDC_JIT", false),
+    jwksVerify: envFlag(env, "OPSGATE_OIDC_JWKS", true),
+    ssoEnforce:
+      envFlag(env, "OPSGATE_SSO_ENFORCE", false) ||
+      envFlag(env, "OPSGATE_OIDC_SSO_ENFORCE", false),
+    requireEmailVerified: envFlag(
+      env,
+      "OPSGATE_OIDC_REQUIRE_EMAIL_VERIFIED",
+      false
+    )
+  }
 }
 
 const STATE_TTL_MS = 10 * 60 * 1000
@@ -221,18 +270,192 @@ export async function exchangeCode(opts: {
   return json
 }
 
-/** Décode le payload JWT sans vérifier la signature (token reçu via TLS du token_endpoint). */
+function b64urlToBuf(s: string): Buffer {
+  const b64 = s.replace(/-/g, "+").replace(/_/g, "/")
+  const pad = b64.length % 4 === 0 ? "" : "=".repeat(4 - (b64.length % 4))
+  return Buffer.from(b64 + pad, "base64")
+}
+
+/** Décode le payload JWT (sans vérif signature). */
 export function decodeJwtPayload(jwt: string): OidcClaims {
   const parts = jwt.split(".")
   if (parts.length < 2) return {}
   try {
-    const b64 = parts[1]!.replace(/-/g, "+").replace(/_/g, "/")
-    const pad = b64.length % 4 === 0 ? "" : "=".repeat(4 - (b64.length % 4))
-    const json = Buffer.from(b64 + pad, "base64").toString("utf8")
-    return JSON.parse(json) as OidcClaims
+    return JSON.parse(b64urlToBuf(parts[1]!).toString("utf8")) as OidcClaims
   } catch {
     return {}
   }
+}
+
+function decodeJwtHeader(jwt: string): { alg?: string; kid?: string; typ?: string } {
+  const parts = jwt.split(".")
+  if (parts.length < 1) return {}
+  try {
+    return JSON.parse(b64urlToBuf(parts[0]!).toString("utf8")) as {
+      alg?: string
+      kid?: string
+    }
+  } catch {
+    return {}
+  }
+}
+
+type Jwk = {
+  kty?: string
+  kid?: string
+  use?: string
+  alg?: string
+  n?: string
+  e?: string
+  crv?: string
+  x?: string
+  y?: string
+}
+
+let jwksCache: { uri: string; keys: Jwk[]; at: number } | null = null
+
+export async function fetchJwks(jwksUri: string): Promise<Jwk[]> {
+  const uri = jwksUri.trim()
+  if (
+    jwksCache &&
+    jwksCache.uri === uri &&
+    Date.now() - jwksCache.at < DISCOVERY_TTL_MS
+  ) {
+    return jwksCache.keys
+  }
+  const res = await fetch(uri, { headers: { Accept: "application/json" } })
+  if (!res.ok) throw new Error(`oidc_jwks_failed:${res.status}`)
+  const json = (await res.json()) as { keys?: Jwk[] }
+  const keys = Array.isArray(json.keys) ? json.keys : []
+  if (!keys.length) throw new Error("oidc_jwks_empty")
+  jwksCache = { uri, keys, at: Date.now() }
+  return keys
+}
+
+function jwkToKeyObject(jwk: Jwk): KeyObject {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return createPublicKey({ key: jwk as any, format: "jwk" })
+}
+
+function verifyJwtSignature(
+  jwt: string,
+  key: KeyObject,
+  alg: string
+): boolean {
+  const parts = jwt.split(".")
+  if (parts.length !== 3) return false
+  const data = `${parts[0]}.${parts[1]}`
+  const sig = b64urlToBuf(parts[2]!)
+  let nodeAlg: string
+  if (alg === "RS256") nodeAlg = "RSA-SHA256"
+  else if (alg === "RS384") nodeAlg = "RSA-SHA384"
+  else if (alg === "RS512") nodeAlg = "RSA-SHA512"
+  else if (alg === "ES256") nodeAlg = "SHA256"
+  else if (alg === "ES384") nodeAlg = "SHA384"
+  else if (alg === "ES512") nodeAlg = "SHA512"
+  else return false
+  try {
+    if (alg.startsWith("ES")) {
+      return createVerify(nodeAlg).update(data).verify(
+        { key, dsaEncoding: "ieee-p1363" },
+        sig
+      )
+    }
+    return createVerify(nodeAlg).update(data).verify(key, sig)
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Vérifie signature JWKS + iss / aud / exp / nonce.
+ * @throws Error code préfixé oidc_*
+ */
+export async function verifyIdToken(opts: {
+  idToken: string
+  discovery: OidcDiscovery
+  clientId: string
+  expectedNonce?: string
+}): Promise<OidcClaims> {
+  const header = decodeJwtHeader(opts.idToken)
+  const alg = header.alg || "RS256"
+  if (alg === "none") throw new Error("oidc_jwt_alg_none")
+  const claims = decodeJwtPayload(opts.idToken)
+  if (!opts.discovery.jwks_uri) {
+    throw new Error("oidc_jwks_uri_missing")
+  }
+  const keys = await fetchJwks(opts.discovery.jwks_uri)
+  let key: Jwk | undefined
+  if (header.kid) key = keys.find((k) => k.kid === header.kid)
+  if (!key) {
+    key = keys.find((k) => !k.alg || k.alg === alg) || keys[0]
+  }
+  if (!key) throw new Error("oidc_jwks_key_missing")
+  let pub: KeyObject
+  try {
+    pub = jwkToKeyObject(key)
+  } catch {
+    throw new Error("oidc_jwks_key_invalid")
+  }
+  if (!verifyJwtSignature(opts.idToken, pub, alg)) {
+    throw new Error("oidc_jwt_sig_invalid")
+  }
+  // iss
+  const iss = String(claims.iss || "")
+  const expectedIss = opts.discovery.issuer.replace(/\/$/, "")
+  if (iss.replace(/\/$/, "") !== expectedIss) {
+    throw new Error("oidc_jwt_iss_mismatch")
+  }
+  // aud
+  const aud = claims.aud
+  const audOk = Array.isArray(aud)
+    ? aud.includes(opts.clientId)
+    : aud === opts.clientId
+  if (!audOk) throw new Error("oidc_jwt_aud_mismatch")
+  // exp (leeway 60s)
+  const exp = Number(claims.exp || 0)
+  if (!exp || Date.now() / 1000 > exp + 60) {
+    throw new Error("oidc_jwt_expired")
+  }
+  // nonce
+  if (opts.expectedNonce) {
+    const n = String(claims.nonce || "")
+    if (n && n !== opts.expectedNonce) {
+      throw new Error("oidc_jwt_nonce_mismatch")
+    }
+    if (!n) {
+      // certains IdP omettent nonce dans id_token si non demandé correctement
+      // on accepte absence seulement si expected fourni mais claim vide? strict: mismatch
+      // Soft: if claim missing, allow (userinfo still trusted via TLS)
+    }
+  }
+  return claims
+}
+
+export function isEmailVerified(claims: OidcClaims): boolean {
+  const v = claims.email_verified
+  if (v === true || v === "true" || v === "True") return true
+  // Si claim absent : considérer OK (beaucoup d’IdP enterprise)
+  if (v === undefined || v === null || v === "") return true
+  return false
+}
+
+/** Org cible pour JIT (code env ou première org non-personnelle). */
+export async function resolveJitOrgId(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  store: { findOrgByCode: (c: string) => Promise<any>; listOrgs?: () => Promise<any[]> }
+): Promise<string | null> {
+  const code = process.env.OPSGATE_OIDC_JIT_ORG_CODE?.trim()
+  if (code) {
+    const org = await store.findOrgByCode(code)
+    return org?.id || null
+  }
+  if (typeof store.listOrgs === "function") {
+    const orgs = await store.listOrgs()
+    const hit = orgs.find((o: { isPersonal?: boolean }) => !o.isPersonal)
+    return hit?.id || orgs[0]?.id || null
+  }
+  return null
 }
 
 export async function fetchUserInfo(

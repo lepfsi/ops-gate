@@ -3553,6 +3553,7 @@ function LoginScreen({
   const [canForceOidc, setCanForceOidc] = useState(false)
   const [oidcEnabled, setOidcEnabled] = useState(false)
   const [oidcIssuer, setOidcIssuer] = useState<string | null>(null)
+  const [ssoEnforce, setSsoEnforce] = useState(false)
   /** null | email | otp */
   const [resetStep, setResetStep] = useState<null | "email" | "otp">(null)
   const [resetEmail, setResetEmail] = useState("")
@@ -3568,8 +3569,10 @@ function LoginScreen({
         const st = await api.oidcStatus()
         setOidcEnabled(!!st.enabled)
         setOidcIssuer(st.issuer)
+        setSsoEnforce(!!st.sso_enforce && !!st.enabled)
       } catch {
         setOidcEnabled(false)
+        setSsoEnforce(false)
       }
     })()
   }, [apiBase])
@@ -3594,6 +3597,12 @@ function LoginScreen({
         setErr(t("login.locked"))
       } else if (code === "domain_not_allowed") {
         setErr(t("login.ssoDomain", { email: detail || "?" }))
+      } else if (code === "email_not_verified") {
+        setErr(t("login.ssoEmailUnverified"))
+      } else if (code === "jit_org_missing" || code === "jit_create_failed") {
+        setErr(t("login.ssoJitFailed", { detail: detail || code }))
+      } else if (code.startsWith("oidc_jwt_") || code.includes("jwks")) {
+        setErr(t("login.ssoJwks", { code }))
       } else if (code === "oidc_not_configured") {
         setErr(t("login.ssoNotConfigured"))
       } else if (code === "rate_limited") {
@@ -3674,121 +3683,143 @@ function LoginScreen({
                 {t("login.ssoForce")}
               </button>
             )}
-            <div
-              className="login-or muted"
-              style={{
-                textAlign: "center",
-                margin: "14px 0 6px",
-                fontSize: 12,
-                fontWeight: 600,
-                letterSpacing: "0.04em"
-              }}>
-              {t("login.orPassword")}
-            </div>
+            {!ssoEnforce && (
+              <div
+                className="login-or muted"
+                style={{
+                  textAlign: "center",
+                  margin: "14px 0 6px",
+                  fontSize: 12,
+                  fontWeight: 600,
+                  letterSpacing: "0.04em"
+                }}>
+                {t("login.orPassword")}
+              </div>
+            )}
+            {ssoEnforce && (
+              <p className="muted" style={{ fontSize: 12, marginTop: 10 }}>
+                {t("login.ssoEnforceHint")}
+              </p>
+            )}
           </>
         )}
-        <label className="field-label">{t("login.email")}</label>
-        <input
-          className="input"
-          style={{ width: "100%", minWidth: 0 }}
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          autoComplete="username"
-        />
-        <label className="field-label">{t("login.password")}</label>
-        <input
-          className="input"
-          style={{ width: "100%", minWidth: 0 }}
-          type="password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          autoComplete="current-password"
-        />
-        {(needMfa || totp) && (
+        {!ssoEnforce && (
           <>
-            <label className="field-label">{t("login.mfa")}</label>
+            <label className="field-label">{t("login.email")}</label>
             <input
-              className="input mono"
+              className="input"
               style={{ width: "100%", minWidth: 0 }}
-              inputMode="numeric"
-              autoComplete="one-time-code"
-              placeholder="123456"
-              value={totp}
-              onChange={(e) => setTotp(e.target.value.replace(/\D/g, "").slice(0, 6))}
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              autoComplete="username"
             />
+            <label className="field-label">{t("login.password")}</label>
+            <input
+              className="input"
+              style={{ width: "100%", minWidth: 0 }}
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              autoComplete="current-password"
+            />
+            {(needMfa || totp) && (
+              <>
+                <label className="field-label">{t("login.mfa")}</label>
+                <input
+                  className="input mono"
+                  style={{ width: "100%", minWidth: 0 }}
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  placeholder="123456"
+                  value={totp}
+                  onChange={(e) =>
+                    setTotp(e.target.value.replace(/\D/g, "").slice(0, 6))
+                  }
+                />
+              </>
+            )}
+            <button
+              className="btn"
+              type="button"
+              style={{ marginTop: 12, width: "100%" }}
+              disabled={busy}
+              onClick={async () => {
+                setBusy(true)
+                setErr(null)
+                setCanForce(false)
+                try {
+                  setApiBase(apiBase)
+                  const r = await api.login(
+                    email,
+                    password,
+                    false,
+                    totp || undefined
+                  )
+                  setToken(r.token)
+                  setNeedMfa(false)
+                  onLoggedIn(r.admin)
+                } catch (e) {
+                  const err = e as Error & {
+                    code?: string
+                    remaining_attempts?: number
+                  }
+                  const msg = String(e)
+                  if (
+                    err.code === "sso_required" ||
+                    msg.includes("sso_required")
+                  ) {
+                    setErr(t("login.ssoRequired"))
+                  } else if (
+                    err.code === "mfa_required" ||
+                    msg.includes("mfa_required")
+                  ) {
+                    setNeedMfa(true)
+                    setErr(t("login.mfaRequired"))
+                  } else if (
+                    err.code === "mfa_invalid" ||
+                    msg.includes("mfa_invalid")
+                  ) {
+                    setNeedMfa(true)
+                    setErr(t("login.mfaInvalid"))
+                  } else if (
+                    err.code === "session_already_active" ||
+                    msg.includes("session_already_active")
+                  ) {
+                    setCanForce(true)
+                    setErr(t("login.sessionActive"))
+                  } else if (
+                    err.code === "account_locked" ||
+                    msg.toLowerCase().includes("account_locked") ||
+                    msg.toLowerCase().includes("verrouillé") ||
+                    msg.toLowerCase().includes("locked")
+                  ) {
+                    setErr(t("login.locked"))
+                  } else if (typeof err.remaining_attempts === "number") {
+                    setErr(
+                      `${t("login.invalid")}. ${t("login.attemptsLeft", {
+                        n: err.remaining_attempts
+                      })}`
+                    )
+                  } else if (
+                    err.code === "invalid_credentials" ||
+                    /invalid|invalide|identifiant/i.test(msg)
+                  ) {
+                    setErr(
+                      msg.startsWith("Invalid")
+                        ? msg
+                        : `${t("login.invalid")}. ${msg}`
+                    )
+                  } else {
+                    setErr(msg)
+                  }
+                } finally {
+                  setBusy(false)
+                }
+              }}>
+              {t("login.submit")}
+            </button>
           </>
         )}
-        <button
-          className="btn"
-          type="button"
-          style={{ marginTop: 12, width: "100%" }}
-          disabled={busy}
-          onClick={async () => {
-            setBusy(true)
-            setErr(null)
-            setCanForce(false)
-            try {
-              setApiBase(apiBase)
-              const r = await api.login(
-                email,
-                password,
-                false,
-                totp || undefined
-              )
-              setToken(r.token)
-              setNeedMfa(false)
-              onLoggedIn(r.admin)
-            } catch (e) {
-              const err = e as Error & {
-                code?: string
-                remaining_attempts?: number
-              }
-              const msg = String(e)
-              if (
-                err.code === "mfa_required" ||
-                msg.includes("mfa_required")
-              ) {
-                setNeedMfa(true)
-                setErr(t("login.mfaRequired"))
-              } else if (
-                err.code === "mfa_invalid" ||
-                msg.includes("mfa_invalid")
-              ) {
-                setNeedMfa(true)
-                setErr(t("login.mfaInvalid"))
-              } else if (
-                err.code === "session_already_active" ||
-                msg.includes("session_already_active")
-              ) {
-                setCanForce(true)
-                setErr(t("login.sessionActive"))
-              } else if (
-                err.code === "account_locked" ||
-                msg.toLowerCase().includes("account_locked") ||
-                msg.toLowerCase().includes("verrouillé") ||
-                msg.toLowerCase().includes("locked")
-              ) {
-                setErr(t("login.locked"))
-              } else if (typeof err.remaining_attempts === "number") {
-                setErr(
-                  `${t("login.invalid")}. ${t("login.attemptsLeft", {
-                    n: err.remaining_attempts
-                  })}`
-                )
-              } else if (
-                err.code === "invalid_credentials" ||
-                /invalid|invalide|identifiant/i.test(msg)
-              ) {
-                setErr(msg.startsWith("Invalid") ? msg : `${t("login.invalid")}. ${msg}`)
-              } else {
-                setErr(msg)
-              }
-            } finally {
-              setBusy(false)
-            }
-          }}>
-          {t("login.submit")}
-        </button>
         <button
           type="button"
           className="login-advanced-toggle"
