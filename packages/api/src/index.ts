@@ -46,6 +46,12 @@ async function main() {
       "[opsgate-api] Rate-limit/quotas = mémoire process (set OPSGATE_REDIS_URL pour multi-instance)"
     )
   }
+  if (store.kind === "postgres") {
+    const rls = (process.env.OPSGATE_PG_RLS || "on").toLowerCase()
+    console.log(
+      `[opsgate-api] Postgres RLS mode=${rls} (off|on|strict) — isolation org_id`
+    )
+  }
 
   serve({ fetch: app.fetch, port, hostname: "127.0.0.1" })
 }

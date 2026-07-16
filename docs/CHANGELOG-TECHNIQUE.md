@@ -236,13 +236,24 @@ Prod future : services Windows / silent scripts ; pas 3 terminaux ouverts.
 | Health | `rate_limit_backend`, `redis` | `/health` |
 | Docs | `MULTI-TENANT-QUOTAS.md` | |
 
-## 14. Suite recommandée
+## 14. V2 P1 suite — Postgres RLS multi-tenant (16 juillet 2026)
 
-1. RLS Postgres (multi-tenant dur)  
-2. Firefox MV3  
-3. Chrome Web Store / MDM force-install  
-4. OIDC : JIT admin, JWKS verify, `sso_enforce`, SAML  
-5. H2 : HPACK decode si besoin terrain  
+| Sujet | Détail | Fichiers |
+|-------|--------|----------|
+| Policies | FORCE RLS sur org + tables `org_id` | `packages/api/src/db/rls.sql` |
+| Contexte | `app.current_org_id` / `app.rls_bypass` | `pg-rls.ts` |
+| Pool | wrap `query`/`connect` + ALS | `pg-store.ts` |
+| Middleware | Bearer → org ; login/enroll bypass | `app.ts` |
+| Modes | `OPSGATE_PG_RLS=off\|on\|strict` | health `pg_rls` |
+| Docs | `POSTGRES-RLS.md` | |
+
+## 15. Suite recommandée
+
+1. **P2 Firefox MV3**  
+2. Chrome Web Store / MDM force-install  
+3. LDAP / AD sync  
+4. OIDC : JIT, JWKS, `sso_enforce`, SAML  
+5. Secrets chiffrés par org  
 
 Détail : `docs/V2-BACKLOG.md` · `docs/architecture/PLATFORM-v2.md`.
 
