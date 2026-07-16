@@ -1,299 +1,122 @@
 #!/usr/bin/env python3
-"""Génère docs/DSI-FILTRAGE-DONNEES-SENSIBLES.pdf — charte DailyOps + BrandMark login MMC."""
+"""Génère docs/DSI-FILTRAGE-DONNEES-SENSIBLES.pdf — charte DailyOps + BrandMark."""
 from __future__ import annotations
 
 import sys
 from pathlib import Path
 
-from fpdf import FPDF
-
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
+
 from pdf_brand import (  # noqa: E402
-    GRAY,
-    INK,
-    MUTED,
     NAVY,
-    NAVY2,
-    SLATE,
     TEAL,
-    TEAL_SOFT,
     WHITE,
     draw_brand_mark,
     draw_login_brand,
     font_name,
     register_fonts,
 )
+from pdf_md_render import (  # noqa: E402
+    draw_cover,
+    ensure_space,
+    flush_table,
+    make_doc_pdf,
+    reset_x,
+    uw,
+    write_callout,
+    write_heading,
+    write_text,
+)
 
 OUT = ROOT / "docs" / "DSI-FILTRAGE-DONNEES-SENSIBLES.pdf"
 
 
-class DsiPDF(FPDF):
-    def header(self) -> None:
-        if self.page_no() == 1:
-            return
-        self.set_fill_color(*NAVY)
-        self.rect(0, 0, self.w, 15, "F")
-        draw_brand_mark(self, self.l_margin, 2.5, 10)
-        self.set_xy(self.l_margin + 14, 4)
-        self.set_font(font_name(), "B", 9)
-        self.set_text_color(*WHITE)
-        self.cell(0, 7, "OpsGate  |  Document DSI / RSSI  |  DailyOps.Tech")
-        self.set_draw_color(*TEAL)
-        self.set_line_width(1.3)
-        self.line(0, 15, self.w, 15)
-        self.set_y(20)
-
-    def footer(self) -> None:
-        if self.page_no() == 1:
-            return
-        self.set_y(-13)
-        self.set_draw_color(*TEAL)
-        self.set_line_width(0.5)
-        self.line(self.l_margin, self.get_y(), self.w - self.r_margin, self.get_y())
-        self.set_y(-10)
-        self.set_font(font_name(), "", 8)
-        self.set_text_color(*GRAY)
-        self.cell(
-            0,
-            7,
-            f"Page {self.page_no() - 1}  ·  DailyOps.Tech  ·  Confidentiel évaluation DSI",
-            align="C",
-        )
+def h1(pdf, text: str) -> None:
+    write_heading(pdf, text, 2)
 
 
-def uw(pdf: FPDF) -> float:
-    return pdf.w - pdf.l_margin - pdf.r_margin
+def h2(pdf, text: str) -> None:
+    write_heading(pdf, text, 3)
 
 
-def ensure_space(pdf: FPDF, need: float) -> None:
-    if pdf.get_y() + need > pdf.h - 18:
-        pdf.add_page()
-
-
-def h1(pdf: FPDF, text: str) -> None:
-    ensure_space(pdf, 16)
-    pdf.ln(3)
-    pdf.set_font(font_name(), "B", 14)
-    pdf.set_text_color(*NAVY)
-    pdf.multi_cell(uw(pdf), 7, text)
-    y = pdf.get_y()
-    pdf.set_draw_color(*TEAL)
-    pdf.set_line_width(1.0)
-    pdf.line(pdf.l_margin, y + 0.5, pdf.l_margin + 32, y + 0.5)
-    pdf.ln(3)
-
-
-def h2(pdf: FPDF, text: str) -> None:
-    # Assez d'espace pour le titre + au moins 3 lignes de suite (évite titres orphelins)
-    ensure_space(pdf, 36)
-    pdf.ln(2)
-    pdf.set_font(font_name(), "B", 11)
-    pdf.set_text_color(*NAVY2)
-    pdf.multi_cell(uw(pdf), 6, text)
-    pdf.ln(1)
-
-
-def body(pdf: FPDF, text: str, size: int = 10) -> None:
+def body(pdf, text: str) -> None:
     ensure_space(pdf, 10)
-    pdf.set_font(font_name(), "", size)
-    pdf.set_text_color(*INK)
-    pdf.set_x(pdf.l_margin)
-    pdf.multi_cell(uw(pdf), 5.3, text)
+    write_text(pdf, text, size=10, line_h=5.3)
 
 
-def bold(pdf: FPDF, text: str) -> None:
+def bold(pdf, text: str) -> None:
     ensure_space(pdf, 8)
-    pdf.set_font(font_name(), "B", 10)
-    pdf.set_text_color(*INK)
-    pdf.set_x(pdf.l_margin)
-    pdf.multi_cell(uw(pdf), 5.3, text)
+    write_text(pdf, text, size=10, style="B", line_h=5.3)
 
 
-def bullet(pdf: FPDF, text: str) -> None:
+def bullet(pdf, text: str) -> None:
     ensure_space(pdf, 8)
-    pdf.set_font(font_name(), "", 10)
-    pdf.set_text_color(*INK)
-    pdf.set_x(pdf.l_margin)
-    pdf.multi_cell(uw(pdf), 5.2, f"  •  {text}")
+    write_text(pdf, "•  " + text, size=10, line_h=5.2)
 
 
-def callout(pdf: FPDF, text: str) -> None:
-    pdf.ln(2)
-    ensure_space(pdf, 22)
-    x, y = pdf.l_margin, pdf.get_y()
-    w = uw(pdf)
-    pdf.set_font(font_name(), "", 9)
-    # fixed estimate
-    nlines = max(2, int(len(text) / 90) + 1)
-    h = 8 + nlines * 4.8
-    pdf.set_fill_color(*TEAL_SOFT)
-    pdf.rect(x, y, w, h, "F")
-    pdf.set_fill_color(*TEAL)
-    pdf.rect(x, y, 3.2, h, "F")
-    pdf.set_xy(x + 7, y + 3)
-    pdf.set_text_color(*NAVY)
-    pdf.multi_cell(w - 12, 4.8, text)
-    pdf.set_y(y + h + 3)
+def table(pdf, headers: list[str], rows: list[list[str]], _col_w: list[float] | None = None) -> None:
+    """Tableau multi-ligne ; col_w ignoré (calcul auto proportionnel)."""
+    flush_table(pdf, [headers] + rows)
 
 
-def reason_card(pdf: FPDF, title: str, text: str) -> None:
+def reason_card(pdf, title: str, text: str) -> None:
+    from pdf_md_render import _wrap_lines, usable_bottom
+    from pdf_brand import SLATE, GRAY
+
     pdf.ln(1.5)
-    ensure_space(pdf, 28)
-    x, y = pdf.l_margin, pdf.get_y()
+    x0 = pdf.l_margin
     w = uw(pdf)
-    nlines = max(2, int(len(text) / 95) + 1)
-    h = 16 + nlines * 4.6
+    title_lines = _wrap_lines(pdf, title, w - 12, 10, "B")
+    body_lines = _wrap_lines(pdf, text, w - 12, 9, "")
+    h = 8 + len(title_lines) * 5 + len(body_lines) * 4.6 + 6
+    if pdf.get_y() + h > usable_bottom(pdf):
+        pdf.add_page()
+        reset_x(pdf)
+    y0 = pdf.get_y()
     pdf.set_draw_color(*SLATE)
     pdf.set_line_width(0.3)
     pdf.set_fill_color(*WHITE)
-    pdf.rect(x, y, w, h, "DF")
+    pdf.rect(x0, y0, w, h, "DF")
     pdf.set_fill_color(*TEAL)
-    pdf.rect(x, y, w, 2.6, "F")
-    pdf.set_xy(x + 6, y + 5)
+    pdf.rect(x0, y0, w, 2.6, "F")
+    ty = y0 + 5
     pdf.set_font(font_name(), "B", 10)
     pdf.set_text_color(*NAVY)
-    pdf.multi_cell(w - 12, 5, title)
-    pdf.set_x(x + 6)
+    for ln in title_lines:
+        pdf.set_xy(x0 + 6, ty)
+        pdf.cell(w - 12, 5, ln)
+        ty += 5
     pdf.set_font(font_name(), "", 9)
     pdf.set_text_color(*GRAY)
-    pdf.multi_cell(w - 12, 4.6, text)
-    pdf.set_y(y + h + 2)
-
-
-def table(pdf: FPDF, headers: list[str], rows: list[list[str]], col_w: list[float]) -> None:
-    """Table simple 1 ligne / cellule (pas de multi_cell multi-page)."""
-    pdf.ln(2)
-    ensure_space(pdf, 14 + 6 * min(3, len(rows)))
-    w = sum(col_w)
-    # header
-    pdf.set_fill_color(*NAVY)
-    pdf.set_text_color(*WHITE)
-    pdf.set_font(font_name(), "B", 8)
-    x0 = pdf.l_margin
-    for i, h in enumerate(headers):
-        pdf.set_x(x0 + sum(col_w[:i]))
-        pdf.cell(col_w[i], 7, h[:48], fill=True, border=0)
-    pdf.ln(7)
-    pdf.set_draw_color(*TEAL)
-    pdf.set_line_width(0.7)
-    pdf.line(x0, pdf.get_y(), x0 + w, pdf.get_y())
-
-    fill = False
-    for row in rows:
-        ensure_space(pdf, 8)
-        if fill:
-            pdf.set_fill_color(*TEAL_SOFT)
-        else:
-            pdf.set_fill_color(*WHITE)
-        pdf.set_text_color(*INK)
-        pdf.set_font(font_name(), "", 8)
-        y = pdf.get_y()
-        # fond ligne
-        pdf.rect(x0, y, w, 6.5, "F")
-        for i, cell in enumerate(row):
-            pdf.set_xy(x0 + sum(col_w[:i]), y + 0.8)
-            # truncate to fit
-            txt = str(cell)
-            max_c = max(8, int(col_w[i] / 1.7))
-            if len(txt) > max_c:
-                txt = txt[: max_c - 1] + "…"
-            pdf.cell(col_w[i], 5, txt, border=0)
-        pdf.set_y(y + 6.5)
-        fill = not fill
-    pdf.ln(2)
-
-
-def cover(pdf: DsiPDF) -> None:
-    pdf.set_fill_color(*NAVY)
-    pdf.rect(0, 0, pdf.w, pdf.h, "F")
-    pdf.set_fill_color(*TEAL)
-    pdf.rect(0, 0, pdf.w, 7, "F")
-    pdf.rect(0, pdf.h - 9, pdf.w, 9, "F")
-
-    # BrandMark centré (même que login MMC)
-    mark = 56
-    mx = (pdf.w - mark) / 2
-    my = 48
-    draw_brand_mark(pdf, mx, my, mark)
-
-    pdf.set_y(my + mark + 14)
-    pdf.set_font(font_name(), "B", 30)
-    pdf.set_text_color(*WHITE)
-    pdf.cell(0, 12, "OpsGate", align="C", new_x="LMARGIN", new_y="NEXT")
-    pdf.ln(2)
-    pdf.set_font(font_name(), "", 12)
-    pdf.set_text_color(*TEAL)
-    pdf.cell(0, 7, "DailyOps.Tech", align="C", new_x="LMARGIN", new_y="NEXT")
-    pdf.ln(10)
-    pdf.set_font(font_name(), "B", 13)
-    pdf.set_text_color(*WHITE)
-    pdf.set_x(28)
-    pdf.multi_cell(
-        pdf.w - 56,
-        7,
-        "Protégez les données de votre entreprise\ndans chaque interaction avec l'IA.",
-        align="C",
-    )
-    pdf.ln(10)
-    pdf.set_draw_color(*TEAL)
-    pdf.set_line_width(1.3)
-    mid = pdf.w / 2
-    pdf.line(mid - 28, pdf.get_y(), mid + 28, pdf.get_y())
-    pdf.ln(12)
-    pdf.set_font(font_name(), "B", 14)
-    pdf.set_text_color(*WHITE)
-    pdf.cell(0, 8, "Document DSI / RSSI", align="C", new_x="LMARGIN", new_y="NEXT")
-    pdf.set_font(font_name(), "", 11)
-    pdf.set_text_color(*MUTED)
-    pdf.cell(
-        0,
-        7,
-        "Données sensibles filtrées et bloquées",
-        align="C",
-        new_x="LMARGIN",
-        new_y="NEXT",
-    )
-    pdf.ln(14)
-    pdf.set_font(font_name(), "", 9)
-    pdf.set_text_color(*TEAL)
-    pdf.cell(
-        0,
-        6,
-        "Public : DSI  ·  RSSI  ·  Comités sécurité",
-        align="C",
-        new_x="LMARGIN",
-        new_y="NEXT",
-    )
-    pdf.set_text_color(*MUTED)
-    pdf.cell(
-        0,
-        6,
-        "Version produit V1.2+ / V2  ·  16 juillet 2026",
-        align="C",
-        new_x="LMARGIN",
-        new_y="NEXT",
-    )
-    pdf.cell(
-        0,
-        6,
-        "Confidentiel — usage évaluation interne",
-        align="C",
-        new_x="LMARGIN",
-        new_y="NEXT",
-    )
-    pdf.add_page()
+    for ln in body_lines:
+        pdf.set_xy(x0 + 6, ty)
+        pdf.cell(w - 12, 4.6, ln)
+        ty += 4.6
+    pdf.set_y(y0 + h + 2)
+    reset_x(pdf)
 
 
 def main() -> None:
-    pdf = DsiPDF()
-    pdf.set_auto_page_break(auto=True, margin=16)
-    pdf.set_margins(16, 22, 16)
+    pdf = make_doc_pdf(
+        "OpsGate  |  Document DSI / RSSI  |  DailyOps.Tech",
+        footer_extra="Document DSI / RSSI",
+    )
     register_fonts(pdf)
     pdf.add_page()
-    cover(pdf)
+    draw_cover(
+        pdf,
+        "Document DSI / RSSI",
+        "Données sensibles filtrées et bloquées",
+        lang="FR",
+        extra_lines=[
+            "Protégez les données de votre entreprise dans chaque interaction avec l'IA.",
+            "Public : DSI  ·  RSSI  ·  Comités sécurité",
+            "Version produit V1.2+ / V2  ·  Confidentiel — usage évaluation interne",
+        ],
+    )
+    pdf.add_page()
 
-    # Login-style brand strip on page 2
     draw_login_brand(
         pdf,
         pdf.l_margin,
@@ -303,15 +126,14 @@ def main() -> None:
         subtitle="Console MMC · DailyOps.Tech",
         light=False,
     )
-    pdf.ln(8)
+    pdf.ln(6)
 
-    callout(
+    write_callout(
         pdf,
         "Ce document n'est pas le manuel administrateur. Il s'adresse aux organes décisionnels : "
         "que propose OpsGate, pourquoi l'adopter, puis quoi est filtré et comment le blocage s'applique.",
     )
 
-    # 1
     h1(pdf, "1. La solution que nous proposons")
     h2(pdf, "En une phrase")
     body(
@@ -331,7 +153,6 @@ def main() -> None:
         "aveugles au contenu réellement collé dans un chat IA.",
     )
     h2(pdf, "Ce qu'OpsGate apporte")
-    w = uw(pdf)
     table(
         pdf,
         ["Pilier", "Bénéfice pour la DSI"],
@@ -343,10 +164,8 @@ def main() -> None:
             ["Déploiement progressif", "Pilote warn → mask / block / proxy enforce."],
             ["Multi-IA", "Pas un verrou ChatGPT seul : catalogue large de services IA."],
         ],
-        [52, w - 52],
     )
 
-    # 2
     h1(pdf, "2. Pourquoi choisir OpsGate")
     reason_card(
         pdf,
@@ -382,10 +201,8 @@ def main() -> None:
             ["Lecture historiques fournisseur", "Respect privacy ; pas de session replay."],
             ["Antivirus / EDR", "Complément, pas remplacement de votre stack endpoint."],
         ],
-        [58, w - 58],
     )
 
-    # 3
     h1(pdf, "3. Comment ça marche (vue décideur)")
     table(
         pdf,
@@ -395,7 +212,6 @@ def main() -> None:
             ["Proxy local (option)", "MITM allowlist multi-IA ; observe ou enforce", "Oui en enforce"],
             ["Control plane", "Policies, packs, licences, MMC, exports", "Gouvernance"],
         ],
-        [40, 78, w - 118],
     )
     body(
         pdf,
@@ -403,7 +219,6 @@ def main() -> None:
         "si le proxy est en enforce, la requête peut encore être coupée avant d'atteindre le fournisseur IA.",
     )
 
-    # 4
     h1(pdf, "4. Ce qui est filtré (catalogue)")
     body(
         pdf,
@@ -424,7 +239,6 @@ def main() -> None:
             ["JWT / Bearer session", "med.", "mask*", "eyJ… (*pas de coupe proxy)"],
             ["Clé de licence", "med.", "mask", "XXXX-XXXX-XXXX"],
         ],
-        [50, 18, 20, w - 88],
     )
     h2(pdf, "4.2 Données financières & PII")
     table(
@@ -436,7 +250,6 @@ def main() -> None:
             ["E-mail", "low", "warn", "PII légère"],
             ["Téléphone FR / intl", "low", "warn", "PII légère"],
         ],
-        [52, 18, 20, w - 90],
     )
     bold(
         pdf,
@@ -450,7 +263,6 @@ def main() -> None:
         "(sévérité high sauf IP privées en warn et IAM medium).",
     )
 
-    # 5
     h1(pdf, "5. Comment le blocage s'applique")
     h2(pdf, "Modes policy extension")
     table(
@@ -462,7 +274,6 @@ def main() -> None:
             ["mask_force", "Masquage obligatoire", "Masqués ou envoi refusé"],
             ["block", "Envoi refusé côté page", "Non (DOM)"],
         ],
-        [36, 58, w - 94],
     )
     h2(pdf, "Proxy local")
     table(
@@ -472,9 +283,8 @@ def main() -> None:
             ["observe", "Journal MMC uniquement — ne coupe pas"],
             ["enforce", "Coupe si détection actionnable (hors JWT session, email, tél., IP seule)"],
         ],
-        [32, w - 32],
     )
-    callout(
+    write_callout(
         pdf,
         "Anti-casse sites IA : les JWT de session (Authorization: Bearer eyJ…) et cookies d'auth "
         "ne coupent pas l'accès au site — jetons techniques du navigateur, pas un secret collé dans le prompt.",
@@ -485,7 +295,6 @@ def main() -> None:
     bullet(pdf, "E-mail → aXXX@domaine")
     bullet(pdf, "IBAN → préfixe pays + XXXX + fin")
 
-    # 6
     h1(pdf, "6. Périmètre multi-IA")
     body(
         pdf,
@@ -494,7 +303,6 @@ def main() -> None:
         "Together, Fireworks, Phind, etc. Hors allowlist = tunnel transparent (pas de déchiffrement OpsGate).",
     )
 
-    # 7
     h1(pdf, "7. Journalisation & gouvernance")
     table(
         pdf,
@@ -506,10 +314,8 @@ def main() -> None:
             ["Export", "CSV/JSON events et agents (inventaire)"],
             ["SIEM / Syslog / Grafana", "Roadmap V2"],
         ],
-        [46, w - 46],
     )
 
-    # 8
     h1(pdf, "8. Responsabilités (RACI simplifié)")
     table(
         pdf,
@@ -520,10 +326,8 @@ def main() -> None:
             ["Utilisateur", "Respecter les alertes ; ne pas coller de secrets"],
             ["DailyOps.Tech", "Produit OpsGate, training, runbooks, support"],
         ],
-        [38, w - 38],
     )
 
-    # 9
     h1(pdf, "9. Formation DailyOps.tech")
     body(pdf, "À publier sur DailyOps.tech (parcours DSI + parcours admin) :")
     for i, s in enumerate(
@@ -540,7 +344,6 @@ def main() -> None:
     ):
         bullet(pdf, f"{i}. {s}")
 
-    # 10
     h1(pdf, "10. FAQ décideurs")
     bold(pdf, "Q. « Envoyer quand même » en mode warn — les données partent-elles ?")
     body(
@@ -584,7 +387,7 @@ def main() -> None:
 
     OUT.parent.mkdir(parents=True, exist_ok=True)
     pdf.output(str(OUT))
-    print(f"Wrote {OUT} ({OUT.stat().st_size} bytes, {pdf.page_no()} pages)")
+    print(f"OK {OUT.name}  pages={pdf.page_no()}  {OUT.stat().st_size // 1024} KB")
 
 
 if __name__ == "__main__":
