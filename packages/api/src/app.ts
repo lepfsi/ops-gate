@@ -48,6 +48,55 @@ export function createApp() {
   app.use("*", cors())
   app.use("*", secureHeaders())
 
+  /**
+   * Postgres RLS : lie chaque requête HTTP au tenant (org_id) via AsyncLocalStorage.
+   * Paths publics / enroll / login restent en bypass service.
+   */
+  app.use("*", async (c, next) => {
+    const st = getStore()
+    if (st.kind !== "postgres") return next()
+    const {
+      getPgRlsMode,
+      pathNeedsRlsBypass,
+      withBypassRls,
+      withOrgRls
+    } = await import("./pg-rls")
+    if (getPgRlsMode() === "off") return next()
+
+    const path = c.req.path || ""
+    if (pathNeedsRlsBypass(path)) {
+      return withBypassRls(() => next())
+    }
+
+    const header = c.req.header("Authorization") || ""
+    const match = header.match(/^Bearer\s+(.+)$/i)
+    if (!match) {
+      // Pas de token : bypass (handlers renverront 401) — strict aussi pour ne pas bloquer 401
+      return withBypassRls(() => next())
+    }
+    const token = match[1]!.trim()
+
+    // Résolution token sous bypass (session peut être n’importe quel org)
+    const orgId = await withBypassRls(async () => {
+      try {
+        const admin = await store.resolveAdminSession(token)
+        if (admin) return admin.session.orgId
+      } catch {
+        /* ignore */
+      }
+      try {
+        const agent = await store.resolveAgentByToken(token)
+        if (agent) return agent.orgId
+      } catch {
+        /* ignore */
+      }
+      return null
+    })
+
+    if (orgId) return withOrgRls(orgId, () => next())
+    return withBypassRls(() => next())
+  })
+
   app.get("/", (c) =>
     c.json({
       name: "OpsGate API",
@@ -64,6 +113,7 @@ export function createApp() {
   app.get("/health", async (c) => {
     const { redisStatus } = await import("./redis")
     const { rateLimitBackend } = await import("./rate-limit")
+    const { getPgRlsMode } = await import("./pg-rls")
     const redis = redisStatus()
     return c.json({
       ok: true,
@@ -73,6 +123,10 @@ export function createApp() {
       store: getStore().kind,
       rate_limit_backend: await rateLimitBackend(),
       redis,
+      pg_rls:
+        getStore().kind === "postgres"
+          ? { mode: getPgRlsMode(), enabled: getPgRlsMode() !== "off" }
+          : { mode: "n/a", enabled: false },
       features: [
         "enroll",
         "config",
@@ -89,7 +143,8 @@ export function createApp() {
         "prometheus-metrics",
         "security-report-pdf",
         "redis-rate-limit",
-        "multi-tenant-quotas"
+        "multi-tenant-quotas",
+        "postgres-rls"
       ]
     })
   })

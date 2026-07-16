@@ -56,8 +56,14 @@ Config console **Paramètres → Monitoring** ou JSON org :
 
 Toujours en place (licence key / seats) — orthogonal aux `maxAgents` soft quota admin.
 
+## Postgres RLS
+
+Voir **[`POSTGRES-RLS.md`](./POSTGRES-RLS.md)** — FORCE ROW LEVEL SECURITY + `app.current_org_id` / bypass service.
+
+`OPSGATE_PG_RLS=on|strict|off` (défaut `on` si store=postgres).
+
 ## Suite multi-tenant
 
-- RLS Postgres strict (row-level)  
 - Isolation chiffrement secrets par org  
 - Quotas storage / retention events  
+- Rôle Postgres non-superuser dédié (hardening ops)  

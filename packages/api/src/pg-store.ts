@@ -50,10 +50,66 @@ import type {
   UserGroup
 } from "./types"
 import { ALL_ADMIN_PERMISSIONS } from "./types"
+import {
+  getPgRlsMode,
+  getRlsContext,
+  queryWithRls,
+  withBypassRls
+} from "./pg-rls"
 
 const { Pool } = pg
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
+
+/** Pool proxy : chaque query/connect injecte le contexte RLS (ALS). */
+function wrapPoolWithRls(pool: pg.Pool): pg.Pool {
+  return new Proxy(pool, {
+    get(target, prop, receiver) {
+      if (prop === "query") {
+        return (
+          text: string | { text?: string; values?: unknown[] },
+          values?: unknown[]
+        ) => {
+          if (typeof text === "string") {
+            return queryWithRls(target, text, values)
+          }
+          const q = text?.text || ""
+          const v = text?.values ?? values
+          return queryWithRls(target, q, v)
+        }
+      }
+      if (prop === "connect") {
+        return async () => {
+          const client = await target.connect()
+          if (getPgRlsMode() === "off") return client
+          const ctx = getRlsContext()
+          try {
+            await client.query(
+              `SELECT set_config('app.rls_bypass', $1, false)`,
+              [ctx.bypass ? "on" : "off"]
+            )
+            await client.query(
+              `SELECT set_config('app.current_org_id', $1, false)`,
+              [ctx.orgId || ""]
+            )
+          } catch {
+            /* ignore */
+          }
+          const origRelease = client.release.bind(client)
+          client.release = ((err?: Error | boolean) => {
+            // Remet bypass pour ne pas polluer le pool
+            const done = () => origRelease(err as Error | boolean | undefined)
+            client
+              .query(`SELECT set_config('app.rls_bypass', 'on', false)`)
+              .then(done, done)
+          }) as typeof client.release
+          return client
+        }
+      }
+      return Reflect.get(target, prop, receiver)
+    }
+  }) as pg.Pool
+}
 
 const DEFAULT_HOSTS = [
   "chatgpt.com",
@@ -347,10 +403,14 @@ export class PgStore implements OpsGateStore {
   }
 
   static async create(databaseUrl: string): Promise<PgStore> {
-    const pool = new Pool({ connectionString: databaseUrl })
+    const raw = new Pool({ connectionString: databaseUrl })
+    const pool = wrapPoolWithRls(raw)
     const store = new PgStore(pool)
-    await store.migrate()
-    await store.ensureSeed()
+    // Migrate + seed toujours en bypass (cross-tenant / DDL)
+    await withBypassRls(async () => {
+      await store.migrate()
+      await store.ensureSeed()
+    })
     return store
   }
 
@@ -485,7 +545,29 @@ export class PgStore implements OpsGateStore {
       })
     // Events survivant à la révocation agent (CASCADE → SET NULL)
     await this.migrateEventsAgentFk()
+    // Multi-tenant RLS (V2 P1) — skip si OPSGATE_PG_RLS=off
+    await this.migrateRls()
     console.log("[store:postgres] schema migrated (V1 full control plane)")
+  }
+
+  /** Active FORCE ROW LEVEL SECURITY + policies org (voir db/rls.sql). */
+  private async migrateRls() {
+    if (getPgRlsMode() === "off") {
+      console.log("[store:postgres] RLS skip (OPSGATE_PG_RLS=off)")
+      return
+    }
+    try {
+      const rlsSql = readFileSync(join(__dirname, "db", "rls.sql"), "utf8")
+      await this.pool.query(rlsSql)
+      console.log(
+        `[store:postgres] RLS multi-tenant applied (mode=${getPgRlsMode()})`
+      )
+    } catch (e) {
+      console.warn(
+        "[store:postgres] RLS migrate failed:",
+        e instanceof Error ? e.message : e
+      )
+    }
   }
 
   /** detection_events.agent_id : NOT NULL CASCADE → NULL SET NULL + unique org-level */
