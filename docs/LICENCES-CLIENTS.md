@@ -43,18 +43,26 @@ Révoquer la licence full (retour essai 30 j) : même écran, **Supprimer la lic
 **Build client final** : ne pas définir `VITE_OPSGATE_VENDOR_DESK` → le code
 VendorDesk n’est **pas** inclus (moins de surface reverse-engineering).
 
-**Build / dev DailyOps** (PowerShell) :
+**Dev DailyOps** (bureau concepteur) :
 
 ```powershell
-$env:VITE_OPSGATE_VENDOR_DESK = "true"
-pnpm console:dev
-# puis ouvrir :
+# Terminal API
+$env:OPSGATE_VENDOR_LICENSE_SECRET = "ton-secret-long-min-12-car"
+pnpm api:dev
+
+# Terminal console — IMPORTANT : mode vendor (pas console:dev seul)
+pnpm console:dev:vendor
+# puis ouvrir exactement :
 # http://127.0.0.1:5173/?desk=vendor
 ```
 
-1. `OPSGATE_VENDOR_LICENSE_SECRET` (≥12 car.) sur l’API  
-2. URL `?desk=vendor`  
-3. Entrer la clé + URL API → générer / PDF / top-up / révoquer  
+Si tu ouvres `?desk=vendor` avec un simple `pnpm console:dev` **sans** redémarrer
+en mode vendor, Vite affiche encore la **login client** (comportement d’avant).
+
+1. Secret API `OPSGATE_VENDOR_LICENSE_SECRET`  
+2. `pnpm console:dev:vendor`  
+3. URL `?desk=vendor`  
+4. Entrer la clé + URL API → générer / PDF / top-up / révoquer  
 
 **Augmenter les sièges** : type **Top-up** → nouvelle clé OPS-… ; le client
 l’active (Paramètres → Licences) → sièges **ajoutés** à l’org (pas de

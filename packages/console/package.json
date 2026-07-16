@@ -5,7 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite --port 5173 --strictPort",
+    "dev:vendor": "vite --port 5173 --strictPort --mode vendor",
     "build": "tsc -b && vite build",
+    "build:vendor": "tsc -b && vite build --mode vendor",
     "preview": "vite preview --port 5173"
   },
   "dependencies": {
