@@ -683,7 +683,10 @@ export const api = {
     request<{
       ok: boolean
       expires_in_sec?: number
+      mailed?: boolean
+      delivery?: string
       dev_otp?: string
+      target_email_masked?: string
       message: string
     }>("/v1/auth/password-reset/request", {
       method: "POST",
@@ -691,13 +694,17 @@ export const api = {
       body: JSON.stringify({ email })
     }),
 
-  confirmPrincipalOtp: (otp: string, new_password: string) =>
+  confirmPrincipalOtp: (otp: string, new_password: string, email?: string) =>
     request<{ ok: boolean; message?: string }>(
       "/v1/auth/password-reset/confirm",
       {
         method: "POST",
         auth: false,
-        body: JSON.stringify({ otp, new_password })
+        body: JSON.stringify({
+          otp,
+          new_password,
+          email: email || undefined
+        })
       }
     ),
 

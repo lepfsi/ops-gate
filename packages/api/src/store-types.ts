@@ -384,8 +384,13 @@ export interface OpsGateStore {
   requestPasswordResetOtp(orgId: string): Promise<{
     ok: true
     expires_in_sec: number
+    /** true si SMTP a accepté l’envoi */
+    mailed: boolean
+    delivery: "smtp" | "log" | "failed" | "disabled"
+    /** OTP en clair uniquement en lab (OPSGATE_MAIL_DEV_OTP ou SMTP absent hors prod) */
     dev_otp?: string
     message: string
+    target_email_masked?: string
   }>
   confirmPasswordResetOtp(
     orgId: string,

@@ -2520,15 +2520,50 @@ export class PgStore implements OpsGateStore {
          created_at = NOW()`,
       [orgId, hashManagementPassword(otp), Date.now() + expiresIn * 1000]
     )
-    console.log(
-      `[opsgate-otp] org=${orgId} password-reset OTP=${otp} (dev — would email admin)`
-    )
+    const org = await this.getOrg(orgId)
+    const principal = await this.getPrincipalAdmin(orgId)
+    const targetEmail = (principal?.email || org?.primaryEmail || "").trim()
+    const {
+      sendPasswordResetOtpEmail,
+      shouldExposeDevOtp,
+      maskEmail,
+      isMailConfigured
+    } = await import("./mail")
+    let mailed = false
+    let delivery: "smtp" | "log" | "failed" | "disabled" = "disabled"
+    if (targetEmail) {
+      const sent = await sendPasswordResetOtpEmail({
+        to: targetEmail,
+        otp,
+        expiresMin: Math.floor(expiresIn / 60),
+        orgName: org?.name
+      })
+      mailed = sent.ok && sent.delivery === "smtp"
+      delivery = sent.delivery
+    }
+    const expose = shouldExposeDevOtp()
+    if (expose) {
+      console.log(
+        `[opsgate-otp] DEV OTP org=${orgId} ${maskEmail(targetEmail)} = ${otp} (delivery=${delivery})`
+      )
+    }
+    const masked = targetEmail ? maskEmail(targetEmail) : "—"
     return {
       ok: true as const,
       expires_in_sec: expiresIn,
-      dev_otp: otp,
-      message:
-        "OTP généré (mode dev : affiché ici + logs API). Prod : envoi email admin."
+      mailed,
+      delivery,
+      dev_otp: expose ? otp : undefined,
+      target_email_masked: masked,
+      message: mailed
+        ? `Un code OTP a été envoyé à ${masked}.`
+        : delivery === "log"
+          ? `SMTP non configuré : OTP journalisé côté serveur${expose ? " et affiché en lab" : ""}. Configurez OPSGATE_SMTP_*.`
+          : delivery === "failed"
+            ? `Échec d'envoi SMTP vers ${masked}. Vérifiez la config mail.`
+            : isMailConfigured()
+              ? `OTP généré (destinataire manquant).`
+              : `OTP généré sans e-mail (configurez OPSGATE_SMTP_HOST).`
     }
   }
 

@@ -3922,7 +3922,13 @@ function LoginScreen({
                       try {
                         const r = await api.requestPrincipalOtp(resetEmail)
                         setDevOtp(r.dev_otp || null)
-                        setInfo(r.message)
+                        setInfo(
+                          r.mailed
+                            ? r.message
+                            : r.dev_otp
+                              ? `${r.message} (lab OTP affiché ci-dessous)`
+                              : r.message
+                        )
                         setResetStep("otp")
                       } catch (e) {
                         setErr(String(e))
@@ -3943,14 +3949,21 @@ function LoginScreen({
             ) : (
               <>
                 <p className="muted">
-                  Un OTP a été envoyé à <code>{resetEmail}</code>
+                  Un code OTP a été envoyé par e-mail
+                  {resetEmail ? (
+                    <>
+                      {" "}
+                      à <code>{resetEmail}</code>
+                    </>
+                  ) : null}
                   {devOtp ? (
                     <>
                       {" "}
-                      (dev : <code>{devOtp}</code>)
+                      — lab uniquement : <code>{devOtp}</code>
                     </>
-                  ) : null}
-                  .
+                  ) : (
+                    " (vérifiez votre boîte de réception / spam)."
+                  )}
                 </p>
                 <label className="field-label">OTP</label>
                 <input
@@ -3974,7 +3987,11 @@ function LoginScreen({
                     onClick={async () => {
                       setBusy(true)
                       try {
-                        await api.confirmPrincipalOtp(otp, otpNew)
+                        await api.confirmPrincipalOtp(
+                          otp,
+                          otpNew,
+                          resetEmail || undefined
+                        )
                         setInfo("Mdp mis à jour  -  connectez-vous")
                         setPassword(otpNew)
                         setEmail(resetEmail)
@@ -5811,6 +5828,11 @@ function PeopleView({
         <>
           <div className="card">
             <h2>OTP Administrator principal</h2>
+            <p className="muted" style={{ fontSize: 13 }}>
+              Envoie un code par e-mail (SMTP) à l’admin principal pour
+              réinitialiser son mot de passe. Sans SMTP : mode lab (log serveur /
+              OTP affiché si autorisé).
+            </p>
             <button
               className="btn secondary"
               type="button"
@@ -5827,11 +5849,11 @@ function PeopleView({
                   setBusy(false)
                 }
               }}>
-              Demander OTP
+              Demander OTP (e-mail)
             </button>
             {devOtp && (
               <p className="ok">
-                OTP : <code>{devOtp}</code>
+                Lab OTP : <code>{devOtp}</code>
               </p>
             )}
             <div className="row" style={{ marginTop: 10 }}>

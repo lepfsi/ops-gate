@@ -1554,7 +1554,7 @@ export class MemoryStore implements OpsGateStore {
   async requestPasswordResetOtp(orgId: string) {
     const org = this.orgs.get(orgId)
     const principal = await this.getPrincipalAdmin(orgId)
-    const targetEmail = principal?.email || org?.primaryEmail || ""
+    const targetEmail = (principal?.email || org?.primaryEmail || "").trim()
     const otp = newOtpCode(6)
     const expiresIn = 10 * 60
     this.otpChallenges.set(orgId, {
@@ -1563,14 +1563,54 @@ export class MemoryStore implements OpsGateStore {
       expiresAt: Date.now() + expiresIn * 1000,
       createdAt: Date.now()
     })
-    console.log(
-      `[opsgate-otp] PRINCIPAL password reset → ${targetEmail} OTP=${otp} (dev — would email)`
-    )
+    const {
+      sendPasswordResetOtpEmail,
+      shouldExposeDevOtp,
+      maskEmail,
+      isMailConfigured
+    } = await import("./mail")
+    let mailed = false
+    let delivery: "smtp" | "log" | "failed" | "disabled" = "disabled"
+    if (targetEmail) {
+      const sent = await sendPasswordResetOtpEmail({
+        to: targetEmail,
+        otp,
+        expiresMin: Math.floor(expiresIn / 60),
+        orgName: org?.name
+      })
+      mailed = sent.ok && sent.delivery === "smtp"
+      delivery = sent.delivery
+      if (!sent.ok && sent.delivery === "failed") {
+        console.warn(
+          `[opsgate-otp] email failed for ${maskEmail(targetEmail)} — OTP still valid in challenge`
+        )
+      }
+    } else {
+      console.warn("[opsgate-otp] no principal email — cannot send OTP mail")
+    }
+    const expose = shouldExposeDevOtp()
+    if (expose) {
+      console.log(
+        `[opsgate-otp] DEV OTP for ${maskEmail(targetEmail)} = ${otp} (delivery=${delivery})`
+      )
+    }
+    const masked = targetEmail ? maskEmail(targetEmail) : "—"
     return {
       ok: true as const,
       expires_in_sec: expiresIn,
-      dev_otp: otp,
-      message: `OTP envoyé à l'email principal (${targetEmail || "—"}) pour reset Administrator. Prod : email réel.`
+      mailed,
+      delivery,
+      dev_otp: expose ? otp : undefined,
+      target_email_masked: masked,
+      message: mailed
+        ? `Un code OTP a été envoyé à ${masked}.`
+        : delivery === "log"
+          ? `SMTP non configuré : OTP journalisé côté serveur${expose ? " et affiché en lab" : ""}. Configurez OPSGATE_SMTP_*.`
+          : delivery === "failed"
+            ? `Échec d'envoi SMTP vers ${masked}. Vérifiez la config mail.`
+            : isMailConfigured()
+              ? `OTP généré (destinataire manquant).`
+              : `OTP généré sans e-mail (configurez OPSGATE_SMTP_HOST).`
     }
   }
 

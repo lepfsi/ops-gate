@@ -138,6 +138,7 @@ export function createApp() {
         "policy-profiles",
         "vendor-recovery-offline-only",
         "password-otp-reset-principal",
+        "smtp-mail",
         "console-auth",
         "siem-syslog",
         "prometheus-metrics",
@@ -149,7 +150,8 @@ export function createApp() {
         "ldap-cron",
         "webauthn",
         "saml-sp"
-      ]
+      ],
+      mail: (await import("./mail")).getMailStatus()
     })
   })
 
@@ -2756,6 +2758,17 @@ export function createApp() {
       `Reset mdp admin « ${existing.label} » (${existing.email}) + déverrouillage`,
       { admin_id: existing.id }
     )
+    // Notification e-mail (best-effort)
+    try {
+      const { sendPasswordChangedNotice } = await import("./mail")
+      await sendPasswordChangedNotice({
+        to: existing.email,
+        adminLabel: existing.label,
+        byEmail: _gate.admin.email
+      })
+    } catch {
+      /* ignore mail errors */
+    }
     return c.json({
       ok: true,
       admin: admin ? publicAdminView(admin) : null,
@@ -3623,9 +3636,30 @@ export function createApp() {
   })
 
   /**
-   * OTP reset = Administrator principal uniquement (email primary).
-   * Public (pas de session) — comme un reset login.
+   * OTP reset mot de passe — principal (e-mail).
+   * Public. Envoi SMTP si OPSGATE_SMTP_* configuré.
+   * Body: { email } — résout l’org via findAdminsByEmail (fallback DEMO).
    */
+  async function resolveOrgForPasswordReset(emailRaw: string) {
+    const email = (emailRaw || "").trim().toLowerCase()
+    if (email) {
+      const hits = await store.findAdminsByEmail(email)
+      const principalHit = hits.find((a) => a.isPrincipal && a.active)
+      if (principalHit) {
+        const org = await store.getOrg(principalHit.orgId)
+        if (org) return { org, principal: principalHit, email }
+      }
+      // e-mail connu mais non principal : réponse générique (anti-énumération)
+      if (hits.length > 0) {
+        return { org: null as null, principal: null as null, email, deny: true as const }
+      }
+    }
+    const org = await demoOrg()
+    if (!org) return { org: null as null, principal: null as null, email }
+    const principal = await store.getPrincipalAdmin(org.id)
+    return { org, principal, email }
+  }
+
   v1.post("/auth/password-reset/request", async (c) => {
     let body: { email?: string }
     try {
@@ -3633,30 +3667,36 @@ export function createApp() {
     } catch {
       body = {}
     }
-    const org = await demoOrg()
-    if (!org) return c.json({ error: "no_demo_org" }, 404)
-    const principal = await store.getPrincipalAdmin(org.id)
     const email = (body.email || "").trim().toLowerCase()
-    if (
-      email &&
-      principal &&
-      email !== principal.email &&
-      email !== org.primaryEmail.toLowerCase()
-    ) {
-      // ne pas révéler si email existe
+    const resolved = await resolveOrgForPasswordReset(email)
+    // Toujours message générique si email fourni et ne matche pas le principal
+    if (email && resolved.deny) {
       return c.json({
         ok: true,
-        message: "Si l'email correspond à l'Administrator, un OTP a été envoyé."
+        message:
+          "Si l'email correspond à un administrateur principal, un OTP a été envoyé."
       })
     }
-    const result = await store.requestPasswordResetOtp(org.id)
+    if (!resolved.org) {
+      return c.json({ error: "no_org" }, 404)
+    }
+    if (email && resolved.principal) {
+      const pe = resolved.principal.email.toLowerCase()
+      const oe = (resolved.org.primaryEmail || "").toLowerCase()
+      if (email !== pe && email !== oe) {
+        return c.json({
+          ok: true,
+          message:
+            "Si l'email correspond à un administrateur principal, un OTP a été envoyé."
+        })
+      }
+    }
+    const result = await store.requestPasswordResetOtp(resolved.org.id)
     return c.json(result)
   })
 
   v1.post("/auth/password-reset/confirm", async (c) => {
-    const org = await demoOrg()
-    if (!org) return c.json({ error: "no_demo_org" }, 404)
-    let body: { otp?: string; new_password?: string }
+    let body: { otp?: string; new_password?: string; email?: string }
     try {
       body = await c.req.json()
     } catch {
@@ -3665,8 +3705,10 @@ export function createApp() {
     if (!body.otp || !body.new_password) {
       return c.json({ error: "otp_and_new_password_required" }, 400)
     }
+    const resolved = await resolveOrgForPasswordReset(body.email || "")
+    if (!resolved.org) return c.json({ error: "no_org" }, 404)
     const result = await store.confirmPasswordResetOtp(
-      org.id,
+      resolved.org.id,
       body.otp,
       body.new_password
     )
@@ -3674,20 +3716,24 @@ export function createApp() {
     return c.json({
       ok: true,
       message:
-        "Mot de passe Administrator mis à jour. Les agents synchronisés le reçoivent au prochain poll (~15 min)."
+        "Mot de passe Administrator mis à jour. Connectez-vous avec le nouveau mot de passe."
     })
   })
 
   // Compat anciens chemins console
   v1.post("/org/password-reset/request", async (c) => {
-    const org = await demoOrg()
-    if (!org) return c.json({ error: "no_demo_org" }, 404)
-    return c.json(await store.requestPasswordResetOtp(org.id))
+    let body: { email?: string }
+    try {
+      body = await c.req.json()
+    } catch {
+      body = {}
+    }
+    const resolved = await resolveOrgForPasswordReset(body.email || "")
+    if (!resolved.org) return c.json({ error: "no_org" }, 404)
+    return c.json(await store.requestPasswordResetOtp(resolved.org.id))
   })
   v1.post("/org/password-reset/confirm", async (c) => {
-    const org = await demoOrg()
-    if (!org) return c.json({ error: "no_demo_org" }, 404)
-    let body: { otp?: string; new_password?: string }
+    let body: { otp?: string; new_password?: string; email?: string }
     try {
       body = await c.req.json()
     } catch {
@@ -3696,13 +3742,32 @@ export function createApp() {
     if (!body.otp || !body.new_password) {
       return c.json({ error: "otp_and_new_password_required" }, 400)
     }
+    const resolved = await resolveOrgForPasswordReset(body.email || "")
+    if (!resolved.org) return c.json({ error: "no_org" }, 404)
     const result = await store.confirmPasswordResetOtp(
-      org.id,
+      resolved.org.id,
       body.otp,
       body.new_password
     )
     if (!result.ok) return c.json({ error: result.error }, 400)
     return c.json({ ok: true })
+  })
+
+  /** Test SMTP (principal) — vérifie la connexion sans envoyer de mail */
+  v1.get("/org/mail/status", async (c) => {
+    const gate = await requireConsoleAuth(c, "console_access")
+    if (!gate.ok) return c.json({ error: gate.error }, gate.status)
+    const { getMailStatus, verifySmtpConnection, isMailConfigured } =
+      await import("./mail")
+    const status = getMailStatus()
+    let verify: { ok: boolean; error?: string } | null = null
+    if (isMailConfigured() && gate.admin.isPrincipal) {
+      verify = await verifySmtpConnection()
+    }
+    return c.json({
+      ...status,
+      verify: gate.admin.isPrincipal ? verify : undefined
+    })
   })
 
   /** Pool recovery one-time — liste (pas de clair) */
