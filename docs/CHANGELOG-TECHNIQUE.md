@@ -170,19 +170,30 @@ Prod future : services Windows / silent scripts ; pas 3 terminaux ouverts.
 | Rate limit login | `OPSGATE_RATE_LOGIN_PER_MIN` | `rate-limit.ts` |
 | Quota events/jour | `monitoring.quotas.maxEventsPerDay` | events/batch 429, console Monitoring |
 
-## 8. Suite recommandée (après P1)
+## 8. V2 P1 suite — OIDC flow complet (16 juillet 2026)
 
-1. OIDC **flow complet** (authorize + code + mapping admin)  
-2. Soft-mask **on-wire** multi-vendor (rewrite JSON)  
-3. Firefox MV3  
-4. Chrome Web Store / MDM force-install  
-5. Redis pour rate-limit multi-instance  
+| Sujet | Détail | Fichiers |
+|-------|--------|----------|
+| OIDC module | Discovery, PKCE S256, state TTL, token exchange, claims email | `packages/api/src/oidc.ts` |
+| Start / callback | `GET /v1/auth/oidc/start`, `GET /v1/auth/oidc/callback` | `app.ts` |
+| Session SSO | `createAdminSessionOidc(email)` (skip mdp + MFA local) | `memory-store`, `pg-store`, `store-types` |
+| Console SSO | Bouton login + fragment `#opsgate_token` + erreurs IdP | `console/App.tsx`, `api.ts`, `i18n` |
+| Mapping | email / preferred_username / upn → `org_admins` existant | pas de JIT |
+| Docs | flow, Entra, env, erreurs | `AUTH-MFA-SSO.md` |
+
+## 9. Suite recommandée (après OIDC)
+
+1. Soft-mask **on-wire** multi-vendor (rewrite JSON)  
+2. Firefox MV3  
+3. Chrome Web Store / MDM force-install  
+4. Redis pour rate-limit multi-instance  
+5. OIDC : JIT admin, JWKS verify, `sso_enforce`, SAML  
 
 Détail : `docs/V2-BACKLOG.md` · `docs/architecture/PLATFORM-v2.md`.
 
 ---
 
-## 7. Convention pour les prochains changements
+## Convention pour les prochains changements
 
 Quand tu modifies le produit :
 

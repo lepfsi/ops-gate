@@ -16,7 +16,7 @@ Voir le journal détaillé : [`CHANGELOG-TECHNIQUE.md`](./CHANGELOG-TECHNIQUE.md
 | **P0 ✅** | **SIEM / Syslog** | **Livré** : UDP/TCP, RFC 5424 + CEF, config org console Monitoring. Voir `siem.ts` + `docs/grafana/README.md`. |
 | **P0 ✅** | **Métriques + Grafana** | **Livré** : `GET /metrics`, counters + gauges multi-org, dashboard `docs/grafana/opsgate-dashboard.json`. |
 | **P1 ✅ partiel** | **Proxy prod** | **Livré** : service/tâche Windows, PAC/GPO docs, soft-mask env. Reste : MSI packagé, soft-mask rewrite on-wire, HTTP/2 stream-aware. |
-| **P1 ✅ partiel** | **SSO + MFA** | **Livré** : MFA TOTP console. SSO OIDC = fondations (`/auth/oidc/status` + env). Reste : flow authorize complet + WebAuthn. |
+| **P1 ✅** | **SSO + MFA** | **Livré** : MFA TOTP + OIDC Authorization Code+PKCE (`/auth/oidc/start|callback`, mapping email→admin, bouton console). Reste optionnel : JIT, JWKS, WebAuthn, SAML, `sso_enforce`. |
 | **P1 ✅ partiel** | **Multi-tenant prod** | **Livré** : rate limit login, quota events/jour. Reste : Redis multi-instance, RLS, quotas étendus. |
 | **P2** | **Multi-navigateur** | Chromium OK. **Firefox** MV3 puis Safari. |
 | **P2** | **Chrome Web Store** + force-install MDM | Distribution + ExtensionInstallForcelist |

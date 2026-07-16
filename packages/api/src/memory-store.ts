@@ -832,18 +832,55 @@ export class MemoryStore implements OpsGateStore {
         return { ok: false as const, error: "mfa_invalid" }
       }
     }
-    await this.clearAdminLoginFailures(hit.admin.id)
+    return this.issueAdminSession(hit.orgId, hit.admin, opts?.force)
+  }
+
+  async createAdminSessionOidc(
+    email: string,
+    opts?: { force?: boolean }
+  ) {
+    const emailNorm = email.trim().toLowerCase()
+    type Cand = { orgId: string; admin: OrgAdmin; personal: boolean }
+    const candidates: Cand[] = []
+    for (const [orgId, list] of this.admins) {
+      const admin = list.find((a) => a.active && a.email === emailNorm)
+      if (!admin) continue
+      if (!admin.isPrincipal && !admin.permissions.includes("console_access")) {
+        continue
+      }
+      candidates.push({
+        orgId,
+        admin,
+        personal: !!this.orgs.get(orgId)?.isPersonal
+      })
+    }
+    candidates.sort((a, b) => Number(a.personal) - Number(b.personal))
+    const hit = candidates[0]
+    if (!hit) return { ok: false as const, error: "admin_not_found" }
+    if (hit.admin.lockedAt) {
+      return { ok: false as const, error: "account_locked" }
+    }
+    // SSO : MFA local non exigé (IdP a authentifié)
+    return this.issueAdminSession(hit.orgId, hit.admin, opts?.force)
+  }
+
+  private async issueAdminSession(
+    orgId: string,
+    admin: OrgAdmin,
+    force?: boolean
+  ) {
+    await this.clearAdminLoginFailures(admin.id)
     const now = Date.now()
     const idleMs = MemoryStore.SESSION_IDLE_MS
     let forced = false
     for (const [tok, sess] of this.sessions) {
-      if (sess.adminId !== hit.admin.id) continue
+      if (sess.adminId !== admin.id) continue
       const last = sess.lastActivityAt || sess.createdAt
       if (now > sess.expiresAt || now - last > idleMs) {
         this.sessions.delete(tok)
         continue
       }
-      if (opts?.force) {
+      if (force) {
         this.sessions.delete(tok)
         forced = true
         continue
@@ -853,14 +890,14 @@ export class MemoryStore implements OpsGateStore {
     const token = `ogs_${newToken().replace(/^ogt_/, "")}`
     const session: AdminSession = {
       token,
-      orgId: hit.orgId,
-      adminId: hit.admin.id,
+      orgId,
+      adminId: admin.id,
       expiresAt: now + 12 * 60 * 60 * 1000,
       createdAt: now,
       lastActivityAt: now
     }
     this.sessions.set(token, session)
-    return { ok: true as const, session, admin: hit.admin, forced }
+    return { ok: true as const, session, admin, forced }
   }
 
   async resolveAdminSession(token: string) {
