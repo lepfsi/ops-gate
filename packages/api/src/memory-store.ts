@@ -760,10 +760,42 @@ export class MemoryStore implements OpsGateStore {
   /** Idle serveur : sans heartbeat console, la session expire (évite lockout fantôme). */
   private static readonly SESSION_IDLE_MS = 10 * 60 * 1000
 
+  async setAdminTotp(
+    orgId: string,
+    adminId: string,
+    fields: {
+      totpEnabled?: boolean
+      totpSecret?: string | null
+      totpPendingSecret?: string | null
+    }
+  ) {
+    const list = this.admins.get(orgId) || []
+    const idx = list.findIndex((a) => a.id === adminId)
+    if (idx < 0) return undefined
+    const prev = list[idx]
+    const next: OrgAdmin = {
+      ...prev,
+      totpEnabled:
+        fields.totpEnabled !== undefined
+          ? !!fields.totpEnabled
+          : prev.totpEnabled,
+      totpSecret:
+        fields.totpSecret !== undefined ? fields.totpSecret : prev.totpSecret,
+      totpPendingSecret:
+        fields.totpPendingSecret !== undefined
+          ? fields.totpPendingSecret
+          : prev.totpPendingSecret,
+      updatedAt: new Date().toISOString()
+    }
+    list[idx] = next
+    this.admins.set(orgId, list)
+    return next
+  }
+
   async createAdminSession(
     email: string,
     password: string,
-    opts?: { force?: boolean }
+    opts?: { force?: boolean; totpCode?: string }
   ) {
     const emailNorm = email.trim().toLowerCase()
     const hash = hashManagementPassword(password)
@@ -788,6 +820,17 @@ export class MemoryStore implements OpsGateStore {
     if (!hit) return { ok: false as const, error: "invalid_credentials" }
     if (hit.admin.lockedAt) {
       return { ok: false as const, error: "account_locked" }
+    }
+    // MFA TOTP
+    if (hit.admin.totpEnabled && hit.admin.totpSecret) {
+      const code = (opts?.totpCode || "").trim()
+      if (!code) {
+        return { ok: false as const, error: "mfa_required" }
+      }
+      const { verifyTotp } = await import("./totp")
+      if (!verifyTotp(hit.admin.totpSecret, code)) {
+        return { ok: false as const, error: "mfa_invalid" }
+      }
     }
     await this.clearAdminLoginFailures(hit.admin.id)
     const now = Date.now()

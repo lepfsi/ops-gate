@@ -90,14 +90,18 @@ export function mitmConnect(opts: {
 
   /**
    * Soft-block : refuse cette requête, garde la session TLS ouverte.
-   * Le navigateur peut recharger le site immédiatement.
+   * Option soft-mask (P1) : renvoie 200 avec corps neutralisé si OPSGATE_PROXY_SOFT_MASK=1
+   * (approximation — pas un rewrite JSON complet du fournisseur IA).
    */
   const softBlockRequest = (reason: string) => {
-    log("warn", "mitm_request_blocked", {
+    const softMask =
+      (process.env.OPSGATE_PROXY_SOFT_MASK || "").toLowerCase() === "1" ||
+      (process.env.OPSGATE_PROXY_SOFT_MASK || "").toLowerCase() === "true"
+    log("warn", softMask ? "mitm_request_soft_mask" : "mitm_request_blocked", {
       host: targetHost,
       reason,
       held_bytes: holdBytes,
-      mode: "enforce_soft",
+      mode: softMask ? "enforce_soft_mask" : "enforce_soft",
       note: "TLS kept open — next request allowed after reset"
     })
     clearHold()
@@ -112,23 +116,43 @@ export function mitmConnect(opts: {
       typeof tlsClient.alpnProtocol === "string" ? tlsClient.alpnProtocol : ""
     try {
       if (!alpn || alpn === "http/1.1" || alpn === "http/1.0") {
-        const body =
-          "OpsGate: envoi bloqué — données sensibles détectées.\n" +
-          "OpsGate: request blocked — sensitive data detected.\n\n" +
-          "Le site reste accessible. Ne renvoyez pas le même contenu sensible.\n" +
-          "The site remains available. Do not resend the same sensitive content.\n"
-        // keep-alive : le navigateur conserve l’origine, prochains GET/POST OK
-        tlsClient.write(
-          "HTTP/1.1 403 Forbidden\r\n" +
-            "Content-Type: text/plain; charset=utf-8\r\n" +
-            `Content-Length: ${Buffer.byteLength(body)}\r\n` +
-            "Connection: keep-alive\r\n" +
-            "Cache-Control: no-store\r\n" +
-            "X-OpsGate-Block: 1\r\n" +
-            "X-OpsGate-Block-Scope: request\r\n" +
-            "\r\n" +
-            body
-        )
+        if (softMask) {
+          // Corps neutre : l'API amont n'est jamais contactée ; le client reçoit un 422 applicatif
+          const body = JSON.stringify({
+            error: "opsgate_soft_mask",
+            message:
+              "OpsGate: contenu sensible retiré — renvoyez un message sans secrets.",
+            blocked: true
+          })
+          tlsClient.write(
+            "HTTP/1.1 422 Unprocessable Entity\r\n" +
+              "Content-Type: application/json; charset=utf-8\r\n" +
+              `Content-Length: ${Buffer.byteLength(body)}\r\n` +
+              "Connection: keep-alive\r\n" +
+              "Cache-Control: no-store\r\n" +
+              "X-OpsGate-Block: soft-mask\r\n" +
+              "X-OpsGate-Block-Scope: request\r\n" +
+              "\r\n" +
+              body
+          )
+        } else {
+          const body =
+            "OpsGate: envoi bloqué — données sensibles détectées.\n" +
+            "OpsGate: request blocked — sensitive data detected.\n\n" +
+            "Le site reste accessible. Ne renvoyez pas le même contenu sensible.\n" +
+            "The site remains available. Do not resend the same sensitive content.\n"
+          tlsClient.write(
+            "HTTP/1.1 403 Forbidden\r\n" +
+              "Content-Type: text/plain; charset=utf-8\r\n" +
+              `Content-Length: ${Buffer.byteLength(body)}\r\n` +
+              "Connection: keep-alive\r\n" +
+              "Cache-Control: no-store\r\n" +
+              "X-OpsGate-Block: 1\r\n" +
+              "X-OpsGate-Block-Scope: request\r\n" +
+              "\r\n" +
+              body
+          )
+        }
       } else {
         // HTTP/2 : pas de frames GOAWAY/RST propres ici — on coupe seulement ce socket
         // (prochaine connexion navigateur = nouvel onglet/requête = OK)

@@ -159,13 +159,24 @@ Prod future : services Windows / silent scripts ; pas 3 terminaux ouverts.
 | Grafana | Dashboard JSON | `docs/grafana/opsgate-dashboard.json`, `docs/grafana/README.md` |
 | listOrgs | Multi-tenant scrape | `memory-store` / `pg-store` |
 
-## 7. Suite recommandée (après P0)
+## 7. V2 P1 livré — Proxy prod foundations · MFA · quotas (16 juillet 2026)
 
-1. **Proxy prod** : MSI / service Windows, soft-mask on-wire, HTTP/2 stream-aware  
-2. **SSO + MFA** console  
-3. **Firefox** (multi-navigateur)  
-4. **Chrome Web Store** / force-install MDM  
-5. Connecteurs SIEM packagés (apps Splunk…)  
+| Sujet | Détail | Fichiers / docs |
+|-------|--------|----------------|
+| Service / tâche Windows proxy | install script NSSM ou Task Scheduler | `scripts/install-proxy-service-windows.ps1`, `PROXY-PROD-WINDOWS.md` |
+| Soft-mask option | `OPSGATE_PROXY_SOFT_MASK=1` → 422 JSON local | `packages/proxy/src/mitm.ts` |
+| MFA TOTP | setup / enable / disable + login `totp_code` | `totp.ts`, store, console Settings + login |
+| SSO OIDC | statut env `OPSGATE_OIDC_*` | `GET /v1/auth/oidc/status`, `AUTH-MFA-SSO.md` |
+| Rate limit login | `OPSGATE_RATE_LOGIN_PER_MIN` | `rate-limit.ts` |
+| Quota events/jour | `monitoring.quotas.maxEventsPerDay` | events/batch 429, console Monitoring |
+
+## 8. Suite recommandée (après P1)
+
+1. OIDC **flow complet** (authorize + code + mapping admin)  
+2. Soft-mask **on-wire** multi-vendor (rewrite JSON)  
+3. Firefox MV3  
+4. Chrome Web Store / MDM force-install  
+5. Redis pour rate-limit multi-instance  
 
 Détail : `docs/V2-BACKLOG.md` · `docs/architecture/PLATFORM-v2.md`.
 

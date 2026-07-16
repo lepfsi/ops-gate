@@ -504,6 +504,29 @@ export function createApp() {
         reason: "log_categories_filtered_all"
       })
     }
+    // Quota multi-tenant (events/jour)
+    {
+      const orgQ = await store.getOrg(agent.orgId)
+      const { mergeMonitoringSettings } = await import("./types")
+      const monQ = mergeMonitoringSettings(orgQ?.monitoring)
+      const max = monQ.quotas?.maxEventsPerDay ?? 0
+      if (max > 0) {
+        const { checkAndIncrEventQuota } = await import("./rate-limit")
+        const q = checkAndIncrEventQuota(agent.orgId, toStore.length, max)
+        if (!q.ok) {
+          return c.json(
+            {
+              error: "quota_exceeded",
+              used: q.used,
+              max: q.max,
+              message: `Quota org atteint (${q.used}/${q.max} events/jour UTC).`
+            },
+            429
+          )
+        }
+      }
+    }
+
     const result = await store.appendEvents(agent.orgId, agent.id, toStore)
     // V2 P0 : compteurs Prometheus + forward SIEM (best-effort)
     try {
@@ -548,6 +571,7 @@ export function createApp() {
       locked: !!a.lockedAt,
       locked_at: a.lockedAt || null,
       failed_login_count: a.failedLoginCount || 0,
+      mfa_enabled: !!a.totpEnabled,
       created_at: a.createdAt,
       updated_at: a.updatedAt
     }
@@ -686,9 +710,35 @@ export function createApp() {
     }
   }
 
-  /** Login console */
+  /** Login console (MFA TOTP optionnel : totp_code) */
   v1.post("/auth/login", async (c) => {
-    let body: { email?: string; password?: string; force?: boolean }
+    // Rate limit par IP (V2 P1 multi-tenant)
+    const ip =
+      c.req.header("x-forwarded-for")?.split(",")[0]?.trim() ||
+      c.req.header("x-real-ip") ||
+      "local"
+    const { rateLimitCheck } = await import("./rate-limit")
+    const rl = rateLimitCheck(
+      `login:${ip}`,
+      Number(process.env.OPSGATE_RATE_LOGIN_PER_MIN || 30),
+      60_000
+    )
+    if (!rl.ok) {
+      return c.json(
+        {
+          error: "rate_limited",
+          retry_after_sec: rl.retryAfterSec,
+          message: "Trop de tentatives de connexion. Réessayez plus tard."
+        },
+        429
+      )
+    }
+    let body: {
+      email?: string
+      password?: string
+      force?: boolean
+      totp_code?: string
+    }
     try {
       body = await c.req.json()
     } catch {
@@ -716,9 +766,28 @@ export function createApp() {
       /* ignore */
     }
     const result = await store.createAdminSession(body.email, body.password, {
-      force: !!body.force
+      force: !!body.force,
+      totpCode: body.totp_code
     })
     if (!result.ok) {
+      if (result.error === "mfa_required") {
+        return c.json(
+          {
+            error: "mfa_required",
+            message: "Code d’authentification à deux facteurs requis."
+          },
+          401
+        )
+      }
+      if (result.error === "mfa_invalid") {
+        return c.json(
+          {
+            error: "mfa_invalid",
+            message: "Code MFA invalide ou expiré."
+          },
+          401
+        )
+      }
       if (result.error === "invalid_credentials") {
         try {
           const hits = await store.findAdminsByEmail(emailKey)
@@ -842,12 +911,130 @@ export function createApp() {
       expires_at: result.session.expiresAt,
       admin: publicAdminView(result.admin),
       forced: !!result.forced,
+      mfa_enabled: !!result.admin.totpEnabled,
       hint:
         result.admin.mustChangePassword
           ? "Changez le mot de passe par défaut (0000) dès que possible."
           : result.forced
             ? "L’autre session a été déconnectée."
             : undefined
+    })
+  })
+
+  /** MFA TOTP — démarrer le setup (génère secret pending) */
+  v1.post("/org/admins/me/mfa/setup", async (c) => {
+    const gate = await requireConsoleAuth(c, "console_access")
+    if (!gate.ok) return c.json({ error: gate.error }, gate.status)
+    const { generateTotpSecret, otpauthUrl } = await import("./totp")
+    const secret = generateTotpSecret()
+    await store.setAdminTotp(gate.orgId, gate.admin.id, {
+      totpPendingSecret: secret
+    })
+    return c.json({
+      ok: true,
+      secret,
+      otpauth_url: otpauthUrl({
+        secret,
+        email: gate.admin.email,
+        issuer: "OpsGate"
+      }),
+      message:
+        "Scannez le secret dans votre app Authenticator, puis confirmez avec POST …/mfa/enable { code }."
+    })
+  })
+
+  /** MFA TOTP — activer (code de l’app) */
+  v1.post("/org/admins/me/mfa/enable", async (c) => {
+    const gate = await requireConsoleAuth(c, "console_access")
+    if (!gate.ok) return c.json({ error: gate.error }, gate.status)
+    let body: { code?: string }
+    try {
+      body = await c.req.json()
+    } catch {
+      return c.json({ error: "invalid_json" }, 400)
+    }
+    const admin = (
+      await store.listAdmins(gate.orgId)
+    ).find((a) => a.id === gate.admin.id)
+    const pending = admin?.totpPendingSecret
+    if (!pending) {
+      return c.json({ error: "mfa_setup_required" }, 400)
+    }
+    const { verifyTotp } = await import("./totp")
+    if (!verifyTotp(pending, body.code || "")) {
+      return c.json({ error: "mfa_invalid" }, 400)
+    }
+    await store.setAdminTotp(gate.orgId, gate.admin.id, {
+      totpEnabled: true,
+      totpSecret: pending,
+      totpPendingSecret: null
+    })
+    await store.appendAdminAudit({
+      orgId: gate.orgId,
+      adminId: gate.admin.id,
+      adminEmail: gate.admin.email,
+      adminLabel: gate.admin.label,
+      action: "mfa_enable",
+      detail: "MFA TOTP activé"
+    })
+    return c.json({ ok: true, mfa_enabled: true })
+  })
+
+  /** MFA TOTP — désactiver (mot de passe + code) */
+  v1.post("/org/admins/me/mfa/disable", async (c) => {
+    const gate = await requireConsoleAuth(c, "console_access")
+    if (!gate.ok) return c.json({ error: gate.error }, gate.status)
+    let body: { password?: string; code?: string }
+    try {
+      body = await c.req.json()
+    } catch {
+      return c.json({ error: "invalid_json" }, 400)
+    }
+    const { hashManagementPassword } = await import("./crypto")
+    if (
+      !body.password ||
+      hashManagementPassword(body.password) !== gate.admin.passwordHash
+    ) {
+      return c.json({ error: "invalid_password" }, 401)
+    }
+    const admin = (
+      await store.listAdmins(gate.orgId)
+    ).find((a) => a.id === gate.admin.id)
+    if (admin?.totpEnabled && admin.totpSecret) {
+      const { verifyTotp } = await import("./totp")
+      if (!verifyTotp(admin.totpSecret, body.code || "")) {
+        return c.json({ error: "mfa_invalid" }, 401)
+      }
+    }
+    await store.setAdminTotp(gate.orgId, gate.admin.id, {
+      totpEnabled: false,
+      totpSecret: null,
+      totpPendingSecret: null
+    })
+    await store.appendAdminAudit({
+      orgId: gate.orgId,
+      adminId: gate.admin.id,
+      adminEmail: gate.admin.email,
+      adminLabel: gate.admin.label,
+      action: "mfa_disable",
+      detail: "MFA TOTP désactivé"
+    })
+    return c.json({ ok: true, mfa_enabled: false })
+  })
+
+  /** Fondations SSO OIDC (V2 P1) — statut + URL authorize si configuré */
+  v1.get("/auth/oidc/status", async (c) => {
+    const issuer = process.env.OPSGATE_OIDC_ISSUER?.trim()
+    const clientId = process.env.OPSGATE_OIDC_CLIENT_ID?.trim()
+    const enabled = !!(issuer && clientId)
+    return c.json({
+      enabled,
+      issuer: enabled ? issuer : null,
+      client_id: enabled ? clientId : null,
+      scopes: "openid profile email",
+      note: enabled
+        ? "OIDC configuré côté serveur. Flow authorize à brancher sur le provider."
+        : "Définir OPSGATE_OIDC_ISSUER + OPSGATE_OIDC_CLIENT_ID (+ SECRET) pour activer."
     })
   })
 

@@ -267,6 +267,9 @@ function rowAdmin(r: pg.QueryResultRow): OrgAdmin {
     mustChangePassword: !!r.must_change_password,
     failedLoginCount: Number(r.failed_login_count) || 0,
     lockedAt: r.locked_at ? new Date(r.locked_at).toISOString() : null,
+    totpEnabled: !!r.totp_enabled,
+    totpSecret: r.totp_secret ?? null,
+    totpPendingSecret: r.totp_pending_secret ?? null,
     createdAt: new Date(r.created_at).toISOString(),
     updatedAt: new Date(r.updated_at).toISOString()
   }
@@ -391,6 +394,9 @@ export class PgStore implements OpsGateStore {
       `ALTER TABLE agents ADD COLUMN IF NOT EXISTS maintenance_note TEXT`,
       `ALTER TABLE org_admins ADD COLUMN IF NOT EXISTS failed_login_count INT NOT NULL DEFAULT 0`,
       `ALTER TABLE org_admins ADD COLUMN IF NOT EXISTS locked_at TIMESTAMPTZ`,
+      `ALTER TABLE org_admins ADD COLUMN IF NOT EXISTS totp_enabled BOOLEAN NOT NULL DEFAULT FALSE`,
+      `ALTER TABLE org_admins ADD COLUMN IF NOT EXISTS totp_secret TEXT`,
+      `ALTER TABLE org_admins ADD COLUMN IF NOT EXISTS totp_pending_secret TEXT`,
       `CREATE TABLE IF NOT EXISTS issued_licenses (
         id TEXT PRIMARY KEY,
         license_key TEXT NOT NULL UNIQUE,
@@ -1495,10 +1501,42 @@ export class PgStore implements OpsGateStore {
   /** Idle serveur 10 min sans heartbeat — évite lockout si onglet fermé sans logout. */
   private static readonly SESSION_IDLE_MS = 10 * 60 * 1000
 
+  async setAdminTotp(
+    orgId: string,
+    adminId: string,
+    fields: {
+      totpEnabled?: boolean
+      totpSecret?: string | null
+      totpPendingSecret?: string | null
+    }
+  ) {
+    const sets: string[] = [`updated_at = NOW()`]
+    const vals: unknown[] = [orgId, adminId]
+    let i = 3
+    if (fields.totpEnabled !== undefined) {
+      sets.push(`totp_enabled = $${i++}`)
+      vals.push(!!fields.totpEnabled)
+    }
+    if (fields.totpSecret !== undefined) {
+      sets.push(`totp_secret = $${i++}`)
+      vals.push(fields.totpSecret)
+    }
+    if (fields.totpPendingSecret !== undefined) {
+      sets.push(`totp_pending_secret = $${i++}`)
+      vals.push(fields.totpPendingSecret)
+    }
+    const { rows } = await this.pool.query(
+      `UPDATE org_admins SET ${sets.join(", ")}
+       WHERE org_id = $1 AND id = $2 RETURNING *`,
+      vals
+    )
+    return rows[0] ? rowAdmin(rows[0]) : undefined
+  }
+
   async createAdminSession(
     email: string,
     password: string,
-    opts?: { force?: boolean }
+    opts?: { force?: boolean; totpCode?: string }
   ) {
     const emailNorm = email.trim().toLowerCase()
     const hash = hashManagementPassword(password)
@@ -1524,6 +1562,14 @@ export class PgStore implements OpsGateStore {
     }
     if (!admin.isPrincipal && !admin.permissions.includes("console_access")) {
       return { ok: false as const, error: "no_console_access" }
+    }
+    if (admin.totpEnabled && admin.totpSecret) {
+      const code = (opts?.totpCode || "").trim()
+      if (!code) return { ok: false as const, error: "mfa_required" }
+      const { verifyTotp } = await import("./totp")
+      if (!verifyTotp(admin.totpSecret, code)) {
+        return { ok: false as const, error: "mfa_invalid" }
+      }
     }
     // Succès : reset compteur échecs
     await this.clearAdminLoginFailures(admin.id)

@@ -173,6 +173,20 @@ export interface OrgMonitoringSettings {
    * format rfc5424 (défaut) ou cef (ArcSight/Splunk).
    */
   siem?: OrgSiEmSettings
+  /**
+   * Quotas multi-tenant (V2 P1).
+   * maxEventsPerDay : 0 = illimité.
+   */
+  quotas?: OrgQuotaSettings
+}
+
+export interface OrgQuotaSettings {
+  /** Max detection events acceptés / jour UTC (0 = off) */
+  maxEventsPerDay: number
+}
+
+export const DEFAULT_QUOTA_SETTINGS: OrgQuotaSettings = {
+  maxEventsPerDay: 0
 }
 
 /** Forward Syslog / SIEM (par org) */
@@ -289,7 +303,8 @@ export const DEFAULT_MONITORING_SETTINGS: OrgMonitoringSettings = {
     /** enforce = le proxy coupe les flux medium/high (filtre, y compris uploads textuels) */
     mode: "enforce"
   },
-  siem: { ...DEFAULT_SIEM_SETTINGS }
+  siem: { ...DEFAULT_SIEM_SETTINGS },
+  quotas: { ...DEFAULT_QUOTA_SETTINGS }
 }
 
 export function mergeMonitoringSettings(
@@ -415,6 +430,15 @@ export function mergeMonitoringSettings(
           : base.siem?.appName || "OpsGate"
     }
   }
+  if (partial.quotas && typeof partial.quotas === "object") {
+    const q = partial.quotas
+    base.quotas = {
+      maxEventsPerDay:
+        typeof q.maxEventsPerDay === "number" && q.maxEventsPerDay >= 0
+          ? Math.floor(q.maxEventsPerDay)
+          : base.quotas?.maxEventsPerDay ?? 0
+    }
+  }
   if (partial.schedule && typeof partial.schedule === "object") {
     base.schedule = {
       ...DEFAULT_MONITORING_SETTINGS.schedule,
@@ -506,6 +530,12 @@ export interface OrgAdmin {
   failedLoginCount?: number
   /** Verrouillage après seuil d’échecs (ISO) — null = non verrouillé */
   lockedAt?: string | null
+  /** MFA TOTP activé (V2 P1) */
+  totpEnabled?: boolean
+  /** Secret base32 (stocké côté serveur — protéger la DB) */
+  totpSecret?: string | null
+  /** Secret en attente de confirmation (setup) */
+  totpPendingSecret?: string | null
 }
 
 export interface AdminSession {
@@ -787,6 +817,8 @@ export type AdminAuditAction =
   | "org_settings_update"
   | "agent_merge"
   | "report_export"
+  | "mfa_enable"
+  | "mfa_disable"
   | "recovery_info_view"
   | "recovery_codes_generated"
   | "recovery_code_consumed"
