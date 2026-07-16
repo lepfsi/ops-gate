@@ -1,27 +1,20 @@
 /**
  * Envoi d’e-mails transactionnels OpsGate (SMTP réel).
  *
- * Modèle produit :
- *   - **Par défaut (SaaS DailyOps)** : le control plane est pré-configuré via
- *     OPSGATE_SMTP_* avec expéditeur `OpsGate <noreply@dailyops.tech>`.
- *     Le client n’a rien à renseigner pour recevoir les OTP.
- *   - **Option client** : Paramètres → E-mail / SMTP (host/user/pass).
- *     From optionnel → retombe sur noreply@dailyops.tech ; pour un bon
- *     deliverability en SMTP d’entreprise, le client met son domaine
- *     (sinon SPF/DKIM risquent de rejeter dailyops.tech depuis leur relais).
+ * Modèle simple :
+ *   Le client configure SON SMTP dans la console
+ *   (Paramètres → E-mail / SMTP : host, port, user, pass, From).
  *
- * Priorité config :
- *   1. Org SMTP (console) si enabled + host
- *   2. Env OPSGATE_SMTP_* / SMTP_*
+ * Repli ops (optionnel) : variables OPSGATE_SMTP_* / SMTP_* sur le serveur
+ * si aucune config org n’est active (lab / install sans UI encore faite).
  */
 import nodemailer from "nodemailer"
 import type { Transporter } from "nodemailer"
 
 import type { OrgSmtpSettings } from "./types"
 
-/** Expéditeur produit DailyOps (défaut plateforme) */
-export const OPSGATE_DEFAULT_FROM =
-  "OpsGate <noreply@dailyops.tech>"
+/** Fallback From uniquement si ni org ni env ne le définissent */
+export const OPSGATE_DEFAULT_FROM = "OpsGate <noreply@localhost>"
 
 export type MailDelivery = "smtp" | "log" | "failed" | "disabled"
 
@@ -90,8 +83,14 @@ export function smtpFromOrg(
   const host = (smtp.host || "").trim()
   if (!host) return null
   const port = Number(smtp.port) || 587
-  // From optionnel côté client → défaut plateforme DailyOps
-  const from = (smtp.from || "").trim() || OPSGATE_DEFAULT_FROM
+  // From : celui saisi en console ; sinon user@host approximatif ; sinon fallback local
+  let from = (smtp.from || "").trim()
+  if (!from) {
+    const u = (smtp.user || "").trim()
+    from = u.includes("@")
+      ? `OpsGate <${u}>`
+      : OPSGATE_DEFAULT_FROM
+  }
   return {
     host,
     port,
@@ -146,14 +145,11 @@ export function getMailStatus(
     source: cfg?.source || null,
     host: cfg?.host || null,
     port: cfg ? cfg.port : null,
-    from: cfg?.from || OPSGATE_DEFAULT_FROM,
-    default_from: OPSGATE_DEFAULT_FROM,
+    from: cfg?.from || null,
     auth: !!(cfg?.user),
     org_enabled: !!orgSmtp?.enabled,
     org_host: orgSmtp?.host || "",
     env_configured: !!envCfg,
-    /** true = le plan utilise déjà le SMTP DailyOps (env), client n’a rien à faire */
-    platform_default: !!envCfg && !orgCfg,
     dev_otp_exposed: shouldExposeDevOtp(orgSmtp, e),
     mode: cfg ? ("smtp" as const) : ("log" as const),
     org_ready: !!orgCfg
@@ -168,9 +164,7 @@ export function publicSmtpView(smtp?: OrgSmtpSettings | null) {
     port: s?.port || 587,
     secure: !!s?.secure,
     user: s?.user || "",
-    /** vide en base = UI affiche le défaut plateforme */
     from: s?.from || "",
-    default_from: OPSGATE_DEFAULT_FROM,
     tlsInsecure: !!s?.tlsInsecure,
     password_set: !!(s?.password && s.password.length > 0)
   }

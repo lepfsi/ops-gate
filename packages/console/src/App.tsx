@@ -2306,9 +2306,7 @@ function SystemSettingsView({
           const ms = await api.mailStatus()
           setSmtpStatusLine(
             ms.configured
-              ? ms.platform_default
-                ? `${t("mail.configured")} · ${t("mail.envFallback")} · From ${ms.from || "noreply@dailyops.tech"}`
-                : `${t("mail.configured")} · ${t("mail.source")}: ${ms.source || "—"} · ${ms.host || ""}:${ms.port || ""} · From ${ms.from || ""}`
+              ? `${t("mail.configured")} · ${ms.host || ""}:${ms.port || ""} · ${ms.from || ""}`
               : t("mail.notConfigured")
           )
           if (ms.smtp) {
@@ -3286,18 +3284,6 @@ function SystemSettingsView({
             <p className="muted" style={{ fontSize: 12, margin: 0 }}>
               {t("mail.help")}
             </p>
-            <p
-              className="muted"
-              style={{
-                fontSize: 12,
-                margin: 0,
-                padding: "8px 10px",
-                background: "var(--surface-2)",
-                borderRadius: 6,
-                border: "1px solid var(--line)"
-              }}>
-              {t("mail.platformHint")}
-            </p>
             {smtpStatusLine && (
               <p style={{ fontSize: 13, margin: 0 }}>
                 <strong>{t("mail.status")} :</strong> {smtpStatusLine}
@@ -3379,7 +3365,7 @@ function SystemSettingsView({
               className="input"
               value={smtpFrom}
               onChange={(e) => setSmtpFrom(e.target.value)}
-              placeholder="OpsGate <noreply@dailyops.tech>"
+              placeholder="OpsGate <noreply@votre-domaine.com>"
               disabled={!smtpOn}
             />
             <p className="muted" style={{ fontSize: 11, margin: 0 }}>
@@ -3418,7 +3404,7 @@ function SystemSettingsView({
                     setSmtpPwdSet(!!r.smtp.password_set)
                     setSmtpStatusLine(
                       r.status.configured
-                        ? `${t("mail.configured")} · ${t("mail.source")}: ${r.status.source || "—"} · ${r.status.host || ""}`
+                        ? `${t("mail.configured")} · ${r.status.host || ""} · ${smtpFrom.trim() || "—"}`
                         : t("mail.notConfigured")
                     )
                     setInfo(t("mail.save") + " OK")
