@@ -10,43 +10,58 @@ Remplacer le mode « OTP affiché en log / dev » par un **vrai envoi SMTP** pou
 
 La MFA TOTP (Authenticator) reste **dans l’app** (pas d’e-mail) — c’est un second facteur hors bande e-mail.
 
-## Configuration (2 façons)
+## Modèle produit (important)
 
-### A. Console (recommandé pour le client / admin principal)
+| Mode | Qui configure | Expéditeur (From) |
+|------|----------------|-------------------|
+| **SaaS / control plane DailyOps** | **Vous** (env serveur) une fois pour toutes | `OpsGate <noreply@dailyops.tech>` |
+| **Client final** | **Rien** en général | Reçoit déjà les mails OpsGate |
+| **Option client** (on-prem / politique « mon SMTP ») | Client : host / user / pass | **Optionnel** ; vide = `noreply@dailyops.tech`. Mieux : adresse **du domaine client** (SPF/DKIM) |
+
+**Règle SPF/DKIM** : si le client envoie via *son* serveur SMTP avec From `noreply@dailyops.tech`, beaucoup de boîtes rejeteront le mail. D’où : From optionnel en UI, mais recommandé = domaine client dès qu’il active « mon SMTP ».
+
+## Configuration
+
+### A. Arrière-plan DailyOps (pré-config serveur — cas normal)
+
+Sur l’instance control plane que **vous** hébergez :
+
+```powershell
+$env:OPSGATE_SMTP_HOST = "smtp.votrefournisseur.com"
+$env:OPSGATE_SMTP_PORT = "587"
+$env:OPSGATE_SMTP_USER = "noreply@dailyops.tech"
+$env:OPSGATE_SMTP_PASS = "********"
+$env:OPSGATE_SMTP_FROM = "OpsGate <noreply@dailyops.tech>"
+```
+
+Le client **n’a pas besoin** de toucher Paramètres → SMTP pour que les OTP partent.
+
+### B. Console client (optionnel)
 
 **Paramètres système → E-mail / SMTP**
 
-1. Cocher **Activer SMTP**  
-2. Host, port (587 ou 465), utilisateur, mot de passe, From  
-3. **Enregistrer SMTP**  
-4. **Tester la connexion** / **Tester + envoyer un e-mail**  
+1. Cocher **Utiliser mon propre serveur SMTP** (seulement si besoin)  
+2. Host, port, utilisateur, mot de passe  
+3. **From optionnel** (vide = `noreply@dailyops.tech`)  
+4. **Enregistrer** → **Tester**  
 
-Prioritaire sur les variables d’environnement si `enabled` + host renseignés.  
-Le mot de passe n’est **jamais** renvoyé en lecture (comme le bind LDAP).
+Prioritaire sur l’env si `enabled` + host.  
+Mot de passe jamais renvoyé en lecture.
 
-### B. Variables d’environnement (serveur / Docker)
+### Détail variables d’environnement
 
 | Variable | Exemple | Rôle |
 |----------|---------|------|
-| `OPSGATE_SMTP_HOST` | `smtp.office365.com` | Serveur SMTP |
-| `OPSGATE_SMTP_PORT` | `587` | Port (587 STARTTLS, 465 TLS) |
-| `OPSGATE_SMTP_SECURE` | `1` | Forcer TLS (typ. 465) |
-| `OPSGATE_SMTP_USER` | `noreply@…` | Auth |
-| `OPSGATE_SMTP_PASS` | `…` | Mot de passe / app password |
-| `OPSGATE_SMTP_FROM` | `OpsGate <noreply@dailyops.tech>` | Expéditeur |
-| `OPSGATE_SMTP_TLS_REJECT` | `0` | Lab : cert self-signed |
-| `OPSGATE_MAIL_DEV_OTP` | `1` | **Lab** : OTP dans la réponse JSON |
+| `OPSGATE_SMTP_HOST` | `smtp.…` | Serveur SMTP DailyOps |
+| `OPSGATE_SMTP_PORT` | `587` | Port |
+| `OPSGATE_SMTP_SECURE` | `1` | TLS implicite (465) |
+| `OPSGATE_SMTP_USER` | `noreply@dailyops.tech` | Auth |
+| `OPSGATE_SMTP_PASS` | `…` | Secret |
+| `OPSGATE_SMTP_FROM` | `OpsGate <noreply@dailyops.tech>` | Expéditeur (défaut code si absent) |
+| `OPSGATE_SMTP_TLS_REJECT` | `0` | Lab self-signed |
+| `OPSGATE_MAIL_DEV_OTP` | `1` | Lab : OTP dans la réponse JSON |
 
 Alias : `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM`.
-
-```powershell
-$env:OPSGATE_SMTP_HOST = "smtp.office365.com"
-$env:OPSGATE_SMTP_PORT = "587"
-$env:OPSGATE_SMTP_USER = "noreply@votre-domaine.com"
-$env:OPSGATE_SMTP_PASS = "********"
-$env:OPSGATE_SMTP_FROM = "OpsGate <noreply@votre-domaine.com>"
-pnpm api:dev
-```
 
 ### Lab sans SMTP (MailHog / log)
 

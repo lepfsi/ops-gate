@@ -191,7 +191,7 @@ export interface OrgMonitoringSettings {
   smtp?: OrgSmtpSettings
 }
 
-/** Config SMTP org (console Paramètres → E-mail / SMTP) */
+/** Config SMTP org (console Paramètres → E-mail / SMTP) — optionnel si SaaS DailyOps */
 export interface OrgSmtpSettings {
   enabled: boolean
   host: string
@@ -201,7 +201,10 @@ export interface OrgSmtpSettings {
   user: string
   /** stocké en monitoring_json ; jamais exposé en GET */
   password?: string
-  /** ex. OpsGate <noreply@entreprise.com> */
+  /**
+   * Expéditeur. Vide = `OpsGate <noreply@dailyops.tech>` (plateforme).
+   * En SMTP d’entreprise, préférer une adresse du domaine client (SPF/DKIM).
+   */
   from: string
   /** lab : accepter certificat auto-signé */
   tlsInsecure?: boolean
