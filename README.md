@@ -58,6 +58,15 @@ pnpm store:chrome
 
 Voir [`docs/architecture/CHROME-WEB-STORE-MDM.md`](docs/architecture/CHROME-WEB-STORE-MDM.md).
 
+### Firefox AMO + enterprise
+
+```bash
+pnpm store:firefox
+# → dist/firefox-amo/opsgate-*-firefox.zip + policies.json template
+```
+
+Voir [`docs/architecture/FIREFOX-AMO.md`](docs/architecture/FIREFOX-AMO.md).
+
 > Ne chargez **pas** la racine du repo.
 
 Hot reload :

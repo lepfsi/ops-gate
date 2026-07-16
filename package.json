@@ -15,6 +15,7 @@
     "package:chrome": "plasmo package --target=chrome-mv3",
     "package:firefox": "plasmo package --target=firefox-mv3",
     "store:chrome": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-chrome-store.ps1",
+    "store:firefox": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-firefox-amo.ps1",
     "build:load": "plasmo build",
     "build:all": "plasmo build --target=chrome-mv3 && plasmo build --target=firefox-mv3",
     "test:rules": "node scripts/test-detection.mjs",

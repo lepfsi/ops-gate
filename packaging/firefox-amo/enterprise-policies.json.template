@@ -1,0 +1,22 @@
+{
+  "policies": {
+    "ExtensionSettings": {
+      "opsgate@dailyops.local": {
+        "installation_mode": "force_installed",
+        "install_url": "https://extensions.corp.example/opsgate/opsgate-latest.xpi"
+      },
+      "*": {
+        "installation_mode": "blocked",
+        "blocked_install_message": "Only OpsGate is allowed by IT policy."
+      }
+    },
+    "Extensions": {
+      "Install": [
+        "https://extensions.corp.example/opsgate/opsgate-latest.xpi"
+      ],
+      "Locked": [
+        "opsgate@dailyops.local"
+      ]
+    }
+  }
+}

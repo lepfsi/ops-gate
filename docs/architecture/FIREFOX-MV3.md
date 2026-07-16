@@ -34,12 +34,15 @@ pnpm dev:firefox
 
 > Temporary add-on : se décharge au redémarrage de Firefox. Pour la prod : package signé AMO / politique entreprise.
 
-## Package (.zip)
+## Package (.zip) / AMO
 
 ```powershell
-pnpm package:firefox
-# Artefact sous build/ (selon Plasmo)
+pnpm package:firefox          # plasmo zip
+pnpm store:firefox            # AMO ZIP + listing + enterprise templates
+# → dist/firefox-amo/opsgate-*-firefox.zip
 ```
+
+Publication AMO + force-install : [`FIREFOX-AMO.md`](./FIREFOX-AMO.md).
 
 ## Différences Chrome vs Firefox
 
