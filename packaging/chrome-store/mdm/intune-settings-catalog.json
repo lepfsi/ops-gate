@@ -1,0 +1,25 @@
+{
+  "$schema": "https://schema.opsgate.local/intune-chrome-extension-hint",
+  "description": "Microsoft Intune — Settings catalog Chrome (Administrative Templates). Values are examples; replace EXTENSION_ID after CWS publish.",
+  "platform": "Windows 10 and later",
+  "profileType": "Settings catalog",
+  "settings": [
+    {
+      "name": "Configure the list of force-installed apps and extensions",
+      "omaUri_hint": "Google Chrome > Extensions > Extension install forcelist",
+      "value": [
+        "EXTENSION_ID;https://clients2.google.com/service/update2/crx"
+      ]
+    },
+    {
+      "name": "Configure extension installation allow list (optional lockdown)",
+      "value": ["EXTENSION_ID"],
+      "note": "Pair with blocklist * only if you fully lock extension installs."
+    }
+  ],
+  "assignment": "Device groups (corp laptops) — user-less install recommended",
+  "verify": [
+    "chrome://policy — ExtensionInstallForcelist applied",
+    "chrome://extensions — OpsGate enabled, not removable by user"
+  ]
+}

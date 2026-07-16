@@ -48,7 +48,9 @@ Voir aussi `CONTROL-PLANE.md` (force-sync, profils, events).
 
 ## Ce qui n’est pas couvert (OS)
 
-- Désinstallation Chrome / suppression dossier extension (nécessite GPO / MDM / password uninstall OS)  
-- Tamper protection OS-level  
+- Désinstallation Chrome / suppression dossier extension → **couvert par MDM force-install**  
+  Voir [`CHROME-WEB-STORE-MDM.md`](./CHROME-WEB-STORE-MDM.md) (`ExtensionInstallForcelist`)  
+- Tamper protection OS-level (root / admin local)  
 
-Le modèle couvre le **tamper applicatif** (UI + storage agent), pas le root OS.
+Le modèle couvre le **tamper applicatif** (UI + storage agent).  
+Combiner avec **force-install MDM** pour empêcher le retrait de l’extension.

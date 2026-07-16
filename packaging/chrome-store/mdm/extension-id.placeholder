@@ -1,0 +1,9 @@
+# Remplacer après publication Chrome Web Store
+# Extension ID = 32 caractères [a-p] affiché dans la dev console / chrome://extensions
+EXTENSION_ID=REPLACE_WITH_CWS_EXTENSION_ID
+
+# Update URL officielle Chrome Web Store (force-install)
+UPDATE_URL=https://clients2.google.com/service/update2/crx
+
+# Format policy (une entrée) :
+# ${EXTENSION_ID};${UPDATE_URL}

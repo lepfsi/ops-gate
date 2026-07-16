@@ -49,6 +49,15 @@ pnpm build:firefox
 
 Doc détaillée : [`docs/architecture/FIREFOX-MV3.md`](docs/architecture/FIREFOX-MV3.md)
 
+### Chrome Web Store + MDM
+
+```bash
+pnpm store:chrome
+# → dist/chrome-store/opsgate-*-chrome.zip + policies MDM
+```
+
+Voir [`docs/architecture/CHROME-WEB-STORE-MDM.md`](docs/architecture/CHROME-WEB-STORE-MDM.md).
+
 > Ne chargez **pas** la racine du repo.
 
 Hot reload :

@@ -1,0 +1,7 @@
+Windows Registry Editor Version 5.00
+
+; OpsGate — force-install Microsoft Edge (Chromium)
+; Remplacer EXTENSION_ID (Edge Add-ons ID ou même package Chromium selon déploiement)
+
+[HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Microsoft\Edge\ExtensionInstallForcelist]
+"1"="EXTENSION_ID;https://edge.microsoft.com/extensionwebstorebase/v1/crx"

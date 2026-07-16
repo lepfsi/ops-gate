@@ -1,7 +1,7 @@
 # OpsGate — Confidentialité (utilisateurs finaux)
 
-**Version produit** : 1.1.0  
-**Dernière mise à jour** : 11 juillet 2026
+**Version produit** : 1.2.0  
+**Dernière mise à jour** : 16 juillet 2026
 
 ## En une phrase
 
@@ -41,6 +41,17 @@ Vous pouvez **quitter l’org** dans Options → retour au mode local.
 - Extension : navigateur local  
 - Control plane (optionnel) : base Postgres (UE recommandée) — rétention indicative 90 jours  
 
+## Permissions navigateur (Chrome / Firefox)
+
+| Permission | Usage |
+|------------|--------|
+| `storage` | Journal local, token d’enrôlement, cache de policy |
+| `alarms` | Synchronisation périodique de la policy (mode org) |
+| Accès sites IA | Injection du content script uniquement sur les domaines IA listés |
+
+Aucun accès permanent à l’historique de navigation hors sites IA déclarés.
+
 ## Contact
 
-Questions privacy : votre administrateur OpsGate / IT.
+Questions privacy : votre administrateur OpsGate / IT.  
+Pour le Chrome Web Store : héberger ce document en HTTPS public (URL privacy policy).
