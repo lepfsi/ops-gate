@@ -154,6 +154,7 @@ export interface OpsGateStore {
     contactEmail: string
     seats: number
     expiresAt: string
+    kind?: import("./license-keys").LicenseKind
   }): Promise<{ licenseKey: string; payload: import("./license-keys").IssuedLicensePayload }>
 
   lookupIssuedLicense(
@@ -253,7 +254,12 @@ export interface OpsGateStore {
   createAdminSession(
     email: string,
     password: string,
-    opts?: { force?: boolean; totpCode?: string }
+    opts?: {
+      force?: boolean
+      totpCode?: string
+      orgId?: string
+      orgCode?: string
+    }
   ): Promise<
     | {
         ok: true
@@ -261,7 +267,11 @@ export interface OpsGateStore {
         admin: OrgAdmin
         forced?: boolean
       }
-    | { ok: false; error: string }
+    | {
+        ok: false
+        error: string
+        orgs?: Array<{ org_id: string; org_code: string; name: string }>
+      }
   >
   /**
    * Login console via SSO OIDC (email claim IdP → admin existant).

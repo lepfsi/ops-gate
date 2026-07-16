@@ -238,20 +238,22 @@ export async function sendMail(opts: {
   }
 }
 
-function plainToHtml(text: string): string {
-  const esc = text
+function escHtml(s: string): string {
+  return String(s)
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
-  return `<pre style="font-family:Segoe UI,Arial,sans-serif;font-size:14px;line-height:1.5;color:#0f172a;white-space:pre-wrap">${esc}</pre>`
 }
 
-function otpHtml(opts: {
+/** Enveloppe brandée commune à TOUS les e-mails OpsGate */
+export function brandedEmailHtml(opts: {
   title: string
-  otp: string
-  minutes: number
-  footer?: string
+  bodyHtml: string
+  footerNote?: string
 }): string {
+  const foot =
+    opts.footerNote ||
+    "Message automatique OpsGate · DailyOps.Tech · ne pas répondre"
   return `<!DOCTYPE html>
 <html><body style="margin:0;padding:0;background:#f1f5f9;font-family:Segoe UI,Arial,sans-serif">
   <table width="100%" cellpadding="0" cellspacing="0" style="padding:32px 12px">
@@ -261,21 +263,41 @@ function otpHtml(opts: {
         <tr><td style="color:#94a3b8;font-size:12px">DailyOps.Tech</td></tr>
       </table>
       <table width="480" style="background:#ffffff;border-radius:0 0 12px 12px;padding:24px;border:1px solid #e2e8f0;border-top:0">
-        <tr><td style="color:#0f172a;font-size:16px;font-weight:600;padding-bottom:12px">${opts.title}</td></tr>
-        <tr><td style="color:#334155;font-size:14px;padding-bottom:16px">Utilisez ce code à usage unique :</td></tr>
-        <tr><td align="center" style="padding:16px 0">
-          <span style="display:inline-block;letter-spacing:6px;font-size:28px;font-weight:700;color:#0A1128;background:#E6FAF7;padding:12px 20px;border-radius:8px;border:1px solid #2BD9C5">${opts.otp}</span>
-        </td></tr>
-        <tr><td style="color:#64748b;font-size:13px;padding-top:8px">Valable ${opts.minutes} minutes. Ne le partagez à personne.</td></tr>
-        ${
-          opts.footer
-            ? `<tr><td style="color:#94a3b8;font-size:12px;padding-top:16px">${opts.footer}</td></tr>`
-            : ""
-        }
+        <tr><td style="color:#0f172a;font-size:16px;font-weight:600;padding-bottom:14px">${escHtml(opts.title)}</td></tr>
+        <tr><td style="color:#334155;font-size:14px;line-height:1.55">${opts.bodyHtml}</td></tr>
+        <tr><td style="color:#94a3b8;font-size:11px;padding-top:20px;border-top:1px solid #e2e8f0;margin-top:16px">${escHtml(foot)}</td></tr>
       </table>
     </td></tr>
   </table>
 </body></html>`
+}
+
+function plainToHtml(text: string): string {
+  const esc = escHtml(text).replace(/\n/g, "<br/>")
+  return brandedEmailHtml({
+    title: "OpsGate",
+    bodyHtml: `<div style="white-space:pre-wrap">${esc}</div>`
+  })
+}
+
+function otpHtml(opts: {
+  title: string
+  otp: string
+  minutes: number
+  footer?: string
+}): string {
+  const body = `
+        <p style="margin:0 0 12px">Utilisez ce code à usage unique :</p>
+        <p style="text-align:center;margin:16px 0">
+          <span style="display:inline-block;letter-spacing:6px;font-size:28px;font-weight:700;color:#0A1128;background:#E6FAF7;padding:12px 20px;border-radius:8px;border:1px solid #2BD9C5">${escHtml(opts.otp)}</span>
+        </p>
+        <p style="color:#64748b;font-size:13px;margin:8px 0 0">Valable ${opts.minutes} minutes. Ne le partagez à personne.</p>
+        <p style="color:#64748b;font-size:13px;margin:16px 0 0;padding:12px;background:#f8fafc;border-radius:6px;border-left:3px solid #2BD9C5">
+          <strong>Sécurité :</strong> si vous n'êtes pas à l'origine de cette demande, ignorez cet e-mail.
+          Votre mot de passe reste inchangé tant que le code n'est pas utilisé.
+        </p>
+        ${opts.footer ? `<p style="color:#94a3b8;font-size:12px;margin-top:16px">${escHtml(opts.footer)}</p>` : ""}`
+  return brandedEmailHtml({ title: opts.title, bodyHtml: body })
 }
 
 /** OTP réinitialisation mot de passe administrateur */
@@ -295,7 +317,9 @@ export async function sendPasswordResetOtpEmail(opts: {
     `Votre code OTP : ${opts.otp}`,
     `Valable ${minutes} minutes.`,
     "",
-    "Si vous n'êtes pas à l'origine de cette demande, ignorez cet e-mail.",
+    "SÉCURITÉ : si vous n'êtes pas à l'origine de cette demande, ignorez cet e-mail.",
+    "Votre mot de passe reste inchangé tant que le code n'est pas utilisé.",
+    "",
     "— DailyOps.Tech / OpsGate"
   ]
     .filter(Boolean)
@@ -356,7 +380,7 @@ export async function sendPasswordChangedNotice(opts: {
   byEmail?: string
   smtp?: OrgSmtpSettings | null
 }): Promise<SendMailResult> {
-  const subject = "OpsGate — mot de passe réinitialisé"
+  const subject = "OpsGate — notification de sécurité"
   const text = [
     "OpsGate — notification de sécurité",
     "",
@@ -364,13 +388,31 @@ export async function sendPasswordChangedNotice(opts: {
     opts.byEmail ? `Par : ${opts.byEmail}` : "",
     "Vous devrez le changer à la prochaine connexion.",
     "",
-    "Si vous n'êtes pas à l'origine de cette action, contactez votre administrateur principal.",
+    "SÉCURITÉ : si vous n'êtes pas à l'origine de cette action, contactez immédiatement un administrateur principal et changez vos mots de passe.",
+    "",
     "— DailyOps.Tech / OpsGate"
   ]
     .filter(Boolean)
     .join("\n")
 
-  return sendMail({ to: opts.to, subject, text, smtp: opts.smtp })
+  const bodyHtml = `
+    <p style="margin:0 0 12px">Le mot de passe du compte${opts.adminLabel ? ` <strong>${escHtml(opts.adminLabel)}</strong>` : ""} a été réinitialisé.</p>
+    ${opts.byEmail ? `<p style="margin:0 0 12px">Action effectuée par : <code>${escHtml(opts.byEmail)}</code></p>` : ""}
+    <p style="margin:0 0 12px">Vous devrez le changer à la prochaine connexion.</p>
+    <p style="color:#64748b;font-size:13px;margin:16px 0 0;padding:12px;background:#fef2f2;border-radius:6px;border-left:3px solid #ef4444">
+      <strong>Sécurité :</strong> si vous n'êtes pas à l'origine de cette action, contactez immédiatement un administrateur principal.
+    </p>`
+
+  return sendMail({
+    to: opts.to,
+    subject,
+    text,
+    html: brandedEmailHtml({
+      title: "Notification de sécurité",
+      bodyHtml
+    }),
+    smtp: opts.smtp
+  })
 }
 
 /** Test SMTP (health / admin) */

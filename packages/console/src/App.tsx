@@ -48,8 +48,18 @@ const ALL_PERMS: AdminPermission[] = [
   "unenroll_agents",
   "manage_admins",
   "manage_policies",
-  "manage_users"
+  "manage_users",
+  "email_password_reset"
 ]
+
+const PERM_LABELS: Record<AdminPermission, string> = {
+  console_access: "Accès console",
+  unenroll_agents: "Désenrôler agents",
+  manage_admins: "Gérer admins",
+  manage_policies: "Policies / packs",
+  manage_users: "Users / groupes / sièges agents",
+  email_password_reset: "Réinit. mdp par e-mail (self)"
+}
 
 export default function App() {
   const [sessionAdmin, setSessionAdmin] = useState<AdminRow | null>(null)
@@ -3816,6 +3826,11 @@ function LoginScreen({
   const [otpNew, setOtpNew] = useState("")
   const [devOtp, setDevOtp] = useState<string | null>(null)
   const [advanced, setAdvanced] = useState(false)
+  /** Multi-tenant : choix d’org si le même email existe sur plusieurs orgs */
+  const [orgChoices, setOrgChoices] = useState<
+    Array<{ org_id: string; org_code: string; name: string }>
+  >([])
+  const [selectedOrgId, setSelectedOrgId] = useState("")
 
   useEffect(() => {
     void (async () => {
@@ -3831,6 +3846,22 @@ function LoginScreen({
       }
     })()
   }, [apiBase])
+
+  async function doLogin(force: boolean, orgId?: string) {
+    setApiBase(apiBase)
+    const r = await api.login(
+      email,
+      password,
+      force,
+      totp || undefined,
+      orgId ? { org_id: orgId } : undefined
+    )
+    setToken(r.token)
+    setNeedMfa(false)
+    setOrgChoices([])
+    setSelectedOrgId("")
+    onLoggedIn(r.admin)
+  }
 
   // Erreurs SSO renvoyées en fragment après callback IdP
   useEffect(() => {
@@ -3993,32 +4024,64 @@ function LoginScreen({
                 />
               </>
             )}
+            {orgChoices.length > 0 && (
+              <>
+                <label className="field-label">Organisation</label>
+                <select
+                  className="input"
+                  value={selectedOrgId}
+                  onChange={(e) => setSelectedOrgId(e.target.value)}>
+                  <option value="">— Choisir —</option>
+                  {orgChoices.map((o) => (
+                    <option key={o.org_id} value={o.org_id}>
+                      {o.name} ({o.org_code})
+                    </option>
+                  ))}
+                </select>
+                <p className="muted" style={{ fontSize: 12 }}>
+                  Cet e-mail est admin de plusieurs organisations.
+                </p>
+              </>
+            )}
             <button
               className="btn"
               type="button"
               style={{ marginTop: 12, width: "100%" }}
-              disabled={busy}
+              disabled={busy || (orgChoices.length > 0 && !selectedOrgId)}
               onClick={async () => {
                 setBusy(true)
                 setErr(null)
                 setCanForce(false)
                 try {
-                  setApiBase(apiBase)
-                  const r = await api.login(
-                    email,
-                    password,
+                  await doLogin(
                     false,
-                    totp || undefined
+                    selectedOrgId || undefined
                   )
-                  setToken(r.token)
-                  setNeedMfa(false)
-                  onLoggedIn(r.admin)
                 } catch (e) {
                   const err = e as Error & {
                     code?: string
                     remaining_attempts?: number
+                    orgs?: Array<{
+                      org_id: string
+                      org_code: string
+                      name: string
+                    }>
                   }
                   const msg = String(e)
+                  if (
+                    err.code === "org_selection_required" ||
+                    msg.includes("org_selection_required")
+                  ) {
+                    if (err.orgs?.length) {
+                      setOrgChoices(err.orgs)
+                      setSelectedOrgId(err.orgs[0]?.org_id || "")
+                      setErr(
+                        "Choisissez l’organisation pour continuer la connexion."
+                      )
+                      setBusy(false)
+                      return
+                    }
+                  }
                   if (
                     err.code === "sso_required" ||
                     msg.includes("sso_required")
@@ -5732,7 +5795,7 @@ function PeopleView({
                   checked={admPerms.includes(p)}
                   onChange={() => togglePerm(p)}
                 />
-                {p}
+                {PERM_LABELS[p] || p}
               </label>
             ))}
           </div>
@@ -6079,7 +6142,8 @@ function PeopleView({
         </div>
       </div>
 
-      <>
+      {(isPrincipal ||
+        sessionAdmin.permissions?.includes("email_password_reset")) && (
           <div className="card">
             <h2>OTP — mon compte</h2>
             <p className="muted" style={{ fontSize: 13 }}>
@@ -6149,6 +6213,7 @@ function PeopleView({
               </button>
             </div>
           </div>
+      )}
 
       {isPrincipal && (
           <div className="card">
@@ -6399,7 +6464,6 @@ function PeopleView({
             )}
           </div>
       )}
-      </>
     </>
   )
 }

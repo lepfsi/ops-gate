@@ -58,6 +58,7 @@ async function request<T>(
         message?: string
         details?: string[]
         remaining_attempts?: number
+        orgs?: Array<{ org_id: string; org_code: string; name: string }>
       }) || {}
     // Préférer le message humain (ex. e-mail déjà inscrit)
     const msg = err.message
@@ -68,11 +69,13 @@ async function request<T>(
     const e = new Error(msg) as Error & {
       code?: string
       remaining_attempts?: number
+      orgs?: Array<{ org_id: string; org_code: string; name: string }>
     }
     e.code = err.error
     if (typeof err.remaining_attempts === "number") {
       e.remaining_attempts = err.remaining_attempts
     }
+    if (err.orgs) e.orgs = err.orgs
     throw e
   }
   return data as T
@@ -409,6 +412,7 @@ export type AdminPermission =
   | "manage_admins"
   | "manage_policies"
   | "manage_users"
+  | "email_password_reset"
 
 export type AdminRow = {
   id: string
@@ -485,7 +489,8 @@ export const api = {
     email: string,
     password: string,
     force?: boolean,
-    totpCode?: string
+    totpCode?: string,
+    org?: { org_id?: string; org_code?: string }
   ) =>
     request<{
       ok: boolean
@@ -502,7 +507,9 @@ export const api = {
         email,
         password,
         force: !!force,
-        totp_code: totpCode || undefined
+        totp_code: totpCode || undefined,
+        org_id: org?.org_id,
+        org_code: org?.org_code
       })
     }),
 

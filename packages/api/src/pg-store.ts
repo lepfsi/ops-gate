@@ -1141,6 +1141,7 @@ export class PgStore implements OpsGateStore {
     contactEmail: string
     seats: number
     expiresAt: string
+    kind?: import("./license-keys").LicenseKind
   }) {
     const {
       generateShortLicenseKey,
@@ -1158,8 +1159,13 @@ export class PgStore implements OpsGateStore {
     }
     const id = newId("lic")
     await this.pool.query(
-      `INSERT INTO issued_licenses (id, license_key, org_code, company_name, address, contact_email, seats, expires_at, issued_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+      `ALTER TABLE issued_licenses ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'full'`
+    )
+    const kind: "full" | "seat_topup" =
+      payload.kind === "seat_topup" ? "seat_topup" : "full"
+    await this.pool.query(
+      `INSERT INTO issued_licenses (id, license_key, org_code, company_name, address, contact_email, seats, expires_at, issued_at, kind)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
       [
         id,
         key,
@@ -1169,10 +1175,14 @@ export class PgStore implements OpsGateStore {
         payload.contactEmail,
         payload.seats,
         payload.expiresAt,
-        payload.issuedAt
+        payload.issuedAt,
+        kind
       ]
     )
-    return { licenseKey: key, payload }
+    return {
+      licenseKey: key,
+      payload: { ...payload, kind }
+    }
   }
 
   async lookupIssuedLicense(licenseKey: string) {
@@ -1195,7 +1205,10 @@ export class PgStore implements OpsGateStore {
       seats: Number(r.seats) || 0,
       expiresAt: new Date(r.expires_at).toISOString(),
       issuedAt: new Date(r.issued_at).toISOString(),
-      revokedAt: r.revoked_at ? new Date(r.revoked_at).toISOString() : null
+      revokedAt: r.revoked_at ? new Date(r.revoked_at).toISOString() : null,
+      kind: (r.kind === "seat_topup" ? "seat_topup" : "full") as
+        | "full"
+        | "seat_topup"
     }
   }
 
@@ -1211,6 +1224,9 @@ export class PgStore implements OpsGateStore {
   }
 
   async listIssuedLicenses() {
+    await this.pool.query(
+      `ALTER TABLE issued_licenses ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'full'`
+    )
     const { rows } = await this.pool.query(
       `SELECT * FROM issued_licenses ORDER BY issued_at DESC LIMIT 500`
     )
@@ -1225,7 +1241,10 @@ export class PgStore implements OpsGateStore {
       seats: Number(r.seats) || 0,
       expiresAt: new Date(r.expires_at).toISOString(),
       issuedAt: new Date(r.issued_at).toISOString(),
-      revokedAt: r.revoked_at ? new Date(r.revoked_at).toISOString() : null
+      revokedAt: r.revoked_at ? new Date(r.revoked_at).toISOString() : null,
+      kind: (r.kind === "seat_topup" ? "seat_topup" : "full") as
+        | "full"
+        | "seat_topup"
     }))
   }
 
@@ -1811,14 +1830,17 @@ export class PgStore implements OpsGateStore {
   async createAdminSession(
     email: string,
     password: string,
-    opts?: { force?: boolean; totpCode?: string }
+    opts?: {
+      force?: boolean
+      totpCode?: string
+      orgId?: string
+      orgCode?: string
+    }
   ) {
     const emailNorm = email.trim().toLowerCase()
     const hash = hashManagementPassword(password)
-    // Préférer l'org non-personnelle si le même email existe plusieurs fois
-    // (bug : principal seedé sur PERSONAL → console vide d'events DEMO)
     const { rows } = await this.pool.query(
-      `SELECT a.*
+      `SELECT a.*, o.org_code, o.name AS org_name, o.is_personal
        FROM org_admins a
        INNER JOIN organizations o ON o.id = a.org_id
        WHERE lower(a.email) = $1
@@ -1826,17 +1848,56 @@ export class PgStore implements OpsGateStore {
          AND a.password_hash = $2
        ORDER BY CASE WHEN o.is_personal THEN 1 ELSE 0 END ASC,
                 a.is_principal DESC,
-                a.created_at ASC
-       LIMIT 1`,
+                a.created_at ASC`,
       [emailNorm, hash]
     )
-    if (!rows[0]) return { ok: false as const, error: "invalid_credentials" }
-    const admin = rowAdmin(rows[0])
+    type Cand = {
+      admin: OrgAdmin
+      orgCode: string
+      orgName: string
+      personal: boolean
+    }
+    let candidates: Cand[] = rows
+      .map((r) => ({
+        admin: rowAdmin(r),
+        orgCode: String(r.org_code || ""),
+        orgName: String(r.org_name || ""),
+        personal: !!r.is_personal
+      }))
+      .filter(
+        (c) =>
+          c.admin.isPrincipal ||
+          c.admin.permissions.includes("console_access")
+      )
+    if (candidates.length === 0) {
+      return { ok: false as const, error: "invalid_credentials" }
+    }
+    if (opts?.orgId) {
+      candidates = candidates.filter((c) => c.admin.orgId === opts.orgId)
+    } else if (opts?.orgCode) {
+      const code = opts.orgCode.trim().toUpperCase()
+      candidates = candidates.filter(
+        (c) => c.orgCode.toUpperCase() === code
+      )
+    }
+    if (candidates.length === 0) {
+      return { ok: false as const, error: "invalid_credentials" }
+    }
+    if (candidates.length > 1 && !opts?.orgId && !opts?.orgCode) {
+      return {
+        ok: false as const,
+        error: "org_selection_required" as const,
+        orgs: candidates.map((c) => ({
+          org_id: c.admin.orgId,
+          org_code: c.orgCode,
+          name: c.orgName
+        }))
+      }
+    }
+    const hit = candidates[0]!
+    const admin = hit.admin
     if (admin.lockedAt) {
       return { ok: false as const, error: "account_locked" }
-    }
-    if (!admin.isPrincipal && !admin.permissions.includes("console_access")) {
-      return { ok: false as const, error: "no_console_access" }
     }
     if (admin.totpEnabled && admin.totpSecret) {
       const code = (opts?.totpCode || "").trim()

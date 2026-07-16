@@ -902,6 +902,8 @@ export function createApp() {
       password?: string
       force?: boolean
       totp_code?: string
+      org_id?: string
+      org_code?: string
     }
     try {
       body = await c.req.json()
@@ -931,9 +933,22 @@ export function createApp() {
     }
     const result = await store.createAdminSession(body.email, body.password, {
       force: !!body.force,
-      totpCode: body.totp_code
+      totpCode: body.totp_code,
+      orgId: body.org_id?.trim(),
+      orgCode: body.org_code?.trim()
     })
     if (!result.ok) {
+      if (result.error === "org_selection_required") {
+        return c.json(
+          {
+            error: "org_selection_required",
+            message:
+              "Cet e-mail est admin de plusieurs organisations. Choisissez l’organisation.",
+            orgs: result.orgs || []
+          },
+          409
+        )
+      }
       if (result.error === "mfa_required") {
         return c.json(
           {
@@ -3035,7 +3050,8 @@ export function createApp() {
         contactEmail: rec.contactEmail,
         seats: rec.seats,
         expiresAt: rec.expiresAt,
-        issuedAt: rec.issuedAt
+        issuedAt: rec.issuedAt,
+        kind: rec.kind || "full"
       }
       displayKey = rec.licenseKey
     } else {
@@ -3054,6 +3070,54 @@ export function createApp() {
     }
     const { mergeMonitoringSettings } = await import("./types")
     const prev = mergeMonitoringSettings(org.monitoring)
+    const isTopup = p.kind === "seat_topup"
+    if (isTopup) {
+      // Pack de sièges : ajoute aux sièges existants, ne remplace pas la société
+      const currentSeats = org.licenseSeats || 0
+      const nextSeats = currentSeats + p.seats
+      await store.setOrgLicenseSeats(org.id, nextSeats)
+      const lic = prev.licenseDisplay
+      await store.updateOrgMonitoring(org.id, {
+        ...prev,
+        licenseDisplay: {
+          companyName: lic?.companyName || p.companyName || org.name,
+          address: lic?.address || p.address || "",
+          contactEmail: lic?.contactEmail || p.contactEmail || org.primaryEmail,
+          expiresAt:
+            lic?.mode === "full" && lic.expiresAt
+              ? // garder la plus lointaine
+                Date.parse(lic.expiresAt) > Date.parse(p.expiresAt)
+                  ? lic.expiresAt
+                  : p.expiresAt
+              : p.expiresAt,
+          mode: "full",
+          seats: nextSeats,
+          activatedAt: lic?.activatedAt || new Date().toISOString(),
+          licenseKeyFingerprint:
+            lic?.licenseKeyFingerprint || licenseKeyFingerprint(displayKey)
+        }
+      })
+      await audit(
+        _gate,
+        "org_settings_update",
+        `Top-up sièges +${p.seats} → total ${nextSeats} · clé ${displayKey.slice(0, 12)}…`,
+        { seats_added: p.seats, seats_total: nextSeats }
+      )
+      const stats = await store.getLicenseStats(org.id)
+      return c.json({
+        ok: true,
+        kind: "seat_topup",
+        seats_added: p.seats,
+        license: {
+          mode: "full",
+          company_name:
+            prev.licenseDisplay?.companyName || p.companyName || org.name,
+          seats_total: stats.seats,
+          seats_used: stats.seats_used,
+          expires_at: p.expiresAt
+        }
+      })
+    }
     await store.setOrgLicenseSeats(org.id, p.seats)
     await store.updateOrgMonitoring(org.id, {
       ...prev,
@@ -3077,6 +3141,7 @@ export function createApp() {
     const stats = await store.getLicenseStats(org.id)
     return c.json({
       ok: true,
+      kind: "full",
       license: {
         mode: "full",
         company_name: p.companyName,
@@ -3181,6 +3246,7 @@ export function createApp() {
       licenses: list.map((l) => ({
         id: l.id,
         license_key: l.licenseKey,
+        kind: l.kind || "full",
         org_code: l.orgCode,
         company_name: l.companyName,
         address: l.address,
@@ -3198,10 +3264,48 @@ export function createApp() {
     })
   })
 
+  /** Certificat PDF (brandé texte) pour envoi client */
+  v1.post("/vendor/licenses/certificate", async (c) => {
+    const access = requireVendorSecret(c)
+    if (!access.ok) return c.json({ error: access.error }, access.status)
+    let body: { license_key?: string }
+    try {
+      body = await c.req.json()
+    } catch {
+      return c.json({ error: "invalid_json" }, 400)
+    }
+    const key = (body.license_key || "").trim()
+    if (!key) return c.json({ error: "license_key_required" }, 400)
+    const rec = await store.lookupIssuedLicense(key)
+    if (!rec) return c.json({ error: "license_not_found" }, 404)
+    const {
+      buildLicenseCertificatePdf,
+      certificateFilename
+    } = await import("./license-certificate-pdf")
+    const pdf = buildLicenseCertificatePdf({
+      licenseKey: rec.licenseKey,
+      orgCode: rec.orgCode,
+      companyName: rec.companyName,
+      address: rec.address,
+      contactEmail: rec.contactEmail,
+      seats: rec.seats,
+      expiresAt: rec.expiresAt,
+      issuedAt: rec.issuedAt,
+      kind: rec.kind
+    })
+    const name = certificateFilename(rec)
+    return new Response(new Uint8Array(pdf), {
+      status: 200,
+      headers: {
+        "Content-Type": "application/pdf",
+        "Content-Disposition": `attachment; filename="${name}"`
+      }
+    })
+  })
+
   /**
    * Émet une licence client OPS-XXXX-… (DailyOps only).
-   * Body: org_code, company_name, address?, contact_email, seats, expires_at?|years?,
-   *        provision_org? (crée tenant + admin si org absente)
+   * kind: full | seat_topup (pack de sièges additionnels)
    */
   v1.post("/vendor/licenses", async (c) => {
     const access = requireVendorSecret(c)
@@ -3215,6 +3319,7 @@ export function createApp() {
       expires_at?: string
       years?: number
       provision_org?: boolean
+      kind?: "full" | "seat_topup"
     }
     try {
       body = await c.req.json()
@@ -3222,12 +3327,29 @@ export function createApp() {
       return c.json({ error: "invalid_json" }, 400)
     }
     const orgCode = (body.org_code || "").trim().toUpperCase()
-    const companyName = (body.company_name || "").trim()
-    const contactEmail = (body.contact_email || "").trim().toLowerCase()
-    const address = (body.address || "").trim()
+    const kind = body.kind === "seat_topup" ? "seat_topup" : "full"
+    let companyName = (body.company_name || "").trim()
+    let contactEmail = (body.contact_email || "").trim().toLowerCase()
+    let address = (body.address || "").trim()
     const seats = Math.max(0, Math.floor(Number(body.seats) || 0))
     if (!orgCode || orgCode.length < 4) {
       return c.json({ error: "org_code_required", hint: "ex. ACME-2026" }, 400)
+    }
+    // Top-up : préremplir depuis l’org existante si champs vides
+    if (kind === "seat_topup") {
+      const org = await store.findOrgByCode(orgCode)
+      if (!org) {
+        return c.json(
+          {
+            error: "org_not_found",
+            message: "Pour un top-up, le code org doit déjà exister."
+          },
+          400
+        )
+      }
+      if (!companyName) companyName = org.name
+      if (!contactEmail) contactEmail = org.primaryEmail || "licence@local"
+      if (!address) address = ""
     }
     if (!companyName) {
       return c.json({ error: "company_name_required" }, 400)
@@ -3267,17 +3389,20 @@ export function createApp() {
       address,
       contactEmail,
       seats,
-      expiresAt
+      expiresAt,
+      kind
     })
 
+    const { maskLicenseKey } = await import("./license-keys")
     console.log(
-      `[vendor] license issued key=${issued.licenseKey} org=${orgCode} seats=${seats} company=${companyName}`
+      `[vendor] license issued key=${maskLicenseKey(issued.licenseKey)} kind=${kind} org=${orgCode} seats=${seats} company=${companyName}`
     )
 
     return c.json({
       ok: true,
       license_key: issued.licenseKey,
       paper_format: issued.licenseKey,
+      kind,
       payload: {
         org_code: issued.payload.orgCode,
         company_name: issued.payload.companyName,
@@ -3285,7 +3410,8 @@ export function createApp() {
         contact_email: issued.payload.contactEmail,
         seats: issued.payload.seats,
         expires_at: issued.payload.expiresAt,
-        issued_at: issued.payload.issuedAt
+        issued_at: issued.payload.issuedAt,
+        kind
       },
       tenant: provision
         ? {
@@ -3774,6 +3900,17 @@ export function createApp() {
           "Si un compte admin correspond à cet e-mail, un code OTP a été envoyé."
       })
     }
+    // Secondaire : besoin permission email_password_reset
+    if (
+      !resolved.admin.isPrincipal &&
+      !resolved.admin.permissions.includes("email_password_reset")
+    ) {
+      return c.json({
+        ok: true,
+        message:
+          "Si un compte admin correspond à cet e-mail, un code OTP a été envoyé."
+      })
+    }
     const result = await store.requestPasswordResetOtp(resolved.org.id, {
       email: resolved.admin.email,
       adminId: resolved.admin.id
@@ -3827,6 +3964,20 @@ export function createApp() {
   v1.post("/org/password-reset/request", async (c) => {
     const gate = await requireConsoleAuth(c, "console_access")
     if (!gate.ok) return c.json({ error: gate.error }, gate.status)
+    // Secondaire : permission email_password_reset (principal : toujours)
+    if (
+      !gate.admin.isPrincipal &&
+      !adminHas(gate.admin, "email_password_reset")
+    ) {
+      return c.json(
+        {
+          error: "forbidden_permission",
+          message:
+            "Réinit. mdp par e-mail non autorisée. Demandez à un administrateur principal."
+        },
+        403
+      )
+    }
     const result = await store.requestPasswordResetOtp(gate.orgId, {
       adminId: gate.admin.id,
       email: gate.admin.email
@@ -3951,6 +4102,8 @@ export function createApp() {
     const to = (body.send_test_to || gate.admin.email || "").trim()
     let sent: { ok: boolean; delivery?: string; error?: string } | null = null
     if (to.includes("@")) {
+      const { brandedEmailHtml } = await import("./mail")
+      const safeName = org.name.replace(/</g, "")
       const r = await sendMail({
         to,
         subject: "OpsGate — test de configuration SMTP",
@@ -3965,17 +4118,11 @@ export function createApp() {
           "",
           "— DailyOps.Tech / OpsGate"
         ].join("\n"),
-        html: `<!DOCTYPE html><html><body style="margin:0;padding:0;background:#f1f5f9;font-family:Segoe UI,Arial,sans-serif">
-<table width="100%" cellpadding="0" cellspacing="0" style="padding:32px 12px"><tr><td align="center">
-<table width="480" style="background:#0A1128;border-radius:12px 12px 0 0;padding:20px 24px">
-<tr><td style="color:#2BD9C5;font-weight:700;font-size:18px">OpsGate</td></tr>
-<tr><td style="color:#94a3b8;font-size:12px">DailyOps.Tech</td></tr>
-</table>
-<table width="480" style="background:#ffffff;border-radius:0 0 12px 12px;padding:24px;border:1px solid #e2e8f0;border-top:0">
-<tr><td style="color:#0f172a;font-size:16px;font-weight:600;padding-bottom:12px">Test de configuration SMTP</td></tr>
-<tr><td style="color:#334155;font-size:14px;line-height:1.5">Si vous lisez ce message, l'envoi d'e-mails OpsGate fonctionne pour <strong>${org.name.replace(/</g, "")}</strong>.</td></tr>
-<tr><td style="color:#64748b;font-size:12px;padding-top:16px">Source : ${verify.source || "—"} · ne pas répondre</td></tr>
-</table></td></tr></table></body></html>`,
+        html: brandedEmailHtml({
+          title: "Test de configuration SMTP",
+          bodyHtml: `<p style="margin:0 0 12px">Si vous lisez ce message, l'envoi d'e-mails OpsGate fonctionne pour <strong>${safeName}</strong>.</p>
+            <p style="color:#64748b;font-size:13px">Source : ${verify.source || "—"}</p>`
+        }),
         smtp: mon.smtp
       })
       sent = {

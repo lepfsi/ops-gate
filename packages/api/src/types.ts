@@ -675,14 +675,26 @@ export type AdminPermission =
   | "manage_admins"
   | "manage_policies"
   | "manage_users"
+  /** Secondaire : peut demander un OTP e-mail pour réinit. son propre mdp */
+  | "email_password_reset"
 
 export const ALL_ADMIN_PERMISSIONS: AdminPermission[] = [
   "console_access",
   "unenroll_agents",
   "manage_admins",
   "manage_policies",
-  "manage_users"
+  "manage_users",
+  "email_password_reset"
 ]
+
+export const ADMIN_PERMISSION_LABELS: Record<AdminPermission, string> = {
+  console_access: "Accès console",
+  unenroll_agents: "Désenrôler agents",
+  manage_admins: "Gérer les admins",
+  manage_policies: "Gérer policies / packs",
+  manage_users: "Gérer users / groupes / licences agents",
+  email_password_reset: "Réinit. mdp par e-mail (self)"
+}
 
 /**
  * Administrateur org.
