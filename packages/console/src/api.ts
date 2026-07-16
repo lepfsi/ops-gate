@@ -522,6 +522,10 @@ export const api = {
       start_path?: string
       callback_path?: string
       flow?: string
+      jit?: boolean
+      jwks_verify?: boolean
+      sso_enforce?: boolean
+      require_email_verified?: boolean
       note?: string
     }>("/v1/auth/oidc/status", { auth: false }),
 

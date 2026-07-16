@@ -875,6 +875,21 @@ export function createApp() {
         429
       )
     }
+    // SSO enforce : refuser le login password si OIDC actif
+    {
+      const { getOidcConfig, getOidcFeatureFlags } = await import("./oidc")
+      const flags = getOidcFeatureFlags()
+      if (flags.ssoEnforce && getOidcConfig()) {
+        return c.json(
+          {
+            error: "sso_required",
+            message:
+              "Connexion par mot de passe désactivée. Utilisez SSO (OIDC)."
+          },
+          403
+        )
+      }
+    }
     let body: {
       email?: string
       password?: string
@@ -1170,8 +1185,9 @@ export function createApp() {
    *       OPSGATE_CONSOLE_URL, OPSGATE_OIDC_ALLOWED_DOMAINS (opt).
    */
   v1.get("/auth/oidc/status", async (c) => {
-    const { getOidcConfig } = await import("./oidc")
+    const { getOidcConfig, getOidcFeatureFlags } = await import("./oidc")
     const cfg = getOidcConfig()
+    const flags = getOidcFeatureFlags()
     const enabled = !!cfg
     return c.json({
       enabled,
@@ -1182,8 +1198,14 @@ export function createApp() {
       start_path: "/v1/auth/oidc/start",
       callback_path: "/v1/auth/oidc/callback",
       flow: "authorization_code_pkce",
+      jit: flags.jit,
+      jwks_verify: flags.jwksVerify,
+      sso_enforce: flags.ssoEnforce && enabled,
+      require_email_verified: flags.requireEmailVerified,
       note: enabled
-        ? "OIDC prêt : GET /v1/auth/oidc/start → IdP → callback → session console."
+        ? flags.ssoEnforce
+          ? "OIDC prêt · SSO enforce (login mot de passe désactivé)."
+          : "OIDC prêt : start → IdP → callback → session."
         : "Définir OPSGATE_OIDC_ISSUER + OPSGATE_OIDC_CLIENT_ID (+ SECRET, REDIRECT_URI)."
     })
   })
@@ -1259,14 +1281,18 @@ export function createApp() {
   v1.get("/auth/oidc/callback", async (c) => {
     const {
       getOidcConfig,
+      getOidcFeatureFlags,
       discoverOidc,
       takePending,
       exchangeCode,
       decodeJwtPayload,
+      verifyIdToken,
       fetchUserInfo,
       extractEmail,
       mergeClaims,
       isEmailDomainAllowed,
+      isEmailVerified,
+      resolveJitOrgId,
       defaultConsoleReturnTo,
       consoleRedirectWithToken,
       consoleRedirectWithError
@@ -1277,6 +1303,7 @@ export function createApp() {
     const code = c.req.query("code") || ""
     const pending = state ? takePending(state) : null
     const returnTo = pending?.returnTo || defaultConsoleReturnTo()
+    const flags = getOidcFeatureFlags()
 
     if (errQ) {
       return c.redirect(
@@ -1316,16 +1343,33 @@ export function createApp() {
         code,
         codeVerifier: pending.codeVerifier
       })
-      let claims = tokens.id_token
-        ? decodeJwtPayload(tokens.id_token)
-        : {}
-      if (tokens.id_token && pending.nonce && claims) {
-        const payload = claims as { nonce?: string }
-        if (payload.nonce && payload.nonce !== pending.nonce) {
-          return c.redirect(
-            consoleRedirectWithError(returnTo, "nonce_mismatch"),
-            302
-          )
+
+      let claims: import("./oidc").OidcClaims = {}
+      if (tokens.id_token) {
+        if (flags.jwksVerify && discovery.jwks_uri) {
+          try {
+            claims = await verifyIdToken({
+              idToken: tokens.id_token,
+              discovery,
+              clientId: cfg.clientId,
+              expectedNonce: pending.nonce
+            })
+          } catch (ve) {
+            const codeV =
+              ve instanceof Error ? ve.message : "oidc_jwt_verify_failed"
+            return c.redirect(
+              consoleRedirectWithError(returnTo, codeV),
+              302
+            )
+          }
+        } else {
+          claims = decodeJwtPayload(tokens.id_token)
+          if (pending.nonce && claims.nonce && claims.nonce !== pending.nonce) {
+            return c.redirect(
+              consoleRedirectWithError(returnTo, "nonce_mismatch"),
+              302
+            )
+          }
         }
       }
       if (tokens.access_token) {
@@ -1345,10 +1389,64 @@ export function createApp() {
           302
         )
       }
+      if (flags.requireEmailVerified && !isEmailVerified(claims)) {
+        return c.redirect(
+          consoleRedirectWithError(returnTo, "email_not_verified", email),
+          302
+        )
+      }
 
-      const result = await store.createAdminSessionOidc(email, {
+      let result = await store.createAdminSessionOidc(email, {
         force: pending.force
       })
+
+      // JIT : créer admin si absent
+      let jitCreated = false
+      if (!result.ok && result.error === "admin_not_found" && flags.jit) {
+        const orgId = await resolveJitOrgId(store)
+        if (!orgId) {
+          return c.redirect(
+            consoleRedirectWithError(returnTo, "jit_org_missing", email),
+            302
+          )
+        }
+        const label =
+          (typeof claims.name === "string" && claims.name.trim()) ||
+          email.split("@")[0] ||
+          email
+        // Mot de passe aléatoire inutilisable (SSO only) — 32 chars
+        const { randomBytes } = await import("node:crypto")
+        const junkPwd = randomBytes(24).toString("base64url")
+        const admin = await store.upsertAdmin(orgId, {
+          label: String(label).slice(0, 80),
+          email,
+          password: junkPwd,
+          active: true,
+          isPrincipal: false,
+          permissions: ["console_access"],
+          mustChangePassword: false
+        })
+        if (!admin) {
+          return c.redirect(
+            consoleRedirectWithError(returnTo, "jit_create_failed", email),
+            302
+          )
+        }
+        jitCreated = true
+        await store.appendAdminAudit({
+          orgId,
+          adminId: admin.id,
+          adminEmail: admin.email,
+          adminLabel: admin.label,
+          action: "admin_create",
+          detail: "Admin créé par JIT OIDC",
+          meta: { via: "oidc_jit", sub: claims.sub || undefined }
+        })
+        result = await store.createAdminSessionOidc(email, {
+          force: pending.force
+        })
+      }
+
       if (!result.ok) {
         if (result.error === "session_already_active") {
           return c.redirect(
@@ -1374,11 +1472,15 @@ export function createApp() {
         "login",
         result.forced
           ? "Connexion console SSO OIDC (prise de contrôle)"
-          : "Connexion console SSO OIDC",
+          : jitCreated
+            ? "Connexion console SSO OIDC (JIT admin créé)"
+            : "Connexion console SSO OIDC",
         {
           via: "oidc",
           issuer: cfg.issuer,
-          sub: (claims as { sub?: string }).sub || undefined
+          sub: claims.sub || undefined,
+          jit: jitCreated || undefined,
+          jwks: flags.jwksVerify || undefined
         }
       )
 

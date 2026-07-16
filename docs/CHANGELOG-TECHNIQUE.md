@@ -290,12 +290,24 @@ Prod future : services Windows / silent scripts ; pas 3 terminaux ouverts.
 | Docs | AMO unlisted/listed + Intune | `FIREFOX-AMO.md` |
 | Gecko id | `opsgate@dailyops.local` (stable) | déjà en manifest |
 
-## 19. Suite recommandée
+## 19. V2 — OIDC polish (JWKS · JIT · sso_enforce) (16 juillet 2026)
+
+| Sujet | Détail | Fichiers |
+|-------|--------|----------|
+| JWKS | Vérif RS/ES256 id_token + iss/aud/exp | `oidc.ts` `verifyIdToken` |
+| JIT | `OPSGATE_OIDC_JIT=1` + org code | callback + `upsertAdmin` |
+| SSO enforce | `OPSGATE_SSO_ENFORCE=1` bloque password login | app login + console |
+| email_verified | `OPSGATE_OIDC_REQUIRE_EMAIL_VERIFIED` | callback |
+| Status | flags dans `/auth/oidc/status` | console SSO-only UI |
+| Docs | `AUTH-MFA-SSO.md` | |
+
+## 20. Suite recommandée
 
 1. Safari  
-2. OIDC : JIT, JWKS, `sso_enforce`  
-3. Publication CWS / AMO réelles (comptes dev)  
-4. LDAP : sync planifiée, prune, map auto profil  
+2. Publication CWS / AMO réelles  
+3. WebAuthn / SAML  
+4. LDAP : cron, prune, map auto profil  
+5. OIDC state multi-instance (Redis)  
 
 Détail : `docs/V2-BACKLOG.md` · `docs/architecture/PLATFORM-v2.md`.
 
