@@ -22,6 +22,11 @@ yarn-error.log*
 # local env files
 .env*.local
 
+# Documentation confidentielle DailyOps (ne jamais pousser)
+docs/private/
+docs/**/*CONFIDENTIEL*
+docs/**/*INTERNE*
+
 out/
 build/
 dist/
