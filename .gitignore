@@ -27,6 +27,8 @@ build/
 dist/
 # WiX toolset binaries (auto-downloaded by build-proxy-msi.ps1)
 tools/wix314/
+# Node portable cache (auto-downloaded by package-proxy-stage.ps1)
+tools/cache/
 packaging/proxy/proxy.ico
 
 # plasmo

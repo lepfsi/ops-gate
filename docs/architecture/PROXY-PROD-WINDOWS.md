@@ -37,21 +37,26 @@ msiexec /i dist\opsgate-proxy-1.2.0.msi /qn
 ```
 
 - Binaries : `C:\Program Files\OpsGate\Proxy\`
+  - `bin\opsgate-proxy.mjs`
+  - **`runtime\node\node.exe`** (Node portable LTS — **pas de Node système requis**)
+  - `run-proxy.cmd` · `opsgate-proxy.cmd`
 - Data (CA, agent, logs) : `%ProgramData%\OpsGate\Proxy\`
 - Registry : `HKLM\SOFTWARE\OpsGate\Proxy`
 - Post-install auto (CA + tache + enroll) via custom action ; si skip :
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File "C:\Program Files\OpsGate\Proxy\scripts\post-install.ps1"
+& "C:\Program Files\OpsGate\Proxy\opsgate-proxy.cmd" status
 ```
 
-Prérequis runtime : **Node.js 20+ LTS** dans le PATH (le MSI n’embarque pas Node).
+Prérequis runtime : **aucun** (Node embarqué). Option build : `-SkipEmbeddedNode` si vous forcez un Node PATH.
 
 Stage seul (sans MSI) :
 
 ```powershell
 pnpm proxy:package
-# → dist\proxy-stage + ZIP
+# → dist\proxy-stage + ZIP (inclut runtime\node\node.exe)
+# Pin Node : $env:OPSGATE_EMBED_NODE_VERSION="22.14.0"
 ```
 
 ### B. Dev monorepo (scripts)
@@ -144,12 +149,11 @@ Comportement enforce h2 :
 
 1. API durable (Postgres) joignable  
 2. MSI installé **ou** stage + post-install  
-3. Node.js 20+ sur le poste  
-4. CA trustée (`%ProgramData%\OpsGate\Proxy\ca\ca-cert.pem`)  
-5. Enroll proxy OK (`node bin\opsgate-proxy.mjs status`)  
-6. Service/tâche auto  
-7. PAC/GPO  
-8. SIEM org si requis  
-9. Test : envoi sensible → mask/403/422, puis navigation site OK  
+3. CA trustée (`%ProgramData%\OpsGate\Proxy\ca\ca-cert.pem`)  
+4. Enroll proxy OK (`opsgate-proxy.cmd status`)  
+5. Service/tâche auto  
+6. PAC/GPO  
+7. SIEM org si requis  
+8. Test : envoi sensible → mask/403/422, puis navigation site OK  
 
 Voir aussi `PROXY-RUNBOOK.md` · packaging WiX : `packaging/proxy/`.

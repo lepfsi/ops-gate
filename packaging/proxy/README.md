@@ -20,13 +20,23 @@ Outputs (gitignored under `dist/`) :
 ## Contents of stage / MSI
 
 - `bin/opsgate-proxy.mjs` — esbuild bundle (engine + node-forge)
-- `run-proxy.cmd` — service entry (ProgramData logs)
+- `runtime/node/node.exe` — **Node portable** win-x64 (officiel nodejs.org, pin LTS)
+- `run-proxy.cmd` / `opsgate-proxy.cmd` — service + CLI (utilisent le Node embarqué)
 - `scripts/post-install.ps1` — CA, trust, enroll, scheduled task
 - `scripts/uninstall-service.ps1`
 
-## Runtime prerequisite
+## Runtime
 
-**Node.js 20+ LTS** must be on PATH (not bundled in MSI v1).
+**Aucun Node système requis** : le stage/MSI embarque `runtime/node/node.exe`.
+
+| Option | Effet |
+|--------|--------|
+| (défaut) | Télécharge Node **v22.14.0** win-x64 → cache `tools/cache/` |
+| `-NodeVersion 20.18.1` | Pin une autre version |
+| `$env:OPSGATE_EMBED_NODE_VERSION` | Idem |
+| `-SkipEmbeddedNode` | Stage sans Node (PATH requis) |
+
+Redistribution : binaire officiel Node (licence MIT) — voir `runtime/node/LICENSE`.
 
 ## Docs
 

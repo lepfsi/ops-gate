@@ -214,14 +214,24 @@ Prod future : services Windows / silent scripts ; pas 3 terminaux ouverts.
 | Kill-switch | `OPSGATE_PROXY_HTTP2=0` → h1 only | health `http2` |
 | Docs | PROXY-PROD / RUNBOOK | |
 
-## 12. Suite recommandée
+## 12. V2 P1 suite — Node portable dans MSI (16 juillet 2026)
 
-1. MSI : Node portable embarqué (option)  
-2. Firefox MV3  
-3. Chrome Web Store / MDM force-install  
-4. Redis pour rate-limit multi-instance  
-5. OIDC : JIT admin, JWKS verify, `sso_enforce`, SAML  
-6. H2 : HPACK decode (scan headers) si besoin terrain  
+| Sujet | Détail | Fichiers |
+|-------|--------|----------|
+| Embed | Node win-x64 officiel → `runtime/node/node.exe` | `scripts/package-proxy-stage.ps1` |
+| Cache | `tools/cache/node-v*-win-x64/` (gitignore) | build local réutilisable |
+| Pin | défaut **v22.14.0** ; `-NodeVersion` / `OPSGATE_EMBED_NODE_VERSION` | |
+| Slim | copie `node.exe` + LICENSE seulement (pas npm) | ~30–40 MB |
+| Scripts | `run-proxy.cmd` / `opsgate-proxy.cmd` / post-install préfèrent runtime | |
+| Opt-out | `-SkipEmbeddedNode` | stage sans Node |
+
+## 13. Suite recommandée
+
+1. Firefox MV3  
+2. Chrome Web Store / MDM force-install  
+3. Redis pour rate-limit multi-instance  
+4. OIDC : JIT admin, JWKS verify, `sso_enforce`, SAML  
+5. H2 : HPACK decode (scan headers) si besoin terrain  
 
 Détail : `docs/V2-BACKLOG.md` · `docs/architecture/PLATFORM-v2.md`.
 
