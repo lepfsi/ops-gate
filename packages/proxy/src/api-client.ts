@@ -75,7 +75,7 @@ export type ProxyDetectionEvent = {
   ts: string
   source: "proxy"
   hostname: string
-  decision: "observe" | "block"
+  decision: "observe" | "block" | "mask_send"
   detection_count: number
   highest_severity: "low" | "medium" | "high"
   rule_ids: string[]
@@ -95,12 +95,12 @@ export function queueProxyEvent(
   ev: Omit<
     ProxyDetectionEvent,
     "schema_version" | "source" | "masked" | "device_label"
-  > & { decision: "observe" | "block" }
+  > & { decision: "observe" | "block" | "mask_send" }
 ) {
   const full: ProxyDetectionEvent = {
     schema_version: 1,
     source: "proxy",
-    masked: ev.decision === "block",
+    masked: ev.decision === "block" || ev.decision === "mask_send",
     device_label: cleanProxyLabel(state.device_label),
     file_names: ev.file_names ?? null,
     ...ev

@@ -6,7 +6,7 @@
 |--|--------------------|-------------------|
 | Où | Page web (DOM) | Réseau HTTPS (MITM allowlist) |
 | Warn / banner orange | **Oui** | **Non** (jamais) |
-| Mask / choix utilisateur | **Oui** | **Non** |
+| Mask / choix utilisateur | **Oui** (UI) | **Oui** si `OPSGATE_PROXY_SOFT_MASK=1` (on-wire rewrite) |
 | Journal MMC | events `prompt` / `file` | events `source=proxy` |
 | Filtre fort | selon policy | **enforce** = coupe la connexion |
 | Fichiers | scan local (pdf/docx…) | texte/multipart partiel |
@@ -122,11 +122,15 @@ Filtrer décision `observe` / `block` ou source `proxy`.
 
 | Variable | Effet |
 |----------|--------|
-| `$env:OPSGATE_PROXY_MODE="enforce"` | Défaut recommandé : coupe le flux si medium/high + event `block` |
+| `$env:OPSGATE_PROXY_MODE="enforce"` | Défaut : agit si medium/high (block ou mask) |
 | `$env:OPSGATE_PROXY_MODE="observe"` | Journal seul + event `observe` (pas de coupure) |
+| `$env:OPSGATE_PROXY_SOFT_MASK="1"` | **On-wire** : body masqué puis forward amont + event `mask_send` |
+| `$env:OPSGATE_PROXY_SOFT_MASK="local"` | 422 JSON local sans amont |
+| soft-mask unset | Soft-block **403** + event `block` |
 
 ```powershell
 $env:OPSGATE_PROXY_MODE="enforce"
+$env:OPSGATE_PROXY_SOFT_MASK="1"
 pnpm proxy:dev
 ```
 
@@ -136,9 +140,9 @@ pnpm proxy:dev
 
 1. API + proxy:dev + Chrome avec `--proxy-server`  
 2. Terminal proxy doit montrer `connect` … `chatgpt.com` … `mitm_established`  
-3. Dans le chat, envoie : `sk-abcdefghijklmnopqrstuvwxyz012345`  
-4. Logs : `observe_detection` **ou** `enforce_block` + `events_batch_ok`  
-5. MMC → Événements → ligne Proxy / observe ou block  
+3. Dans le chat, envoie un secret détectable, ex. carte `4532 0151 1283 0366` ou clé `sk-proj-…`  
+4. Logs : `observe_detection` **ou** `enforce_block` / `enforce_mask` / `mitm_request_soft_mask_onwire` + `events_batch_ok`  
+5. MMC → Événements → ligne Proxy / observe, block ou **mask_send**  
 
 Si étape 2 absente → Chrome n’utilise pas le proxy.  
 Si 2 OK mais pas 4 → détection / contenu pas dans le flux scanné.  

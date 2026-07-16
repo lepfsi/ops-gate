@@ -181,13 +181,25 @@ Prod future : services Windows / silent scripts ; pas 3 terminaux ouverts.
 | Mapping | email / preferred_username / upn → `org_admins` existant | pas de JIT |
 | Docs | flow, Entra, env, erreurs | `AUTH-MFA-SSO.md` |
 
-## 9. Suite recommandée (après OIDC)
+## 9. V2 P1 suite — Soft-mask on-wire proxy (16 juillet 2026)
 
-1. Soft-mask **on-wire** multi-vendor (rewrite JSON)  
-2. Firefox MV3  
-3. Chrome Web Store / MDM force-install  
-4. Redis pour rate-limit multi-instance  
-5. OIDC : JIT admin, JWKS verify, `sso_enforce`, SAML  
+| Sujet | Détail | Fichiers |
+|-------|--------|----------|
+| Modes | `OPSGATE_PROXY_SOFT_MASK` = `off` / `local` / `onwire` (`1` → onwire) | `packages/proxy/src/soft-mask.ts` |
+| Rewrite | Body HTTP/1.1 masqué (engine) + Content-Length + forward amont | `soft-mask.ts`, `mitm.ts` |
+| Fallback | gzip / non-HTTP1.1 / rien masqué → 422 local | `mitm.ts` |
+| Events | décision `mask_send`, types `proxy_mask_onwire` / `proxy_mask_local` | `observe.ts`, `api-client.ts` |
+| Health | `soft_mask` dans `/opsgate-proxy/health` | `proxy-server.ts` |
+| Docs | `PROXY-PROD-WINDOWS.md` | |
+
+## 10. Suite recommandée
+
+1. Proxy MSI packagé / install service polish  
+2. HTTP/2 stream-aware enforce  
+3. Firefox MV3  
+4. Chrome Web Store / MDM force-install  
+5. Redis pour rate-limit multi-instance  
+6. OIDC : JIT admin, JWKS verify, `sso_enforce`, SAML  
 
 Détail : `docs/V2-BACKLOG.md` · `docs/architecture/PLATFORM-v2.md`.
 
