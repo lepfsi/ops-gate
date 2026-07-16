@@ -2523,6 +2523,8 @@ export class PgStore implements OpsGateStore {
     const org = await this.getOrg(orgId)
     const principal = await this.getPrincipalAdmin(orgId)
     const targetEmail = (principal?.email || org?.primaryEmail || "").trim()
+    const { mergeMonitoringSettings } = await import("./types")
+    const mon = mergeMonitoringSettings(org?.monitoring)
     const {
       sendPasswordResetOtpEmail,
       shouldExposeDevOtp,
@@ -2536,12 +2538,13 @@ export class PgStore implements OpsGateStore {
         to: targetEmail,
         otp,
         expiresMin: Math.floor(expiresIn / 60),
-        orgName: org?.name
+        orgName: org?.name,
+        smtp: mon.smtp
       })
       mailed = sent.ok && sent.delivery === "smtp"
       delivery = sent.delivery
     }
-    const expose = shouldExposeDevOtp()
+    const expose = shouldExposeDevOtp(mon.smtp)
     if (expose) {
       console.log(
         `[opsgate-otp] DEV OTP org=${orgId} ${maskEmail(targetEmail)} = ${otp} (delivery=${delivery})`
@@ -2558,12 +2561,12 @@ export class PgStore implements OpsGateStore {
       message: mailed
         ? `Un code OTP a été envoyé à ${masked}.`
         : delivery === "log"
-          ? `SMTP non configuré : OTP journalisé côté serveur${expose ? " et affiché en lab" : ""}. Configurez OPSGATE_SMTP_*.`
+          ? `SMTP non configuré : OTP journalisé côté serveur${expose ? " et affiché en lab" : ""}. Paramètres → E-mail / SMTP ou OPSGATE_SMTP_*.`
           : delivery === "failed"
             ? `Échec d'envoi SMTP vers ${masked}. Vérifiez la config mail.`
-            : isMailConfigured()
+            : isMailConfigured(mon.smtp)
               ? `OTP généré (destinataire manquant).`
-              : `OTP généré sans e-mail (configurez OPSGATE_SMTP_HOST).`
+              : `OTP généré sans e-mail (configurez Paramètres → E-mail / SMTP).`
     }
   }
 

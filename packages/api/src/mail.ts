@@ -1,22 +1,17 @@
 /**
  * Envoi d’e-mails transactionnels OpsGate (SMTP réel).
  *
- * Config (env) :
- *   OPSGATE_SMTP_HOST       ex. smtp.office365.com / smtp.gmail.com / mailhog
- *   OPSGATE_SMTP_PORT       587 (STARTTLS) ou 465 (TLS)
- *   OPSGATE_SMTP_SECURE     "1" si port 465
- *   OPSGATE_SMTP_USER
- *   OPSGATE_SMTP_PASS
- *   OPSGATE_SMTP_FROM       ex. "OpsGate <noreply@dailyops.tech>"
- *   OPSGATE_SMTP_TLS_REJECT "0" pour lab self-signed
+ * Sources de config (priorité) :
+ *   1. Paramètres org (console → E-mail / SMTP) si enabled + host
+ *   2. Variables d’env OPSGATE_SMTP_* / SMTP_*
  *
  * Dev sans SMTP :
  *   OPSGATE_MAIL_DEV_OTP=1  → renvoie l’OTP dans la réponse API (lab uniquement)
- *
- * Sans host SMTP : log console uniquement (pas d’envoi réseau).
  */
 import nodemailer from "nodemailer"
 import type { Transporter } from "nodemailer"
+
+import type { OrgSmtpSettings } from "./types"
 
 export type MailDelivery = "smtp" | "log" | "failed" | "disabled"
 
@@ -25,18 +20,98 @@ export type SendMailResult =
   | { ok: true; delivery: "log" }
   | { ok: false; delivery: "failed" | "disabled"; error: string }
 
+/** Config SMTP runtime (org ou env) */
+export type SmtpRuntimeConfig = {
+  host: string
+  port: number
+  secure: boolean
+  user?: string
+  pass?: string
+  from: string
+  tlsInsecure?: boolean
+  source: "org" | "env"
+}
+
 function env(name: string, fallback = ""): string {
   return (process.env[name] || fallback).trim()
 }
 
+export function smtpFromEnv(
+  e: NodeJS.ProcessEnv = process.env
+): SmtpRuntimeConfig | null {
+  const host = (e.OPSGATE_SMTP_HOST || e.SMTP_HOST || "").trim()
+  if (!host) return null
+  const port = Number(e.OPSGATE_SMTP_PORT || e.SMTP_PORT || 587)
+  const secureRaw = (
+    e.OPSGATE_SMTP_SECURE ||
+    e.SMTP_SECURE ||
+    ""
+  ).toLowerCase()
+  const secure =
+    secureRaw === "1" ||
+    secureRaw === "true" ||
+    secureRaw === "on" ||
+    port === 465
+  const user = (e.OPSGATE_SMTP_USER || e.SMTP_USER || "").trim()
+  const pass = (e.OPSGATE_SMTP_PASS || e.SMTP_PASS || "").trim()
+  const from = (
+    e.OPSGATE_SMTP_FROM ||
+    e.SMTP_FROM ||
+    "OpsGate <noreply@localhost>"
+  ).trim()
+  const tlsInsecure =
+    e.OPSGATE_SMTP_TLS_REJECT === "0" || e.OPSGATE_SMTP_TLS_REJECT === "false"
+  return {
+    host,
+    port: Number.isFinite(port) && port > 0 ? port : 587,
+    secure,
+    user: user || undefined,
+    pass: pass || undefined,
+    from,
+    tlsInsecure,
+    source: "env"
+  }
+}
+
+export function smtpFromOrg(
+  smtp?: OrgSmtpSettings | null
+): SmtpRuntimeConfig | null {
+  if (!smtp || !smtp.enabled) return null
+  const host = (smtp.host || "").trim()
+  if (!host) return null
+  const port = Number(smtp.port) || 587
+  return {
+    host,
+    port,
+    secure: !!smtp.secure || port === 465,
+    user: (smtp.user || "").trim() || undefined,
+    pass: (smtp.password || "").trim() || undefined,
+    from:
+      (smtp.from || "").trim() ||
+      "OpsGate <noreply@localhost>",
+    tlsInsecure: !!smtp.tlsInsecure,
+    source: "org"
+  }
+}
+
+/** Org prioritaire si actif, sinon env */
+export function resolveSmtp(
+  orgSmtp?: OrgSmtpSettings | null,
+  e: NodeJS.ProcessEnv = process.env
+): SmtpRuntimeConfig | null {
+  return smtpFromOrg(orgSmtp) || smtpFromEnv(e)
+}
+
 export function isMailConfigured(
+  orgSmtp?: OrgSmtpSettings | null,
   e: NodeJS.ProcessEnv = process.env
 ): boolean {
-  return !!(e.OPSGATE_SMTP_HOST || e.SMTP_HOST || "").trim()
+  return !!resolveSmtp(orgSmtp, e)
 }
 
 /** Expose OTP en clair dans la réponse API (lab). Jamais en prod sauf flag explicite. */
 export function shouldExposeDevOtp(
+  orgSmtp?: OrgSmtpSettings | null,
   e: NodeJS.ProcessEnv = process.env
 ): boolean {
   const flag = (
@@ -46,66 +121,55 @@ export function shouldExposeDevOtp(
   ).toLowerCase()
   if (flag === "1" || flag === "true" || flag === "on") return true
   if ((e.NODE_ENV || "").toLowerCase() === "production") return false
-  // Lab : si pas de SMTP, autoriser dev_otp pour ne pas bloquer les tests
-  return !isMailConfigured(e)
+  return !isMailConfigured(orgSmtp, e)
 }
 
-export function getMailStatus(e: NodeJS.ProcessEnv = process.env) {
-  const host = (e.OPSGATE_SMTP_HOST || e.SMTP_HOST || "").trim()
-  const port = Number(e.OPSGATE_SMTP_PORT || e.SMTP_PORT || 587)
-  const from = (
-    e.OPSGATE_SMTP_FROM ||
-    e.SMTP_FROM ||
-    "OpsGate <noreply@localhost>"
-  ).trim()
-  const user = (e.OPSGATE_SMTP_USER || e.SMTP_USER || "").trim()
+export function getMailStatus(
+  orgSmtp?: OrgSmtpSettings | null,
+  e: NodeJS.ProcessEnv = process.env
+) {
+  const cfg = resolveSmtp(orgSmtp, e)
+  const envCfg = smtpFromEnv(e)
+  const orgCfg = smtpFromOrg(orgSmtp)
   return {
-    configured: !!host,
-    host: host || null,
-    port: host ? port : null,
-    from,
-    auth: !!user,
-    dev_otp_exposed: shouldExposeDevOtp(e),
-    mode: host ? ("smtp" as const) : ("log" as const)
+    configured: !!cfg,
+    source: cfg?.source || null,
+    host: cfg?.host || null,
+    port: cfg ? cfg.port : null,
+    from: cfg?.from || null,
+    auth: !!(cfg?.user),
+    org_enabled: !!orgSmtp?.enabled,
+    org_host: orgSmtp?.host || "",
+    env_configured: !!envCfg,
+    dev_otp_exposed: shouldExposeDevOtp(orgSmtp, e),
+    mode: cfg ? ("smtp" as const) : ("log" as const),
+    org_ready: !!orgCfg
   }
 }
 
-function buildTransport(): Transporter | null {
-  const host = env("OPSGATE_SMTP_HOST") || env("SMTP_HOST")
-  if (!host) return null
-  const port = Number(env("OPSGATE_SMTP_PORT") || env("SMTP_PORT") || "587")
-  const secureRaw = (
-    env("OPSGATE_SMTP_SECURE") ||
-    env("SMTP_SECURE") ||
-    ""
-  ).toLowerCase()
-  const secure =
-    secureRaw === "1" ||
-    secureRaw === "true" ||
-    secureRaw === "on" ||
-    port === 465
-  const user = env("OPSGATE_SMTP_USER") || env("SMTP_USER")
-  const pass = env("OPSGATE_SMTP_PASS") || env("SMTP_PASS")
-  const rejectUnauthorized = !(
-    env("OPSGATE_SMTP_TLS_REJECT") === "0" ||
-    env("OPSGATE_SMTP_TLS_REJECT") === "false"
-  )
-
-  return nodemailer.createTransport({
-    host,
-    port,
-    secure,
-    auth: user ? { user, pass } : undefined,
-    tls: { rejectUnauthorized }
-  })
+export function publicSmtpView(smtp?: OrgSmtpSettings | null) {
+  const s = smtp || null
+  return {
+    enabled: !!s?.enabled,
+    host: s?.host || "",
+    port: s?.port || 587,
+    secure: !!s?.secure,
+    user: s?.user || "",
+    from: s?.from || "",
+    tlsInsecure: !!s?.tlsInsecure,
+    password_set: !!(s?.password && s.password.length > 0)
+  }
 }
 
-function brandFrom(): string {
-  return (
-    env("OPSGATE_SMTP_FROM") ||
-    env("SMTP_FROM") ||
-    "OpsGate <noreply@localhost>"
-  )
+function buildTransport(cfg: SmtpRuntimeConfig | null): Transporter | null {
+  if (!cfg?.host) return null
+  return nodemailer.createTransport({
+    host: cfg.host,
+    port: cfg.port,
+    secure: cfg.secure,
+    auth: cfg.user ? { user: cfg.user, pass: cfg.pass || "" } : undefined,
+    tls: { rejectUnauthorized: !cfg.tlsInsecure }
+  })
 }
 
 export function maskEmail(email: string): string {
@@ -123,14 +187,19 @@ export async function sendMail(opts: {
   subject: string
   text: string
   html?: string
+  /** Config SMTP (org) ; sinon env */
+  smtp?: OrgSmtpSettings | null
+  runtime?: SmtpRuntimeConfig | null
 }): Promise<SendMailResult> {
   const to = (opts.to || "").trim()
   if (!to || !to.includes("@")) {
     return { ok: false, delivery: "disabled", error: "invalid_recipient" }
   }
 
-  const transport = buildTransport()
-  if (!transport) {
+  const cfg =
+    opts.runtime || resolveSmtp(opts.smtp ?? null)
+  const transport = buildTransport(cfg)
+  if (!transport || !cfg) {
     console.log(
       `[opsgate-mail] LOG-ONLY → ${to}\n  Subject: ${opts.subject}\n  ${opts.text.slice(0, 400)}`
     )
@@ -139,14 +208,14 @@ export async function sendMail(opts: {
 
   try {
     const info = await transport.sendMail({
-      from: brandFrom(),
+      from: cfg.from,
       to,
       subject: opts.subject,
       text: opts.text,
       html: opts.html || plainToHtml(opts.text)
     })
     console.log(
-      `[opsgate-mail] SMTP ok → ${maskEmail(to)} id=${info.messageId || "?"}`
+      `[opsgate-mail] SMTP ok (${cfg.source}) → ${maskEmail(to)} id=${info.messageId || "?"}`
     )
     return {
       ok: true,
@@ -206,6 +275,7 @@ export async function sendPasswordResetOtpEmail(opts: {
   otp: string
   expiresMin?: number
   orgName?: string
+  smtp?: OrgSmtpSettings | null
 }): Promise<SendMailResult> {
   const minutes = opts.expiresMin ?? 10
   const subject = "OpsGate — code de réinitialisation du mot de passe"
@@ -226,6 +296,7 @@ export async function sendPasswordResetOtpEmail(opts: {
     to: opts.to,
     subject,
     text,
+    smtp: opts.smtp,
     html: otpHtml({
       title: "Réinitialisation du mot de passe",
       otp: opts.otp,
@@ -243,6 +314,7 @@ export async function sendGenericOtpEmail(opts: {
   otp: string
   purpose: string
   expiresMin?: number
+  smtp?: OrgSmtpSettings | null
 }): Promise<SendMailResult> {
   const minutes = opts.expiresMin ?? 10
   const subject = `OpsGate — code ${opts.purpose}`
@@ -259,6 +331,7 @@ export async function sendGenericOtpEmail(opts: {
     to: opts.to,
     subject,
     text,
+    smtp: opts.smtp,
     html: otpHtml({
       title: opts.purpose,
       otp: opts.otp,
@@ -272,6 +345,7 @@ export async function sendPasswordChangedNotice(opts: {
   to: string
   adminLabel?: string
   byEmail?: string
+  smtp?: OrgSmtpSettings | null
 }): Promise<SendMailResult> {
   const subject = "OpsGate — mot de passe réinitialisé"
   const text = [
@@ -287,23 +361,28 @@ export async function sendPasswordChangedNotice(opts: {
     .filter(Boolean)
     .join("\n")
 
-  return sendMail({ to: opts.to, subject, text })
+  return sendMail({ to: opts.to, subject, text, smtp: opts.smtp })
 }
 
 /** Test SMTP (health / admin) */
-export async function verifySmtpConnection(): Promise<{
+export async function verifySmtpConnection(
+  orgSmtp?: OrgSmtpSettings | null
+): Promise<{
   ok: boolean
   error?: string
+  source?: "org" | "env"
 }> {
-  const transport = buildTransport()
-  if (!transport) return { ok: false, error: "smtp_not_configured" }
+  const cfg = resolveSmtp(orgSmtp)
+  const transport = buildTransport(cfg)
+  if (!transport || !cfg) return { ok: false, error: "smtp_not_configured" }
   try {
     await transport.verify()
-    return { ok: true }
+    return { ok: true, source: cfg.source }
   } catch (e) {
     return {
       ok: false,
-      error: e instanceof Error ? e.message : String(e)
+      error: e instanceof Error ? e.message : String(e),
+      source: cfg.source
     }
   }
 }

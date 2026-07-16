@@ -2120,18 +2120,38 @@ export function createApp() {
     if (!org) return c.json({ error: "no_org" }, 404)
     const { mergeMonitoringSettings } = await import("./types")
     const { publicLdapView } = await import("./ldap")
+    const { publicSmtpView } = await import("./mail")
     const monitoring = mergeMonitoringSettings(org.monitoring)
-    // Ne jamais renvoyer le bind password en clair
+    // Ne jamais renvoyer secrets en clair
     if (monitoring.ldap) {
       monitoring.ldap = {
         ...monitoring.ldap,
         bindPassword: undefined
       } as typeof monitoring.ldap
     }
+    if (monitoring.smtp) {
+      const pub = publicSmtpView(monitoring.smtp)
+      monitoring.smtp = {
+        enabled: pub.enabled,
+        host: pub.host,
+        port: pub.port,
+        secure: pub.secure,
+        user: pub.user,
+        from: pub.from,
+        tlsInsecure: pub.tlsInsecure,
+        password: undefined
+      } as typeof monitoring.smtp
+      // password_set exposé à côté pour la console
+      ;(monitoring.smtp as { password_set?: boolean }).password_set =
+        pub.password_set
+    }
     return c.json({
       org_id: org.id,
       monitoring,
-      ldap_public: publicLdapView(monitoring.ldap)
+      ldap_public: publicLdapView(monitoring.ldap),
+      smtp_public: publicSmtpView(
+        mergeMonitoringSettings(org.monitoring).smtp
+      )
     })
   })
 
@@ -2162,6 +2182,7 @@ export function createApp() {
     const { mergeMonitoringSettings } = await import("./types")
     const mon = mergeMonitoringSettings(updated?.monitoring)
     if (mon.ldap) mon.ldap = { ...mon.ldap, bindPassword: undefined } as typeof mon.ldap
+    if (mon.smtp) mon.smtp = { ...mon.smtp, password: undefined } as typeof mon.smtp
     return c.json({
       ok: true,
       monitoring: mon
@@ -2760,11 +2781,14 @@ export function createApp() {
     )
     // Notification e-mail (best-effort)
     try {
+      const { mergeMonitoringSettings } = await import("./types")
+      const mon = mergeMonitoringSettings(org.monitoring)
       const { sendPasswordChangedNotice } = await import("./mail")
       await sendPasswordChangedNotice({
         to: existing.email,
         adminLabel: existing.label,
-        byEmail: _gate.admin.email
+        byEmail: _gate.admin.email,
+        smtp: mon.smtp
       })
     } catch {
       /* ignore mail errors */
@@ -3753,20 +3777,132 @@ export function createApp() {
     return c.json({ ok: true })
   })
 
-  /** Test SMTP (principal) — vérifie la connexion sans envoyer de mail */
+  /** Statut SMTP (org + env) — sans secrets */
   v1.get("/org/mail/status", async (c) => {
     const gate = await requireConsoleAuth(c, "console_access")
     if (!gate.ok) return c.json({ error: gate.error }, gate.status)
-    const { getMailStatus, verifySmtpConnection, isMailConfigured } =
-      await import("./mail")
-    const status = getMailStatus()
-    let verify: { ok: boolean; error?: string } | null = null
-    if (isMailConfigured() && gate.admin.isPrincipal) {
-      verify = await verifySmtpConnection()
+    const org = await store.getOrg(gate.orgId)
+    if (!org) return c.json({ error: "no_org" }, 404)
+    const { mergeMonitoringSettings } = await import("./types")
+    const mon = mergeMonitoringSettings(org.monitoring)
+    const {
+      getMailStatus,
+      verifySmtpConnection,
+      isMailConfigured,
+      publicSmtpView
+    } = await import("./mail")
+    const status = getMailStatus(mon.smtp)
+    let verify: { ok: boolean; error?: string; source?: string } | null = null
+    if (isMailConfigured(mon.smtp) && gate.admin.isPrincipal) {
+      verify = await verifySmtpConnection(mon.smtp)
     }
     return c.json({
+      org_id: org.id,
       ...status,
+      smtp: publicSmtpView(mon.smtp),
       verify: gate.admin.isPrincipal ? verify : undefined
+    })
+  })
+
+  /**
+   * Enregistre la config SMTP org (principal).
+   * Body = OrgSmtpSettings ; password vide = conserver l’ancien.
+   */
+  v1.put("/org/mail/settings", async (c) => {
+    const gate = await requireConsoleAuth(c, "manage_policies")
+    if (!gate.ok) return c.json({ error: gate.error }, gate.status)
+    if (!gate.admin.isPrincipal) {
+      return c.json({ error: "principal_only" }, 403)
+    }
+    const org = await store.getOrg(gate.orgId)
+    if (!org) return c.json({ error: "no_org" }, 404)
+    let body: Partial<import("./types").OrgSmtpSettings>
+    try {
+      body = await c.req.json()
+    } catch {
+      return c.json({ error: "invalid_json" }, 400)
+    }
+    const { mergeMonitoringSettings } = await import("./types")
+    const prev = mergeMonitoringSettings(org.monitoring)
+    const updated = await store.updateOrgMonitoring(org.id, {
+      ...prev,
+      smtp: {
+        ...(prev.smtp || {}),
+        ...body
+      } as import("./types").OrgSmtpSettings
+    })
+    await audit(
+      gate,
+      "org_settings_update",
+      `SMTP ${body.enabled === false ? "désactivé" : "mis à jour"} · host=${(body.host || prev.smtp?.host || "").trim() || "—"}`
+    )
+    const mon = mergeMonitoringSettings(updated?.monitoring)
+    const { publicSmtpView, getMailStatus } = await import("./mail")
+    return c.json({
+      ok: true,
+      smtp: publicSmtpView(mon.smtp),
+      status: getMailStatus(mon.smtp)
+    })
+  })
+
+  /** Test connexion SMTP (principal) */
+  v1.post("/org/mail/test", async (c) => {
+    const gate = await requireConsoleAuth(c, "manage_policies")
+    if (!gate.ok) return c.json({ error: gate.error }, gate.status)
+    if (!gate.admin.isPrincipal) {
+      return c.json({ error: "principal_only" }, 403)
+    }
+    const org = await store.getOrg(gate.orgId)
+    if (!org) return c.json({ error: "no_org" }, 404)
+    const { mergeMonitoringSettings } = await import("./types")
+    const mon = mergeMonitoringSettings(org.monitoring)
+    let body: { send_test_to?: string } = {}
+    try {
+      body = await c.req.json()
+    } catch {
+      body = {}
+    }
+    const { verifySmtpConnection, sendMail, publicSmtpView } = await import(
+      "./mail"
+    )
+    const verify = await verifySmtpConnection(mon.smtp)
+    if (!verify.ok) {
+      return c.json(
+        {
+          ok: false,
+          verify,
+          smtp: publicSmtpView(mon.smtp),
+          error: verify.error || "smtp_verify_failed"
+        },
+        400
+      )
+    }
+    const to = (body.send_test_to || gate.admin.email || "").trim()
+    let sent: { ok: boolean; delivery?: string; error?: string } | null = null
+    if (to.includes("@")) {
+      const r = await sendMail({
+        to,
+        subject: "OpsGate — test SMTP",
+        text: [
+          "Ceci est un e-mail de test OpsGate.",
+          `Org : ${org.name}`,
+          `Source SMTP : ${verify.source || "—"}`,
+          "Si vous lisez ceci, la configuration e-mail fonctionne.",
+          "— DailyOps.Tech / OpsGate"
+        ].join("\n"),
+        smtp: mon.smtp
+      })
+      sent = {
+        ok: r.ok,
+        delivery: r.delivery,
+        error: r.ok ? undefined : "error" in r ? r.error : undefined
+      }
+    }
+    return c.json({
+      ok: true,
+      verify,
+      test_email: sent,
+      smtp: publicSmtpView(mon.smtp)
     })
   })
 
