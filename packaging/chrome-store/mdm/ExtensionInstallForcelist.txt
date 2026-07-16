@@ -1,0 +1,16 @@
+# Chrome Enterprise — ExtensionInstallForcelist
+# https://chromeenterprise.google/policies/#ExtensionInstallForcelist
+#
+# Remplacer EXTENSION_ID par l'ID publié (32 lettres a-p).
+# Chaque ligne = une extension forcée.
+#
+# Windows Registry (HKLM) :
+#   Path: Software\Policies\Google\Chrome\ExtensionInstallForcelist
+#   Type: REG_SZ list (1, 2, 3…)
+#   Value: <id>;https://clients2.google.com/service/update2/crx
+
+1=EXTENSION_ID;https://clients2.google.com/service/update2/crx
+
+# Edge (Chromium) — même ID si publié aussi sur Edge Add-ons, sinon package Edge séparé :
+# Software\Policies\Microsoft\Edge\ExtensionInstallForcelist
+# 1=EXTENSION_ID;https://edge.microsoft.com/extensionwebstorebase/v1/crx

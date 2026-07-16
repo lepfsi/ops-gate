@@ -1,0 +1,14 @@
+Windows Registry Editor Version 5.00
+
+; OpsGate — force-install Chrome (machine)
+; 1) Remplacer EXTENSION_ID par l'ID CWS réel
+; 2) Double-clic en admin OU GPO Preferences
+; Doc: docs/architecture/CHROME-WEB-STORE-MDM.md
+
+[HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Google\Chrome\ExtensionInstallForcelist]
+"1"="EXTENSION_ID;https://clients2.google.com/service/update2/crx"
+
+; Optionnel : bloquer désinstallation d'autres stores non listés
+; [HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Google\Chrome]
+; "ExtensionInstallBlocklist"="*"
+; "ExtensionInstallAllowlist"="EXTENSION_ID"

@@ -258,13 +258,24 @@ Prod future : services Windows / silent scripts ; pas 3 terminaux ouverts.
 | Artefact | `build/firefox-mv3-prod/` (background.scripts) | Plasmo |
 | Docs | install about:debugging | `FIREFOX-MV3.md`, README |
 
-## 16. Suite recommandée
+## 16. V2 P2 — Chrome Web Store + MDM force-install (16 juillet 2026)
 
-1. Chrome Web Store / MDM force-install  
-2. LDAP / AD sync  
-3. Firefox AMO (signature)  
-4. Safari  
-5. OIDC : JIT, JWKS, `sso_enforce`  
+| Sujet | Détail | Fichiers |
+|-------|--------|----------|
+| Package | Build chrome + ZIP + SHA256 + listing | `scripts/package-chrome-store.ps1` |
+| npm | `pnpm store:chrome` · `package:chrome` | `package.json` |
+| MDM | ExtensionInstallForcelist, .reg Chrome/Edge | `packaging/chrome-store/mdm/` |
+| Intune | Settings catalog hint JSON | `intune-settings-catalog.json` |
+| Airgap | update.xml self-hosted template | `self-hosted-update.xml.template` |
+| Docs | CWS checklist + privacy perms | `CHROME-WEB-STORE-MDM.md`, `PRIVACY.md` |
+
+## 17. Suite recommandée
+
+1. LDAP / AD sync  
+2. Firefox AMO (signature)  
+3. Safari  
+4. OIDC : JIT, JWKS, `sso_enforce`  
+5. Publication CWS réelle (compte dev + review)  
 
 Détail : `docs/V2-BACKLOG.md` · `docs/architecture/PLATFORM-v2.md`.
 

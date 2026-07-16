@@ -1,0 +1,19 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<!--
+  OpsGate — update manifest for self-hosted CRX (enterprise offline / airgap).
+  Alternative to Chrome Web Store update URL.
+
+  Deploy:
+    1) Sign CRX with your extension private key (stable ID)
+    2) Host opsgate.crx + this XML on HTTPS internal
+    3) ExtensionInstallForcelist = <id>;https://extensions.corp.example/opsgate/updates.xml
+
+  See: https://developer.chrome.com/docs/extensions/how-to/distribute/host-on-linux
+-->
+<gupdate xmlns='http://www.google.com/update2/response' protocol='2.0'>
+  <app appid='EXTENSION_ID'>
+    <updatecheck
+      codebase='https://extensions.corp.example/opsgate/opsgate-VERSION.crx'
+      version='VERSION' />
+  </app>
+</gupdate>

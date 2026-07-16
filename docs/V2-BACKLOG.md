@@ -5,8 +5,8 @@ Mis à jour : 16 juillet 2026
 ## Où on en est (jalon)
 
 **V1.x / pré-V2 terrain** : proxy MITM multi-IA + soft-block, rapports PDF, docs DSI, maintenance agents, logs proxy toggle.  
-**Jalon actuel** : P0 + P1 complet + **P2 Firefox MV3** (build + shim API).  
-**Prochaine brique** : Chrome Web Store / MDM, ou LDAP.
+**Jalon actuel** : P0 + P1 + P2 Firefox + **CWS/MDM packaging**.  
+**Prochaine brique** : LDAP / AD sync (ou AMO / Safari).
 
 Voir le journal détaillé : [`CHANGELOG-TECHNIQUE.md`](./CHANGELOG-TECHNIQUE.md).
 
@@ -20,7 +20,7 @@ Voir le journal détaillé : [`CHANGELOG-TECHNIQUE.md`](./CHANGELOG-TECHNIQUE.md
 | **P1 ✅** | **SSO + MFA** | **Livré** : MFA TOTP + OIDC Authorization Code+PKCE (`/auth/oidc/start|callback`, mapping email→admin, bouton console). Reste optionnel : JIT, JWKS, WebAuthn, SAML, `sso_enforce`. |
 | **P1 ✅** | **Multi-tenant prod** | **Livré** : rate-limit, quotas étendus, Redis optionnel, **RLS Postgres** (`OPSGATE_PG_RLS`, FORCE policies). Optionnel : secrets/org, rôle PG non-superuser. |
 | **P2 ✅ partiel** | **Multi-navigateur** | **Chrome + Firefox MV3** livrés (`pnpm build:firefox`). Reste : Safari, AMO listing. |
-| **P2** | **Chrome Web Store** + force-install MDM | Distribution + ExtensionInstallForcelist |
+| **P2 ✅** | **Chrome Web Store** + force-install MDM | **Livré** : `pnpm store:chrome`, ZIP CWS, GPO/Intune/Edge reg, self-host update.xml. Reste : publication compte dev réelle. |
 | **P2** | **LDAP / AD sync** | Champs prêts ; sync groupes → policy |
 | **P3** | **Parser PPT/XLS** | PDF+DOCX déjà V1.x |
 | **P3** | **OCR images** | `scanImages` réservé |
