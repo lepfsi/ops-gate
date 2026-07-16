@@ -45,7 +45,10 @@ const fr: Dict = {
   "mfa.disabled": "MFA désactivé",
   "quota.title": "Quotas multi-tenant",
   "quota.eventsDay": "Max events / jour (0 = illimité)",
-  "quota.hint": "Limite les batches agents si dépassée (HTTP 429).",
+  "quota.eventsMin": "Max events / minute — burst (0 = illimité)",
+  "quota.agents": "Max agents actifs (0 = illimité)",
+  "quota.hint":
+    "Limites org : events (jour/minute) et agents. 429 si dépassé. Redis optionnel multi-instance.",
   "login.advanced": "Options avancées",
   "login.advancedHide": "Masquer les options avancées",
   "login.apiUrl": "URL API",
@@ -436,7 +439,10 @@ const en: Dict = {
   "mfa.disabled": "MFA disabled",
   "quota.title": "Multi-tenant quotas",
   "quota.eventsDay": "Max events / day (0 = unlimited)",
-  "quota.hint": "Caps agent event batches when exceeded (HTTP 429).",
+  "quota.eventsMin": "Max events / minute — burst (0 = unlimited)",
+  "quota.agents": "Max active agents (0 = unlimited)",
+  "quota.hint":
+    "Org limits: events (day/minute) and agents. 429 when exceeded. Optional Redis for multi-instance.",
   "login.advanced": "Advanced options",
   "login.advancedHide": "Hide advanced options",
   "login.apiUrl": "API URL",

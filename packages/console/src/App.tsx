@@ -2181,6 +2181,8 @@ function SystemSettingsView({
   const [siemFacility, setSiemFacility] = useState(16)
   const [siemApp, setSiemApp] = useState("OpsGate")
   const [quotaEventsDay, setQuotaEventsDay] = useState(0)
+  const [quotaEventsMin, setQuotaEventsMin] = useState(0)
+  const [quotaAgents, setQuotaAgents] = useState(0)
   const [mfaSecret, setMfaSecret] = useState("")
   const [mfaOtpUrl, setMfaOtpUrl] = useState("")
   const [mfaCode, setMfaCode] = useState("")
@@ -2256,6 +2258,8 @@ function SystemSettingsView({
           setSiemApp(si.appName || "OpsGate")
         }
         setQuotaEventsDay(m.quotas?.maxEventsPerDay ?? 0)
+        setQuotaEventsMin(m.quotas?.maxEventsPerMinute ?? 0)
+        setQuotaAgents(m.quotas?.maxAgents ?? 0)
         setLoaded(true)
       } catch (e) {
         setError(String(e))
@@ -2353,7 +2357,9 @@ function SystemSettingsView({
           appName: siemApp.trim() || "OpsGate"
         },
         quotas: {
-          maxEventsPerDay: Math.max(0, Math.floor(quotaEventsDay) || 0)
+          maxEventsPerDay: Math.max(0, Math.floor(quotaEventsDay) || 0),
+          maxEventsPerMinute: Math.max(0, Math.floor(quotaEventsMin) || 0),
+          maxAgents: Math.max(0, Math.floor(quotaAgents) || 0)
         }
       })
       try {
@@ -3146,6 +3152,24 @@ function SystemSettingsView({
               onChange={(e) =>
                 setQuotaEventsDay(Number(e.target.value) || 0)
               }
+            />
+            <label className="field-label">{t("quota.eventsMin")}</label>
+            <input
+              className="input"
+              type="number"
+              min={0}
+              value={quotaEventsMin}
+              onChange={(e) =>
+                setQuotaEventsMin(Number(e.target.value) || 0)
+              }
+            />
+            <label className="field-label">{t("quota.agents")}</label>
+            <input
+              className="input"
+              type="number"
+              min={0}
+              value={quotaAgents}
+              onChange={(e) => setQuotaAgents(Number(e.target.value) || 0)}
             />
           </div>
         </div>

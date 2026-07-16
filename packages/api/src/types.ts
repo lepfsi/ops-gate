@@ -175,7 +175,7 @@ export interface OrgMonitoringSettings {
   siem?: OrgSiEmSettings
   /**
    * Quotas multi-tenant (V2 P1).
-   * maxEventsPerDay : 0 = illimité.
+   * 0 = illimité pour chaque champ.
    */
   quotas?: OrgQuotaSettings
 }
@@ -183,10 +183,19 @@ export interface OrgMonitoringSettings {
 export interface OrgQuotaSettings {
   /** Max detection events acceptés / jour UTC (0 = off) */
   maxEventsPerDay: number
+  /** Max events / minute (burst) — 0 = off */
+  maxEventsPerMinute?: number
+  /**
+   * Max agents actifs (extension + proxy) par org — 0 = off.
+   * Re-enroll même fingerprint ne consomme pas de siège supplémentaire.
+   */
+  maxAgents?: number
 }
 
 export const DEFAULT_QUOTA_SETTINGS: OrgQuotaSettings = {
-  maxEventsPerDay: 0
+  maxEventsPerDay: 0,
+  maxEventsPerMinute: 0,
+  maxAgents: 0
 }
 
 /** Forward Syslog / SIEM (par org) */
@@ -436,7 +445,15 @@ export function mergeMonitoringSettings(
       maxEventsPerDay:
         typeof q.maxEventsPerDay === "number" && q.maxEventsPerDay >= 0
           ? Math.floor(q.maxEventsPerDay)
-          : base.quotas?.maxEventsPerDay ?? 0
+          : base.quotas?.maxEventsPerDay ?? 0,
+      maxEventsPerMinute:
+        typeof q.maxEventsPerMinute === "number" && q.maxEventsPerMinute >= 0
+          ? Math.floor(q.maxEventsPerMinute)
+          : base.quotas?.maxEventsPerMinute ?? 0,
+      maxAgents:
+        typeof q.maxAgents === "number" && q.maxAgents >= 0
+          ? Math.floor(q.maxAgents)
+          : base.quotas?.maxAgents ?? 0
     }
   }
   if (partial.schedule && typeof partial.schedule === "object") {
