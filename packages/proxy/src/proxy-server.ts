@@ -10,6 +10,7 @@ import { log } from "./log.js"
 import { mitmConnect } from "./mitm.js"
 import { createStreamObserver } from "./observe.js"
 import { generatePac } from "./pac.js"
+import { http2Enabled } from "./http2-mitm.js"
 import { resolveSoftMaskMode } from "./soft-mask.js"
 import { getProxyRemoteConfig } from "./sync.js"
 
@@ -182,6 +183,7 @@ export function startProxyServer(cfg: ProxyConfig): http.Server {
           /** observe = journal seul | enforce = coupe / mask si medium/high */
           filter_mode: filterMode,
           soft_mask: softMask,
+          http2: http2Enabled(),
           filter_enabled: remote.enabled !== false,
           ca_ready: caExists(),
           allowlist: cfg.allowlist,
@@ -190,8 +192,8 @@ export function startProxyServer(cfg: ProxyConfig): http.Server {
           org_code: cfg.orgCode,
           note:
             "Le proxy ne fait PAS de banner warn (c’est l’extension). " +
-            "Proxy: observe=log MMC, enforce=block|mask. " +
-            "OPSGATE_PROXY_SOFT_MASK=1|onwire|local. " +
+            "Proxy: observe=log MMC, enforce=block|mask, h2 stream-aware. " +
+            "OPSGATE_PROXY_SOFT_MASK=1|onwire|local · OPSGATE_PROXY_HTTP2=0 pour forcer h1. " +
             "Chrome: --proxy-server=127.0.0.1:8888"
         })
       )

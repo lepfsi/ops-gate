@@ -87,6 +87,7 @@ chrome.exe --proxy-server=127.0.0.1:8888
 | `OPSGATE_PROXY_AUTO_ENROLL` | `1` | Enroll au serve si pas de token |
 | `OPSGATE_PROXY_MODE` | `enforce` | `enforce` = block/mask medium/high ; `observe` = journal seul |
 | `OPSGATE_PROXY_SOFT_MASK` | off | `1`/`onwire` = rewrite body masqué + forward ; `local` = 422 sans amont |
+| `OPSGATE_PROXY_HTTP2` | `1` | `0` = forcer ALPN HTTP/1.1 only ; `1` = h2 stream-aware (RST / mask DATA) |
 
 ## Chrome (test forcé — fiable sous Windows)
 

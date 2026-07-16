@@ -115,6 +115,25 @@ $env:OPSGATE_PROXY_SOFT_MASK = "local"
 pnpm proxy:dev
 ```
 
+## HTTP/2 stream-aware
+
+| Env | Effet |
+|-----|--------|
+| `OPSGATE_PROXY_HTTP2=1` (défaut) | ALPN `h2` + `http/1.1` ; demux frames ; **hold par stream** |
+| `OPSGATE_PROXY_HTTP2=0` | Force HTTP/1.1 only (comportement historique enforce) |
+
+Comportement enforce h2 :
+
+1. Preface + frames de contrôle (SETTINGS, PING, WINDOW_UPDATE…) relayés immédiatement  
+2. HEADERS/DATA d’un stream bufferisés jusqu’à `END_STREAM` (ou idle)  
+3. Contenu sensible dans DATA →  
+   - **block** : `RST_STREAM` (CANCEL) client + amont — **autres streams OK**  
+   - **on-wire** : rewrite payloads DATA masqués puis forward  
+   - **local** : RST (pas de réponse JSON HTTP/1 422 sur h2)  
+4. Health : `http2: true|false` sur `/opsgate-proxy/health`  
+
+> HPACK non décodé : secrets uniquement dans les **corps DATA** (JSON chat typique). Les headers compressés ne sont pas scannés en clair.
+
 ## Logs
 
 - `packages/proxy/data/logs/service-stdout.log`

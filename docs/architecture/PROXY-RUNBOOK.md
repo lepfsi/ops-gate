@@ -125,12 +125,15 @@ Filtrer décision `observe` / `block` ou source `proxy`.
 | `$env:OPSGATE_PROXY_MODE="enforce"` | Défaut : agit si medium/high (block ou mask) |
 | `$env:OPSGATE_PROXY_MODE="observe"` | Journal seul + event `observe` (pas de coupure) |
 | `$env:OPSGATE_PROXY_SOFT_MASK="1"` | **On-wire** : body masqué puis forward amont + event `mask_send` |
-| `$env:OPSGATE_PROXY_SOFT_MASK="local"` | 422 JSON local sans amont |
-| soft-mask unset | Soft-block **403** + event `block` |
+| `$env:OPSGATE_PROXY_SOFT_MASK="local"` | 422 JSON local sans amont (h1) ; h2 → RST_STREAM |
+| soft-mask unset | Soft-block **403** (h1) / **RST_STREAM** (h2) + event `block` |
+| `$env:OPSGATE_PROXY_HTTP2="1"` | Défaut : ALPN h2 stream-aware |
+| `$env:OPSGATE_PROXY_HTTP2="0"` | Forcer HTTP/1.1 only |
 
 ```powershell
 $env:OPSGATE_PROXY_MODE="enforce"
 $env:OPSGATE_PROXY_SOFT_MASK="1"
+# $env:OPSGATE_PROXY_HTTP2="0"   # option : forcer h1
 pnpm proxy:dev
 ```
 
