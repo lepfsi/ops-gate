@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState, type CSSProperties } from "react"
 
+import { ext } from "~lib/browser-api"
 import type { OpsGateSettings } from "~types"
 import { DEFAULT_SETTINGS } from "~types"
 
@@ -20,7 +21,7 @@ function OptionsPage() {
 
   const load = useCallback(async () => {
     try {
-      const res = await chrome.runtime.sendMessage({ type: "GET_SETTINGS" })
+      const res = await ext.runtime.sendMessage({ type: "GET_SETTINGS" })
       if (res?.settings) setSettings(res.settings)
     } catch (e) {
       console.error(e)
@@ -37,7 +38,7 @@ function OptionsPage() {
     let cancelled = false
     void (async () => {
       try {
-        const res = await chrome.runtime.sendMessage({ type: "SYNC_NOW" })
+        const res = await ext.runtime.sendMessage({ type: "SYNC_NOW" })
         if (!cancelled && res?.ok && res.settings) {
           setSettings(res.settings)
         }
@@ -79,7 +80,7 @@ function OptionsPage() {
   const persistLocal = async (next: OpsGateSettings) => {
     if (locked) return
     setSettings(next)
-    await chrome.runtime.sendMessage({
+    await ext.runtime.sendMessage({
       type: "SET_SETTINGS",
       partial: next
     })
@@ -99,7 +100,7 @@ function OptionsPage() {
     setErr(null)
     setUnenrollPromptOpen(false)
     try {
-      const res = await chrome.runtime.sendMessage({
+      const res = await ext.runtime.sendMessage({
         type: "ENROLL",
         orgCode: kind === "personal" ? "PERSONAL" : orgCode.trim(),
         deviceLabel,
@@ -139,7 +140,7 @@ function OptionsPage() {
     setMsg(null)
     setErr(null)
     try {
-      const res = await chrome.runtime.sendMessage({ type: "SYNC_NOW" })
+      const res = await ext.runtime.sendMessage({ type: "SYNC_NOW" })
       if (res?.ok) {
         setSettings(res.settings)
         setMsg(
@@ -170,7 +171,7 @@ function OptionsPage() {
     setMsg(null)
     setErr(null)
     try {
-      const res = await chrome.runtime.sendMessage({
+      const res = await ext.runtime.sendMessage({
         type: "RESET_LOCAL_ORG",
         adminUsername: username,
         adminPassword: password

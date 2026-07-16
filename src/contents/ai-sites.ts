@@ -9,6 +9,7 @@ import {
   showToast,
   toastFromDecision
 } from "~lib/banner"
+import { ext } from "~lib/browser-api"
 import { mergeUserMessages } from "~types"
 import { detectTextSync, ensureRulesWarm, maskText } from "~lib/detect"
 import {
@@ -102,7 +103,7 @@ let settings: OpsGateSettings = { ...DEFAULT_SETTINGS }
 
 async function refreshSettings() {
   try {
-    const res = (await chrome.runtime.sendMessage({ type: "GET_SETTINGS" })) as {
+    const res = (await ext.runtime.sendMessage({ type: "GET_SETTINGS" })) as {
       ok?: boolean
       settings?: OpsGateSettings
     }
@@ -116,7 +117,7 @@ async function refreshSettings() {
 
 void refreshSettings()
 setInterval(() => void refreshSettings(), 8000)
-chrome.storage?.onChanged?.addListener((changes, area) => {
+ext.storage?.onChanged?.addListener((changes, area) => {
   if (area === "local" && changes.opsGateSettings?.newValue) {
     settings = { ...DEFAULT_SETTINGS, ...changes.opsGateSettings.newValue }
   }
@@ -130,7 +131,7 @@ function logDecision(
   fileNames?: string[]
 ) {
   try {
-    chrome.runtime.sendMessage({
+    ext.runtime.sendMessage({
       type: "LOG_DETECTION",
       entry: buildJournalPayload(
         location.href,

@@ -247,13 +247,24 @@ Prod future : services Windows / silent scripts ; pas 3 terminaux ouverts.
 | Modes | `OPSGATE_PG_RLS=off\|on\|strict` | health `pg_rls` |
 | Docs | `POSTGRES-RLS.md` | |
 
-## 15. Suite recommandée
+## 15. V2 P2 — Firefox MV3 (16 juillet 2026)
 
-1. **P2 Firefox MV3**  
-2. Chrome Web Store / MDM force-install  
-3. LDAP / AD sync  
-4. OIDC : JIT, JWKS, `sso_enforce`, SAML  
-5. Secrets chiffrés par org  
+| Sujet | Détail | Fichiers |
+|-------|--------|----------|
+| Build | `plasmo build --target=firefox-mv3` | `pnpm build:firefox`, `dev:firefox`, `build:all` |
+| Gecko id | `opsgate@dailyops.local`, min FF 121 | `package.json` manifest |
+| Shim API | `ext` = chrome \| browser | `src/lib/browser-api.ts` |
+| Code | background, popup, options, CS, storage | `chrome.*` → `ext.*` |
+| Artefact | `build/firefox-mv3-prod/` (background.scripts) | Plasmo |
+| Docs | install about:debugging | `FIREFOX-MV3.md`, README |
+
+## 16. Suite recommandée
+
+1. Chrome Web Store / MDM force-install  
+2. LDAP / AD sync  
+3. Firefox AMO (signature)  
+4. Safari  
+5. OIDC : JIT, JWKS, `sso_enforce`  
 
 Détail : `docs/V2-BACKLOG.md` · `docs/architecture/PLATFORM-v2.md`.
 

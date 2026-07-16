@@ -1,12 +1,13 @@
 import { highestSeverity, type Detection, type Severity } from "@opsgate/engine"
 
+import { getSettings } from "~lib/agent-store"
+import { ext } from "~lib/browser-api"
+import { reportEvents, flushEventQueue } from "~lib/cloud"
 import type {
   DetectionSource,
   JournalEntry,
   UserDecision
 } from "~types"
-import { reportEvents, flushEventQueue } from "~lib/cloud"
-import { getSettings } from "~lib/agent-store"
 
 // Re-export settings API from agent-store for backward compatibility
 export {
@@ -20,12 +21,12 @@ const JOURNAL_KEY = "opsGateJournal"
 const MAX_JOURNAL = 100
 
 export async function getJournal(): Promise<JournalEntry[]> {
-  const data = await chrome.storage.local.get(JOURNAL_KEY)
+  const data = await ext.storage.local.get(JOURNAL_KEY)
   return (data[JOURNAL_KEY] as JournalEntry[]) ?? []
 }
 
 export async function clearJournal(): Promise<void> {
-  await chrome.storage.local.set({ [JOURNAL_KEY]: [] })
+  await ext.storage.local.set({ [JOURNAL_KEY]: [] })
 }
 
 export async function appendJournal(
@@ -38,7 +39,7 @@ export async function appendJournal(
     timestamp: Date.now()
   }
   const next = [full, ...journal].slice(0, MAX_JOURNAL)
-  await chrome.storage.local.set({ [JOURNAL_KEY]: next })
+  await ext.storage.local.set({ [JOURNAL_KEY]: next })
 
   // Fire-and-forget cloud event (metadata only) + file d'attente si échec
   void maybeReport(full)

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react"
 
+import { ext } from "~lib/browser-api"
 import type { JournalEntry, OpsGateSettings } from "~types"
 import { DEFAULT_SETTINGS } from "~types"
 
@@ -44,8 +45,8 @@ function IndexPopup() {
   const refresh = async () => {
     try {
       const [s, j] = await Promise.all([
-        chrome.runtime.sendMessage({ type: "GET_SETTINGS" }),
-        chrome.runtime.sendMessage({ type: "GET_JOURNAL" })
+        ext.runtime.sendMessage({ type: "GET_SETTINGS" }),
+        ext.runtime.sendMessage({ type: "GET_JOURNAL" })
       ])
       if (s?.settings) setSettings(s.settings)
       if (j?.journal) setJournal(j.journal)
@@ -66,7 +67,7 @@ function IndexPopup() {
   const toggleEnabled = async () => {
     if (enrolled || hardLock) return
     const next = !settings.enabled
-    const res = await chrome.runtime.sendMessage({
+    const res = await ext.runtime.sendMessage({
       type: "SET_ENABLED",
       enabled: next
     })
@@ -75,12 +76,12 @@ function IndexPopup() {
 
   const clearJournal = async () => {
     if (enrolled) return
-    await chrome.runtime.sendMessage({ type: "CLEAR_JOURNAL" })
+    await ext.runtime.sendMessage({ type: "CLEAR_JOURNAL" })
     setJournal([])
   }
 
   const openOptions = () => {
-    chrome.runtime.openOptionsPage()
+    ext.runtime.openOptionsPage()
   }
 
   return (
