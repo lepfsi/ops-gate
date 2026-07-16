@@ -209,6 +209,16 @@ export interface OpsGateStore {
       unlock?: boolean
     }
   ): Promise<OrgAdmin | undefined>
+  /** MFA TOTP (V2 P1) */
+  setAdminTotp(
+    orgId: string,
+    adminId: string,
+    fields: {
+      totpEnabled?: boolean
+      totpSecret?: string | null
+      totpPendingSecret?: string | null
+    }
+  ): Promise<OrgAdmin | undefined>
   deleteAdmin(orgId: string, adminId: string): Promise<boolean>
   recordAdminLoginFailure(
     adminId: string,
@@ -224,7 +234,7 @@ export interface OpsGateStore {
   createAdminSession(
     email: string,
     password: string,
-    opts?: { force?: boolean }
+    opts?: { force?: boolean; totpCode?: string }
   ): Promise<
     | {
         ok: true

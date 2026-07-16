@@ -2163,6 +2163,12 @@ function SystemSettingsView({
   const [siemFormat, setSiemFormat] = useState<"rfc5424" | "cef">("rfc5424")
   const [siemFacility, setSiemFacility] = useState(16)
   const [siemApp, setSiemApp] = useState("OpsGate")
+  const [quotaEventsDay, setQuotaEventsDay] = useState(0)
+  const [mfaSecret, setMfaSecret] = useState("")
+  const [mfaOtpUrl, setMfaOtpUrl] = useState("")
+  const [mfaCode, setMfaCode] = useState("")
+  const [mfaPwd, setMfaPwd] = useState("")
+  const [mfaOn, setMfaOn] = useState(false)
   const [licCompany, setLicCompany] = useState("")
   const [licAddress, setLicAddress] = useState("")
   const [licEmail, setLicEmail] = useState("")
@@ -2232,6 +2238,7 @@ function SystemSettingsView({
           )
           setSiemApp(si.appName || "OpsGate")
         }
+        setQuotaEventsDay(m.quotas?.maxEventsPerDay ?? 0)
         setLoaded(true)
       } catch (e) {
         setError(String(e))
@@ -2327,6 +2334,9 @@ function SystemSettingsView({
           facility: Math.min(23, Math.max(0, Math.floor(siemFacility) || 16)),
           format: siemFormat,
           appName: siemApp.trim() || "OpsGate"
+        },
+        quotas: {
+          maxEventsPerDay: Math.max(0, Math.floor(quotaEventsDay) || 0)
         }
       })
       try {
@@ -2398,6 +2408,112 @@ function SystemSettingsView({
             <p className="muted" style={{ fontSize: 12, margin: 0 }}>
               {t("settings.lang.hint")}
             </p>
+          </div>
+
+          <h3 style={{ marginTop: 24 }}>{t("mfa.title")}</h3>
+          <p className="muted" style={{ fontSize: 12 }}>
+            {t("mfa.hint")}{" "}
+            {mfaOn ? (
+              <strong style={{ color: "var(--accent-ink)" }}>
+                · {t("mfa.enabled")}
+              </strong>
+            ) : null}
+          </p>
+          <div className="form-stack" style={{ maxWidth: 480 }}>
+            <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+              <button
+                type="button"
+                className="btn secondary"
+                disabled={busy}
+                onClick={async () => {
+                  setBusy(true)
+                  try {
+                    const r = await api.mfaSetup()
+                    setMfaSecret(r.secret)
+                    setMfaOtpUrl(r.otpauth_url)
+                    setInfo(r.message || "OK")
+                  } catch (e) {
+                    setError(String(e))
+                  } finally {
+                    setBusy(false)
+                  }
+                }}>
+                {t("mfa.setup")}
+              </button>
+            </div>
+            {mfaSecret && (
+              <>
+                <label className="field-label">{t("mfa.secret")}</label>
+                <input className="input mono" readOnly value={mfaSecret} />
+                <p className="muted mono" style={{ fontSize: 10, wordBreak: "break-all" }}>
+                  {mfaOtpUrl}
+                </p>
+                <label className="field-label">{t("mfa.code")}</label>
+                <input
+                  className="input mono"
+                  value={mfaCode}
+                  onChange={(e) =>
+                    setMfaCode(e.target.value.replace(/\D/g, "").slice(0, 6))
+                  }
+                  placeholder="123456"
+                />
+                <button
+                  type="button"
+                  className="btn"
+                  disabled={busy || mfaCode.length !== 6}
+                  onClick={async () => {
+                    setBusy(true)
+                    try {
+                      await api.mfaEnable(mfaCode)
+                      setMfaOn(true)
+                      setMfaSecret("")
+                      setMfaCode("")
+                      setInfo(t("mfa.enabled"))
+                    } catch (e) {
+                      setError(String(e))
+                    } finally {
+                      setBusy(false)
+                    }
+                  }}>
+                  {t("mfa.enable")}
+                </button>
+              </>
+            )}
+            <label className="field-label">{t("mfa.password")}</label>
+            <input
+              className="input"
+              type="password"
+              value={mfaPwd}
+              onChange={(e) => setMfaPwd(e.target.value)}
+            />
+            <label className="field-label">{t("mfa.code")}</label>
+            <input
+              className="input mono"
+              value={mfaCode}
+              onChange={(e) =>
+                setMfaCode(e.target.value.replace(/\D/g, "").slice(0, 6))
+              }
+            />
+            <button
+              type="button"
+              className="btn danger"
+              disabled={busy || !mfaPwd}
+              onClick={async () => {
+                setBusy(true)
+                try {
+                  await api.mfaDisable(mfaPwd, mfaCode)
+                  setMfaOn(false)
+                  setMfaPwd("")
+                  setMfaCode("")
+                  setInfo(t("mfa.disabled"))
+                } catch (e) {
+                  setError(String(e))
+                } finally {
+                  setBusy(false)
+                }
+              }}>
+              {t("mfa.disable")}
+            </button>
           </div>
         </div>
         )}
@@ -2998,6 +3114,22 @@ function SystemSettingsView({
               readOnly
               value={`${getApiBase().replace(/\/$/, "")}/metrics`}
             />
+
+            <hr style={{ border: 0, borderTop: "1px solid var(--line)", margin: "16px 0" }} />
+            <h3 style={{ margin: "0 0 8px", fontSize: 15 }}>{t("quota.title")}</h3>
+            <p className="muted" style={{ fontSize: 12, margin: 0 }}>
+              {t("quota.hint")}
+            </p>
+            <label className="field-label">{t("quota.eventsDay")}</label>
+            <input
+              className="input"
+              type="number"
+              min={0}
+              value={quotaEventsDay}
+              onChange={(e) =>
+                setQuotaEventsDay(Number(e.target.value) || 0)
+              }
+            />
           </div>
         </div>
         )}
@@ -3132,6 +3264,8 @@ function LoginScreen({
 }) {
   const [email, setEmail] = useState("admin@demo.local")
   const [password, setPassword] = useState("0000")
+  const [totp, setTotp] = useState("")
+  const [needMfa, setNeedMfa] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const [info, setInfo] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -3197,6 +3331,20 @@ function LoginScreen({
           onChange={(e) => setPassword(e.target.value)}
           autoComplete="current-password"
         />
+        {(needMfa || totp) && (
+          <>
+            <label className="field-label">{t("login.mfa")}</label>
+            <input
+              className="input mono"
+              style={{ width: "100%", minWidth: 0 }}
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              placeholder="123456"
+              value={totp}
+              onChange={(e) => setTotp(e.target.value.replace(/\D/g, "").slice(0, 6))}
+            />
+          </>
+        )}
         <button
           className="btn"
           type="button"
@@ -3208,8 +3356,14 @@ function LoginScreen({
             setCanForce(false)
             try {
               setApiBase(apiBase)
-              const r = await api.login(email, password, false)
+              const r = await api.login(
+                email,
+                password,
+                false,
+                totp || undefined
+              )
               setToken(r.token)
+              setNeedMfa(false)
               onLoggedIn(r.admin)
             } catch (e) {
               const err = e as Error & {
@@ -3218,6 +3372,18 @@ function LoginScreen({
               }
               const msg = String(e)
               if (
+                err.code === "mfa_required" ||
+                msg.includes("mfa_required")
+              ) {
+                setNeedMfa(true)
+                setErr(t("login.mfaRequired"))
+              } else if (
+                err.code === "mfa_invalid" ||
+                msg.includes("mfa_invalid")
+              ) {
+                setNeedMfa(true)
+                setErr(t("login.mfaInvalid"))
+              } else if (
                 err.code === "session_already_active" ||
                 msg.includes("session_already_active")
               ) {
@@ -3240,7 +3406,6 @@ function LoginScreen({
                 err.code === "invalid_credentials" ||
                 /invalid|invalide|identifiant/i.test(msg)
               ) {
-                // Fallback si remaining_attempts absent
                 setErr(msg.startsWith("Invalid") ? msg : `${t("login.invalid")}. ${msg}`)
               } else {
                 setErr(msg)
@@ -3269,7 +3434,12 @@ function LoginScreen({
               setErr(null)
               try {
                 setApiBase(apiBase)
-                const r = await api.login(email, password, true)
+                const r = await api.login(
+                  email,
+                  password,
+                  true,
+                  totp || undefined
+                )
                 setToken(r.token)
                 setCanForce(false)
                 setInfo(r.hint || t("login.force"))

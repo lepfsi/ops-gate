@@ -242,6 +242,7 @@ export type MonitoringSettings = {
   /** SIEM / Syslog (V2 P0) */
   siem?: SiEmSettings
   proxy?: { enabled: boolean; mode: "observe" | "enforce" }
+  quotas?: { maxEventsPerDay: number }
 }
 
 export type PackListItem = {
@@ -377,6 +378,7 @@ export type AdminRow = {
   locked?: boolean
   locked_at?: string | null
   failed_login_count?: number
+  mfa_enabled?: boolean
   created_at?: string
   updated_at?: string
 }
@@ -436,7 +438,12 @@ export const api = {
       note: string
     }>("/v1/auth/setup-info", { auth: false }),
 
-  login: (email: string, password: string, force?: boolean) =>
+  login: (
+    email: string,
+    password: string,
+    force?: boolean,
+    totpCode?: string
+  ) =>
     request<{
       ok: boolean
       token: string
@@ -444,11 +451,45 @@ export const api = {
       admin: AdminRow
       hint?: string
       forced?: boolean
+      mfa_enabled?: boolean
     }>("/v1/auth/login", {
       method: "POST",
       auth: false,
-      body: JSON.stringify({ email, password, force: !!force })
+      body: JSON.stringify({
+        email,
+        password,
+        force: !!force,
+        totp_code: totpCode || undefined
+      })
     }),
+
+  mfaSetup: () =>
+    request<{
+      ok: boolean
+      secret: string
+      otpauth_url: string
+      message?: string
+    }>("/v1/org/admins/me/mfa/setup", { method: "POST", body: "{}" }),
+
+  mfaEnable: (code: string) =>
+    request<{ ok: boolean; mfa_enabled: boolean }>(
+      "/v1/org/admins/me/mfa/enable",
+      { method: "POST", body: JSON.stringify({ code }) }
+    ),
+
+  mfaDisable: (password: string, code: string) =>
+    request<{ ok: boolean; mfa_enabled: boolean }>(
+      "/v1/org/admins/me/mfa/disable",
+      { method: "POST", body: JSON.stringify({ password, code }) }
+    ),
+
+  oidcStatus: () =>
+    request<{
+      enabled: boolean
+      issuer: string | null
+      client_id: string | null
+      note?: string
+    }>("/v1/auth/oidc/status", { auth: false }),
 
   logout: (reason?: "manual" | "idle") =>
     request<{ ok: boolean }>("/v1/auth/logout", {
