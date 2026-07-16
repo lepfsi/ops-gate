@@ -379,6 +379,10 @@ export class MemoryStore implements OpsGateStore {
     return this.orgs.get(id)
   }
 
+  async listOrgs() {
+    return [...this.orgs.values()]
+  }
+
   async setOrgLicenseSeats(orgId: string, seats: number) {
     const org = this.orgs.get(orgId)
     if (!org) return undefined

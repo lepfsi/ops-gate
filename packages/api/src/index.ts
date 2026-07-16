@@ -15,6 +15,7 @@ async function main() {
     `[opsgate-api] V1 listening on http://127.0.0.1:${port} (store=${store.kind})`
   )
   console.log(`[opsgate-api] Health:  GET  /health`)
+  console.log(`[opsgate-api] Metrics: GET  /metrics  (Prometheus)`)
   console.log(
     `[opsgate-api] Enroll:  POST /v1/enroll  { "org_code": "DEMO-OPSGATE" }`
   )

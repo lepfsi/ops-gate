@@ -138,6 +138,8 @@ export interface OpsGateStore {
 
   findOrgByCode(code: string): Promise<Organization | undefined>
   getOrg(id: string): Promise<Organization | undefined>
+  /** Toutes les orgs (métriques Prometheus multi-tenant) */
+  listOrgs(): Promise<Organization[]>
   /** Met à jour monitoring (seuils offline + schedule) */
   setOrgLicenseSeats(orgId: string, seats: number): Promise<Organization | undefined>
 

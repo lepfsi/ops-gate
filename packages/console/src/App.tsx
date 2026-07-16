@@ -2156,6 +2156,13 @@ function SystemSettingsView({
   const [notifLicDays, setNotifLicDays] = useState(30)
   const [notifBrute, setNotifBrute] = useState(true)
   const [notifBruteThr, setNotifBruteThr] = useState(5)
+  const [siemOn, setSiemOn] = useState(false)
+  const [siemHost, setSiemHost] = useState("")
+  const [siemPort, setSiemPort] = useState(514)
+  const [siemProto, setSiemProto] = useState<"udp" | "tcp">("udp")
+  const [siemFormat, setSiemFormat] = useState<"rfc5424" | "cef">("rfc5424")
+  const [siemFacility, setSiemFacility] = useState(16)
+  const [siemApp, setSiemApp] = useState("OpsGate")
   const [licCompany, setLicCompany] = useState("")
   const [licAddress, setLicAddress] = useState("")
   const [licEmail, setLicEmail] = useState("")
@@ -2212,6 +2219,18 @@ function SystemSettingsView({
           setNotifLicDays(n.licenseExpiringDays ?? 30)
           setNotifBrute(n.loginBruteForce !== false)
           setNotifBruteThr(n.loginBruteForceThreshold ?? 5)
+        }
+        const si = m.siem
+        if (si) {
+          setSiemOn(!!si.enabled)
+          setSiemHost(si.host || "")
+          setSiemPort(si.port || 514)
+          setSiemProto(si.protocol === "tcp" ? "tcp" : "udp")
+          setSiemFormat(si.format === "cef" ? "cef" : "rfc5424")
+          setSiemFacility(
+            typeof si.facility === "number" ? si.facility : 16
+          )
+          setSiemApp(si.appName || "OpsGate")
         }
         setLoaded(true)
       } catch (e) {
@@ -2299,6 +2318,15 @@ function SystemSettingsView({
             schedOn && breakStart && breakEnd
               ? [{ start: breakStart, end: breakEnd }]
               : []
+        },
+        siem: {
+          enabled: siemOn,
+          protocol: siemProto,
+          host: siemHost.trim(),
+          port: Math.min(65535, Math.max(1, Math.floor(siemPort) || 514)),
+          facility: Math.min(23, Math.max(0, Math.floor(siemFacility) || 16)),
+          format: siemFormat,
+          appName: siemApp.trim() || "OpsGate"
         }
       })
       try {
@@ -2873,6 +2901,103 @@ function SystemSettingsView({
                 </div>
               </>
             )}
+
+            <hr style={{ border: 0, borderTop: "1px solid var(--line)", margin: "16px 0" }} />
+            <h3 style={{ margin: "0 0 8px", fontSize: 15 }}>{t("siem.title")}</h3>
+            <p className="muted" style={{ fontSize: 12, margin: 0 }}>
+              {t("siem.hint")}
+            </p>
+            <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <input
+                type="checkbox"
+                checked={siemOn}
+                onChange={(e) => setSiemOn(e.target.checked)}
+              />
+              {t("siem.enabled")}
+            </label>
+            {siemOn && (
+              <>
+                <label className="field-label">{t("siem.host")}</label>
+                <input
+                  className="input"
+                  placeholder="siem.example.local"
+                  value={siemHost}
+                  onChange={(e) => setSiemHost(e.target.value)}
+                />
+                <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+                  <div>
+                    <label className="field-label">{t("siem.port")}</label>
+                    <input
+                      className="input"
+                      type="number"
+                      min={1}
+                      max={65535}
+                      value={siemPort}
+                      onChange={(e) =>
+                        setSiemPort(Number(e.target.value) || 514)
+                      }
+                    />
+                  </div>
+                  <div>
+                    <label className="field-label">{t("siem.protocol")}</label>
+                    <select
+                      className="input"
+                      value={siemProto}
+                      onChange={(e) =>
+                        setSiemProto(
+                          e.target.value === "tcp" ? "tcp" : "udp"
+                        )
+                      }>
+                      <option value="udp">UDP</option>
+                      <option value="tcp">TCP</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="field-label">{t("siem.format")}</label>
+                    <select
+                      className="input"
+                      value={siemFormat}
+                      onChange={(e) =>
+                        setSiemFormat(
+                          e.target.value === "cef" ? "cef" : "rfc5424"
+                        )
+                      }>
+                      <option value="rfc5424">RFC 5424</option>
+                      <option value="cef">CEF</option>
+                    </select>
+                  </div>
+                </div>
+                <label className="field-label">{t("siem.facility")}</label>
+                <input
+                  className="input"
+                  type="number"
+                  min={0}
+                  max={23}
+                  value={siemFacility}
+                  onChange={(e) =>
+                    setSiemFacility(Number(e.target.value) || 16)
+                  }
+                />
+                <label className="field-label">{t("siem.appName")}</label>
+                <input
+                  className="input"
+                  value={siemApp}
+                  onChange={(e) => setSiemApp(e.target.value)}
+                />
+              </>
+            )}
+
+            <hr style={{ border: 0, borderTop: "1px solid var(--line)", margin: "16px 0" }} />
+            <h3 style={{ margin: "0 0 8px", fontSize: 15 }}>{t("siem.metrics")}</h3>
+            <p className="muted" style={{ fontSize: 12, margin: 0 }}>
+              {t("siem.metricsHint")}
+            </p>
+            <label className="field-label">{t("siem.metricsUrl")}</label>
+            <input
+              className="input mono"
+              readOnly
+              value={`${getApiBase().replace(/\/$/, "")}/metrics`}
+            />
           </div>
         </div>
         )}

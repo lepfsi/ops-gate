@@ -149,15 +149,23 @@ Prod future : services Windows / silent scripts ; pas 3 terminaux ouverts.
 
 ---
 
-## 6. Suite recommandée (V2) — voir aussi V2-BACKLOG
+## 6. V2 P0 livré — SIEM + Prometheus (16 juillet 2026)
 
-Ordre de priorité raisonnable après stabilisation V1.x :
+| Sujet | Détail | Fichiers |
+|-------|--------|----------|
+| Syslog RFC5424 / CEF | Forward best-effort après `events/batch` | `packages/api/src/siem.ts` |
+| Config org | `monitoring.siem` (host, port, udp/tcp, facility, format) | `types.ts`, merge, console Monitoring |
+| Prometheus | `GET /metrics` (+ token optionnel `OPSGATE_METRICS_TOKEN`) | `packages/api/src/metrics.ts`, `app.ts` |
+| Grafana | Dashboard JSON | `docs/grafana/opsgate-dashboard.json`, `docs/grafana/README.md` |
+| listOrgs | Multi-tenant scrape | `memory-store` / `pg-store` |
 
-1. **SIEM / Syslog** + **Prometheus/Grafana** (observabilité entreprise)  
-2. **Proxy prod** : MSI / service Windows, soft-mask on-wire, HTTP/2 stream-aware  
-3. **SSO + MFA** console  
-4. **Firefox** (multi-navigateur)  
-5. **Chrome Web Store** / force-install MDM  
+## 7. Suite recommandée (après P0)
+
+1. **Proxy prod** : MSI / service Windows, soft-mask on-wire, HTTP/2 stream-aware  
+2. **SSO + MFA** console  
+3. **Firefox** (multi-navigateur)  
+4. **Chrome Web Store** / force-install MDM  
+5. Connecteurs SIEM packagés (apps Splunk…)  
 
 Détail : `docs/V2-BACKLOG.md` · `docs/architecture/PLATFORM-v2.md`.
 

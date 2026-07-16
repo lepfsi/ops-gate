@@ -79,10 +79,40 @@ export function createApp() {
         "policy-profiles",
         "vendor-recovery-offline-only",
         "password-otp-reset-principal",
-        "console-auth"
+        "console-auth",
+        "siem-syslog",
+        "prometheus-metrics",
+        "security-report-pdf"
       ]
     })
   )
+
+  /**
+   * Prometheus scrape endpoint (V2 P0).
+   * Auth optionnelle : header Authorization: Bearer $OPSGATE_METRICS_TOKEN
+   * ou ?token= si OPSGATE_METRICS_TOKEN est défini.
+   */
+  app.get("/metrics", async (c) => {
+    const expected = process.env.OPSGATE_METRICS_TOKEN?.trim()
+    if (expected) {
+      const auth = c.req.header("Authorization") || ""
+      const bearer = auth.match(/^Bearer\s+(.+)$/i)?.[1]?.trim()
+      const q = c.req.query("token") || ""
+      if (bearer !== expected && q !== expected) {
+        return c.text("unauthorized\n", 401)
+      }
+    }
+    try {
+      const { renderPrometheusMetrics } = await import("./metrics")
+      const body = await renderPrometheusMetrics(store)
+      return c.text(body, 200, {
+        "content-type": "text/plain; version=0.0.4; charset=utf-8",
+        "cache-control": "no-store"
+      })
+    } catch (e) {
+      return c.text(`# error ${String((e as Error).message || e)}\n`, 500)
+    }
+  })
 
   /** Clé publique pour vérifier les RulePacks côté agent */
   app.get("/v1/crypto/public-key", (c) =>
@@ -475,6 +505,30 @@ export function createApp() {
       })
     }
     const result = await store.appendEvents(agent.orgId, agent.id, toStore)
+    // V2 P0 : compteurs Prometheus + forward SIEM (best-effort)
+    try {
+      const { recordAcceptedEvents, forwardEventsToSiem, recordSiemForwarded } =
+        await import("./siem")
+      recordAcceptedEvents(toStore as import("./types").StoredEvent[])
+      const org = await store.getOrg(agent.orgId)
+      const { mergeMonitoringSettings } = await import("./types")
+      const mon = mergeMonitoringSettings(org?.monitoring)
+      if (mon.siem?.enabled && mon.siem.host) {
+        const stored = (toStore as import("./types").StoredEvent[]).map(
+          (e, i) => ({
+            ...e,
+            orgId: agent.orgId,
+            agentId: agent.id,
+            id: `fwd-${i}`,
+            receivedAt: new Date().toISOString()
+          })
+        )
+        forwardEventsToSiem(stored, mon.siem, { orgId: agent.orgId })
+        recordSiemForwarded(stored.length)
+      }
+    } catch {
+      /* non bloquant */
+    }
     return c.json({ ok: true, ...result })
   })
 

@@ -168,6 +168,35 @@ export interface OrgMonitoringSettings {
     enabled: boolean
     mode: "observe" | "enforce"
   }
+  /**
+   * SIEM / Syslog (V2 P0) — forward des detection events.
+   * format rfc5424 (défaut) ou cef (ArcSight/Splunk).
+   */
+  siem?: OrgSiEmSettings
+}
+
+/** Forward Syslog / SIEM (par org) */
+export interface OrgSiEmSettings {
+  enabled: boolean
+  /** udp (défaut) | tcp */
+  protocol: "udp" | "tcp"
+  host: string
+  port: number
+  /** Syslog facility 0–23 (défaut 16 = local0) */
+  facility: number
+  format: "rfc5424" | "cef"
+  /** APP-NAME RFC5424 (défaut OpsGate) */
+  appName?: string
+}
+
+export const DEFAULT_SIEM_SETTINGS: OrgSiEmSettings = {
+  enabled: false,
+  protocol: "udp",
+  host: "",
+  port: 514,
+  facility: 16,
+  format: "rfc5424",
+  appName: "OpsGate"
 }
 
 /** Code recovery one-time (hash only en base ; clair affiché une fois) */
@@ -259,7 +288,8 @@ export const DEFAULT_MONITORING_SETTINGS: OrgMonitoringSettings = {
     enabled: true,
     /** enforce = le proxy coupe les flux medium/high (filtre, y compris uploads textuels) */
     mode: "enforce"
-  }
+  },
+  siem: { ...DEFAULT_SIEM_SETTINGS }
 }
 
 export function mergeMonitoringSettings(
@@ -360,6 +390,29 @@ export function mergeMonitoringSettings(
         partial.licenseDisplay.licenseKeyFingerprint !== undefined
           ? partial.licenseDisplay.licenseKeyFingerprint
           : base.licenseDisplay!.licenseKeyFingerprint
+    }
+  }
+  if (partial.siem && typeof partial.siem === "object") {
+    const s = partial.siem
+    base.siem = {
+      ...DEFAULT_SIEM_SETTINGS,
+      ...base.siem,
+      enabled: s.enabled === true,
+      protocol: s.protocol === "tcp" ? "tcp" : "udp",
+      host: typeof s.host === "string" ? s.host.trim() : base.siem?.host || "",
+      port:
+        typeof s.port === "number" && s.port >= 1 && s.port <= 65535
+          ? Math.floor(s.port)
+          : base.siem?.port || 514,
+      facility:
+        typeof s.facility === "number" && s.facility >= 0 && s.facility <= 23
+          ? Math.floor(s.facility)
+          : base.siem?.facility ?? 16,
+      format: s.format === "cef" ? "cef" : "rfc5424",
+      appName:
+        typeof s.appName === "string" && s.appName.trim()
+          ? s.appName.trim().slice(0, 48)
+          : base.siem?.appName || "OpsGate"
     }
   }
   if (partial.schedule && typeof partial.schedule === "object") {
