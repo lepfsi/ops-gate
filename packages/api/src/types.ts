@@ -696,6 +696,11 @@ export interface OrgAdmin {
   label: string
   email: string
   passwordHash: string
+  /**
+   * Hashes des mots de passe précédents (anti-réutilisation).
+   * Ne jamais renvoyer à la console.
+   */
+  passwordHistory?: string[]
   /** Super-admin : tous les droits (plusieurs par org possibles) */
   isPrincipal: boolean
   /** Rôles (principal ignore et a tout) */

@@ -311,12 +311,26 @@ function rowEvent(r: pg.QueryResultRow): StoredEvent {
 }
 
 function rowAdmin(r: pg.QueryResultRow): OrgAdmin {
+  let passwordHistory: string[] = []
+  if (Array.isArray(r.password_history)) {
+    passwordHistory = r.password_history.filter(
+      (x: unknown) => typeof x === "string"
+    )
+  } else if (typeof r.password_history === "string") {
+    try {
+      const p = JSON.parse(r.password_history)
+      if (Array.isArray(p)) passwordHistory = p.filter((x) => typeof x === "string")
+    } catch {
+      /* ignore */
+    }
+  }
   return {
     id: r.id,
     orgId: r.org_id,
     label: r.label,
     email: r.email,
     passwordHash: r.password_hash,
+    passwordHistory,
     isPrincipal: !!r.is_principal,
     permissions: (r.permissions || []) as AdminPermission[],
     active: r.active !== false,
@@ -1526,6 +1540,13 @@ export class PgStore implements OpsGateStore {
     )
   }
 
+  async ensureAdminPasswordHistoryColumn() {
+    await this.pool.query(`
+      ALTER TABLE org_admins
+        ADD COLUMN IF NOT EXISTS password_history JSONB NOT NULL DEFAULT '[]'::jsonb
+    `)
+  }
+
   async upsertAdmin(
     orgId: string,
     input: {
@@ -1540,11 +1561,17 @@ export class PgStore implements OpsGateStore {
       unlock?: boolean
     }
   ) {
+    await this.ensureAdminPasswordHistoryColumn()
     const org = await this.getOrg(orgId)
     if (!org) return undefined
     const now = new Date().toISOString()
     const email = input.email.trim().toLowerCase()
     if (!email.includes("@")) return undefined
+    const {
+      validatePasswordPolicy,
+      pushPasswordHistory,
+      hashManagementPassword: hashPw
+    } = await import("./crypto")
 
     if (input.id) {
       const { rows } = await this.pool.query(
@@ -1560,14 +1587,22 @@ export class PgStore implements OpsGateStore {
       if (dup.rows.length > 0) return undefined
 
       let passwordHash = prev.passwordHash
+      let passwordHistory = prev.passwordHistory || []
       let mustChange =
         input.mustChangePassword !== undefined
           ? input.mustChangePassword
           : prev.mustChangePassword
       if (input.password) {
-        const min = prev.isPrincipal ? 4 : 6
-        if (input.password.length < min) return undefined
-        passwordHash = hashManagementPassword(input.password)
+        const pol = validatePasswordPolicy(input.password, {
+          currentHash: prev.passwordHash,
+          history: prev.passwordHistory
+        })
+        if (!pol.ok) return undefined
+        passwordHistory = pushPasswordHistory(
+          prev.passwordHash,
+          prev.passwordHistory
+        )
+        passwordHash = hashPw(input.password)
         if (input.mustChangePassword === undefined) mustChange = false
       }
       const isPrincipal =
@@ -1588,7 +1623,8 @@ export class PgStore implements OpsGateStore {
         `UPDATE org_admins SET
           label=$3, email=$4, password_hash=$5, permissions=$6::jsonb,
           active=$7, must_change_password=$8, updated_at=$9,
-          is_principal=$10, failed_login_count=$11, locked_at=$12
+          is_principal=$10, failed_login_count=$11, locked_at=$12,
+          password_history=$13::jsonb
          WHERE org_id=$1 AND id=$2 RETURNING *`,
         [
           orgId,
@@ -1602,7 +1638,8 @@ export class PgStore implements OpsGateStore {
           now,
           isPrincipal,
           failedLoginCount,
-          lockedAt
+          lockedAt,
+          JSON.stringify(passwordHistory)
         ]
       )
       if (isPrincipal && input.password) {
@@ -1611,11 +1648,20 @@ export class PgStore implements OpsGateStore {
           [orgId, passwordHash]
         )
       }
+      // Sync e-mail install si principal change d’adresse
+      if (isPrincipal && email !== (org.primaryEmail || "").toLowerCase()) {
+        await this.pool.query(
+          `UPDATE organizations SET primary_email = $2 WHERE id = $1`,
+          [orgId, email]
+        )
+      }
       await this.forceConfigSync(orgId)
       return rowAdmin(updated[0])
     }
 
-    if (!input.password || input.password.length < 6) return undefined
+    if (!input.password) return undefined
+    const pol = validatePasswordPolicy(input.password)
+    if (!pol.ok) return undefined
     const exists = await this.pool.query(
       `SELECT id FROM org_admins WHERE org_id = $1 AND email = $2`,
       [orgId, email]
@@ -1633,14 +1679,14 @@ export class PgStore implements OpsGateStore {
     }
     const id = newId("adm")
     const { rows } = await this.pool.query(
-      `INSERT INTO org_admins (id, org_id, label, email, password_hash, is_principal, permissions, active, must_change_password, created_at, updated_at, failed_login_count, locked_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,false,$9,$9,0,NULL) RETURNING *`,
+      `INSERT INTO org_admins (id, org_id, label, email, password_hash, is_principal, permissions, active, must_change_password, created_at, updated_at, failed_login_count, locked_at, password_history)
+       VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,false,$9,$9,0,NULL,'[]'::jsonb) RETURNING *`,
       [
         id,
         orgId,
         input.label.trim() || `admin`,
         email,
-        hashManagementPassword(input.password),
+        hashPw(input.password),
         asPrincipal,
         JSON.stringify(permissions),
         input.active !== false,
@@ -2635,9 +2681,6 @@ export class PgStore implements OpsGateStore {
     if (hashManagementPassword(otp.trim()) !== rows[0].code_hash) {
       return { ok: false as const, error: "otp_invalid" }
     }
-    if (!newPassword || newPassword.length < 6) {
-      return { ok: false as const, error: "password_too_short" }
-    }
     const chAdminId = (rows[0].admin_id as string) || ""
     const chEmail = ((rows[0].target_email as string) || "").toLowerCase()
     if (target?.adminId && chAdminId && target.adminId !== chAdminId) {
@@ -2650,7 +2693,6 @@ export class PgStore implements OpsGateStore {
     ) {
       return { ok: false as const, error: "admin_mismatch" }
     }
-    // Cible = admin du challenge, sinon fallback email fourni
     let adminId = chAdminId
     if (!adminId && target?.adminId) adminId = target.adminId
     if (!adminId && (chEmail || target?.email)) {
@@ -2660,7 +2702,6 @@ export class PgStore implements OpsGateStore {
       adminId = a?.id || ""
     }
     if (!adminId) {
-      // legacy challenges sans admin_id : ne pas retomber sur DEMO seed
       return { ok: false as const, error: "admin_missing_on_challenge" }
     }
     const { rows: admRows } = await this.pool.query(
@@ -2668,15 +2709,32 @@ export class PgStore implements OpsGateStore {
       [adminId, orgId]
     )
     if (!admRows[0]) return { ok: false as const, error: "admin_not_found" }
-    const isPrincipal = admRows[0].is_principal === true
-    const hash = hashManagementPassword(newPassword)
+    const prev = rowAdmin(admRows[0])
+    const {
+      validatePasswordPolicy,
+      pushPasswordHistory,
+      hashManagementPassword: hashPw
+    } = await import("./crypto")
+    const pol = validatePasswordPolicy(newPassword, {
+      currentHash: prev.passwordHash,
+      history: prev.passwordHistory
+    })
+    if (!pol.ok) return { ok: false as const, error: pol.error }
+    const isPrincipal = prev.isPrincipal
+    const hash = hashPw(newPassword)
+    const history = pushPasswordHistory(prev.passwordHash, prev.passwordHistory)
+    await this.ensureAdminPasswordHistoryColumn()
     await this.pool.query(
-      `UPDATE org_admins SET password_hash = $2, must_change_password = FALSE, updated_at = NOW()
+      `UPDATE org_admins SET password_hash = $2, must_change_password = FALSE, updated_at = NOW(), password_history = $3::jsonb
        WHERE id = $1`,
-      [adminId, hash]
+      [adminId, hash, JSON.stringify(history)]
     )
     if (isPrincipal) {
       await this.updatePolicy(orgId, { managementPasswordHash: hash })
+      await this.pool.query(
+        `UPDATE organizations SET primary_email = $2 WHERE id = $1`,
+        [orgId, prev.email]
+      )
     }
     await this.pool.query(
       `DELETE FROM password_reset_challenges WHERE org_id = $1`,

@@ -252,7 +252,8 @@ export default function App() {
       try {
         const me = await api.me()
         setSessionAdmin(me.admin)
-        if (me.org?.primary_email) setPrimaryEmail(me.org.primary_email)
+        if (me.admin?.is_principal && me.admin.email) setPrimaryEmail(me.admin.email)
+        else if (me.org?.primary_email) setPrimaryEmail(me.org.primary_email)
         if (me.org?.org_code) setOrgCode(me.org.org_code)
         if (me.org?.name) setOrgName(me.org.name)
       } catch {
@@ -439,7 +440,8 @@ export default function App() {
           setSessionAdmin(admin)
           try {
             const me = await api.me()
-            if (me.org?.primary_email) setPrimaryEmail(me.org.primary_email)
+            if (me.admin?.is_principal && me.admin.email) setPrimaryEmail(me.admin.email)
+        else if (me.org?.primary_email) setPrimaryEmail(me.org.primary_email)
             if (me.org?.org_code) setOrgCode(me.org.org_code)
             if (me.org?.name) setOrgName(me.org.name)
           } catch {
@@ -736,7 +738,9 @@ export default function App() {
             Org · <strong className="mono">{orgCode}</strong>
           </span>
         ) : null}
-        {primaryEmail ? <span>Install · {primaryEmail}</span> : null}
+        <span title="Compte connecté">
+          Compte · <strong>{sessionAdmin.email}</strong>
+        </span>
         <span className="meta-tag">V1 1.2</span>
         <button
           type="button"
@@ -1011,7 +1015,7 @@ function ForcePasswordModal({ onDone }: { onDone: () => void }) {
           onChange={(e) => setCur(e.target.value)}
           placeholder="Actuel (ex. 0000)"
         />
-        <label className="field-label">Nouveau mot de passe (≥6)</label>
+        <label className="field-label">Nouveau mot de passe (≥8)</label>
         <input
           className="input"
           type="password"
@@ -1033,7 +1037,7 @@ function ForcePasswordModal({ onDone }: { onDone: () => void }) {
           className="btn"
           type="button"
           style={{ marginTop: 14, width: "100%" }}
-          disabled={busy || next.length < 6 || next !== next2 || !cur}
+          disabled={busy || next.length < 8 || next !== next2 || !cur}
           onClick={async () => {
             setBusy(true)
             setErr(null)
@@ -2242,6 +2246,33 @@ function SystemSettingsView({
   } | null>(null)
   const [loaded, setLoaded] = useState(false)
 
+  // Charger SMTP seulement quand l’onglet mail est ouvert (évite lenteur)
+  useEffect(() => {
+    if (settingsTab !== "mail") return
+    void (async () => {
+      try {
+        const ms = await api.mailStatus()
+        setSmtpStatusLine(
+          ms.configured
+            ? `${t("mail.configured")} · ${ms.host || ""}:${ms.port || ""} · ${ms.from || ""}`
+            : t("mail.notConfigured")
+        )
+        if (ms.smtp) {
+          setSmtpOn(!!ms.smtp.enabled)
+          setSmtpHost(ms.smtp.host || "")
+          setSmtpPort(ms.smtp.port || 587)
+          setSmtpSecure(!!ms.smtp.secure)
+          setSmtpUser(ms.smtp.user || "")
+          setSmtpFrom(ms.smtp.from || "")
+          setSmtpTlsInsecure(!!ms.smtp.tlsInsecure)
+          setSmtpPwdSet(!!ms.smtp.password_set)
+        }
+      } catch {
+        /* ignore */
+      }
+    })()
+  }, [settingsTab, t])
+
   useEffect(() => {
     void (async () => {
       try {
@@ -2302,26 +2333,7 @@ function SystemSettingsView({
           setSmtpTlsInsecure(!!sm.tlsInsecure)
           setSmtpPwdSet(!!sm.password_set)
         }
-        try {
-          const ms = await api.mailStatus()
-          setSmtpStatusLine(
-            ms.configured
-              ? `${t("mail.configured")} · ${ms.host || ""}:${ms.port || ""} · ${ms.from || ""}`
-              : t("mail.notConfigured")
-          )
-          if (ms.smtp) {
-            setSmtpOn(!!ms.smtp.enabled)
-            setSmtpHost(ms.smtp.host || "")
-            setSmtpPort(ms.smtp.port || 587)
-            setSmtpSecure(!!ms.smtp.secure)
-            setSmtpUser(ms.smtp.user || "")
-            setSmtpFrom(ms.smtp.from || "")
-            setSmtpTlsInsecure(!!ms.smtp.tlsInsecure)
-            setSmtpPwdSet(!!ms.smtp.password_set)
-          }
-        } catch {
-          /* mail status optional */
-        }
+        // SMTP : pas de mailStatus ici (lent) — chargé à l'onglet mail
         const ld = m.ldap
         if (ld) {
           setLdapOn(!!ld.enabled)
@@ -4215,7 +4227,7 @@ function LoginScreen({
                   onChange={(e) => setOtp(e.target.value)}
                   autoFocus
                 />
-                <label className="field-label">Nouveau mot de passe (≥6)</label>
+                <label className="field-label">Nouveau mot de passe (≥8)</label>
                 <input
                   className="input"
                   type="password"
@@ -4226,7 +4238,7 @@ function LoginScreen({
                   <button
                     className="btn"
                     type="button"
-                    disabled={busy || !otp || otpNew.length < 6}
+                    disabled={busy || !otp || otpNew.length < 8}
                     onClick={async () => {
                       setBusy(true)
                       try {
@@ -5488,9 +5500,9 @@ function PeopleView({
                         title={t("people.newPwd")}
                         onClick={() => {
                           const pwd = prompt(
-                            `${t("people.newPwdPrompt")} ${a.label} (≥6) :`
+                            `${t("people.newPwdPrompt")} ${a.label} (≥8) :`
                           )
-                          if (!pwd || pwd.length < 6) return
+                          if (!pwd || pwd.length < 8) return
                           setBusy(true)
                           void api
                             .resetSecondaryPassword(a.id, pwd)
@@ -5601,7 +5613,7 @@ function PeopleView({
                   type="password"
                   value={editPwd}
                   onChange={(e) => setEditPwd(e.target.value)}
-                  placeholder="≥6"
+                  placeholder="≥8"
                 />
               </>
             )}
@@ -5613,7 +5625,7 @@ function PeopleView({
                   busy ||
                   (editId === sessionAdmin.id && !editCur) ||
                   (editPwd.length > 0 &&
-                    (editPwd.length < 6 ||
+                    (editPwd.length < 8 ||
                       (editId === sessionAdmin.id && editPwd !== editPwd2)))
                 }
                 onClick={async () => {
@@ -5730,7 +5742,7 @@ function PeopleView({
           type="button"
           style={{ marginTop: 10 }}
           disabled={
-            busy || !admLabel.trim() || !admEmail.includes("@") || admPwd.length < 6
+            busy || !admLabel.trim() || !admEmail.includes("@") || admPwd.length < 8
           }
           onClick={async () => {
             setBusy(true)
@@ -6067,13 +6079,12 @@ function PeopleView({
         </div>
       </div>
 
-      {isPrincipal && (
-        <>
+      <>
           <div className="card">
             <h2>OTP — mon compte</h2>
             <p className="muted" style={{ fontSize: 13 }}>
-              Envoie un code par e-mail à <strong>votre</strong> compte connecté
-              (pas l’ancien compte démo). Configurez SMTP dans l’onglet E-mail.
+              Réinitialisation de <strong>votre</strong> mot de passe par e-mail
+              (compte connecté). SMTP : Paramètres → E-mail / SMTP.
             </p>
             <button
               className="btn secondary"
@@ -6112,14 +6123,14 @@ function PeopleView({
               <input
                 className="input"
                 type="password"
-                placeholder="Nouveau mdp ≥6"
+                placeholder="Nouveau mdp ≥8"
                 value={otpNewPwd}
                 onChange={(e) => setOtpNewPwd(e.target.value)}
               />
               <button
                 className="btn"
                 type="button"
-                disabled={busy || !otp || otpNewPwd.length < 6}
+                disabled={busy || !otp || otpNewPwd.length < 8}
                 onClick={async () => {
                   setBusy(true)
                   try {
@@ -6139,6 +6150,7 @@ function PeopleView({
             </div>
           </div>
 
+      {isPrincipal && (
           <div className="card">
             <h2>Recovery concepteur: codes one-time</h2>
             <div className="row" style={{ gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
@@ -6386,8 +6398,8 @@ function PeopleView({
               </div>
             )}
           </div>
-        </>
       )}
+      </>
     </>
   )
 }

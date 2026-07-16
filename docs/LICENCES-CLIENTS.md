@@ -38,6 +38,21 @@ Révoquer la licence full (retour essai 30 j) : même écran, **Supprimer la lic
 
 ## Côté DailyOps (émission uniquement)
 
+### UI dédiée concepteur (recommandé)
+
+Hors console client — URL secrète (non liée dans le menu) :
+
+```
+http://127.0.0.1:5173/?desk=vendor
+```
+
+1. Définir `OPSGATE_VENDOR_LICENSE_SECRET` (≥12 car.) sur l’API  
+2. Ouvrir l’URL ci-dessus  
+3. Entrer la **même** clé + URL API → déverrouiller  
+4. Générer / lister / révoquer les licences  
+
+Le client final **n’a pas** ce lien et ne peut pas appeler `/v1/vendor/*` sans le secret.
+
 ### Prérequis
 
 - API avec Postgres (`DATABASE_URL`)  
@@ -51,7 +66,7 @@ $env:OPSGATE_LICENSE_SECRET = "votre-secret-constructeur-long"
 
 Sans secret configuré, `POST /v1/vendor/licenses` répond `503 vendor_secret_not_configured`.
 
-### A. CLI (recommandé au quotidien)
+### CLI (alternative)
 
 ```powershell
 cd C:\Users\Utilisateur\ops-gate

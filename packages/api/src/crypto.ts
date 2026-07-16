@@ -9,6 +9,47 @@ export function hashManagementPassword(password: string): string {
   return sha256Hex(`opsgate-mgmt-v1:${password}`)
 }
 
+/** Politique mdp console : ≥ 8 caractères */
+export const MIN_PASSWORD_LENGTH = 8
+
+/** Historique max de hashes mdp (anti-réutilisation) */
+export const PASSWORD_HISTORY_SIZE = 5
+
+export function validatePasswordPolicy(
+  password: string,
+  opts?: { currentHash?: string; history?: string[] | null }
+): { ok: true } | { ok: false; error: string } {
+  const p = password || ""
+  if (p.length < MIN_PASSWORD_LENGTH) {
+    return { ok: false, error: "password_too_short" }
+  }
+  const nextHash = hashManagementPassword(p)
+  if (opts?.currentHash && nextHash === opts.currentHash) {
+    return { ok: false, error: "password_reused" }
+  }
+  const hist = opts?.history || []
+  if (hist.some((h) => h === nextHash)) {
+    return { ok: false, error: "password_reused" }
+  }
+  return { ok: true }
+}
+
+/** Ajoute le hash courant à l’historique (avant remplacement) */
+export function pushPasswordHistory(
+  currentHash: string | undefined,
+  history: string[] | undefined | null
+): string[] {
+  const prev = [...(history || [])]
+  if (currentHash) prev.unshift(currentHash)
+  // dédup + limite
+  const out: string[] = []
+  for (const h of prev) {
+    if (h && !out.includes(h)) out.push(h)
+    if (out.length >= PASSWORD_HISTORY_SIZE) break
+  }
+  return out
+}
+
 /**
  * Mdp défaut admin principal au setup — à changer immédiatement.
  * Surcharge : OPSGATE_SETUP_PASSWORD
