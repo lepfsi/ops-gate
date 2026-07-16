@@ -160,7 +160,26 @@ export interface OpsGateStore {
     licenseKey: string
   ): Promise<import("./license-keys").IssuedLicenseRecord | undefined>
 
+  listIssuedLicenses(): Promise<import("./license-keys").IssuedLicenseRecord[]>
+
   revokeIssuedLicense(licenseKey: string): Promise<boolean>
+
+  /**
+   * Crée un tenant minimal (org + policy + pack + principal) si org_code absent.
+   * Retourne tempPassword une seule fois si créé.
+   */
+  provisionTenant(input: {
+    orgCode: string
+    companyName: string
+    contactEmail: string
+    seats?: number
+  }): Promise<{
+    orgId: string
+    orgCode: string
+    principalEmail: string
+    created: boolean
+    tempPassword?: string
+  }>
 
   updateOrgMonitoring(
     orgId: string,

@@ -103,7 +103,9 @@ export function pathNeedsRlsBypass(path: string): boolean {
     "/v1/auth/saml/",
     "/v1/auth/webauthn/",
     "/v1/auth/password-reset",
-    "/v1/enroll"
+    "/v1/enroll",
+    // Vendor desk : issued_licenses est global (pas d’org_id tenant)
+    "/v1/vendor/"
   ]
   return bypassPrefixes.some((b) => p === b || p.startsWith(b))
 }

@@ -38,6 +38,7 @@ type Tab =
   | "audit"
   | "moving"
   | "settings"
+  | "vendor"
   | "support"
   | "help"
 
@@ -69,6 +70,7 @@ export default function App() {
           "audit",
           "moving",
           "settings",
+          "vendor",
           "support",
           "help"
         ].includes(t)
@@ -697,6 +699,14 @@ export default function App() {
           onClick={() => goTab("settings")}>
           {t("nav.settings")}
         </button>
+        {sessionAdmin?.is_principal && (
+          <button
+            type="button"
+            className={`shell-nav-item ${tab === "vendor" ? "active" : ""}`}
+            onClick={() => goTab("vendor")}>
+            {t("nav.vendor")}
+          </button>
+        )}
         <div className="shell-nav-foot">
           <button
             type="button"
@@ -974,6 +984,15 @@ export default function App() {
             setLang(l)
             setStoredLang(l)
           }}
+          t={t}
+        />
+      )}
+      {tab === "vendor" && sessionAdmin?.is_principal && (
+        <VendorDeskView
+          busy={busy}
+          setBusy={setBusy}
+          setError={setError}
+          setInfo={setInfo}
           t={t}
         />
       )}
@@ -8295,6 +8314,324 @@ function MovingRulesView({
               </div>
             </div>
           </>
+        )}
+      </div>
+    </>
+  )
+}
+
+function VendorDeskView({
+  busy,
+  setBusy,
+  setError,
+  setInfo,
+  t
+}: {
+  busy: boolean
+  setBusy: (b: boolean) => void
+  setError: (e: string | null) => void
+  setInfo: (i: string | null) => void
+  t: (k: string) => string
+}) {
+  const [orgCode, setOrgCode] = useState("")
+  const [company, setCompany] = useState("")
+  const [address, setAddress] = useState("")
+  const [email, setEmail] = useState("")
+  const [seats, setSeats] = useState(25)
+  const [years, setYears] = useState(1)
+  const [expires, setExpires] = useState("")
+  const [provision, setProvision] = useState(true)
+  const [lastKey, setLastKey] = useState<string | null>(null)
+  const [lastMeta, setLastMeta] = useState<string | null>(null)
+  const [list, setList] = useState<
+    Array<{
+      license_key: string
+      org_code: string
+      company_name: string
+      contact_email: string
+      seats: number
+      expires_at: string
+      status: string
+    }>
+  >([])
+  const [available, setAvailable] = useState(true)
+  const [hint, setHint] = useState("")
+
+  const load = useCallback(async () => {
+    try {
+      const st = await api.vendorStatus()
+      setAvailable(!!st.available)
+      setHint(st.hint || "")
+      if (st.available) {
+        const r = await api.vendorListLicenses()
+        setList(r.licenses || [])
+      }
+    } catch (e) {
+      setAvailable(false)
+      setHint(String(e))
+    }
+  }, [])
+
+  useEffect(() => {
+    void load()
+  }, [load])
+
+  if (!available) {
+    return (
+      <div className="card" style={{ maxWidth: 640 }}>
+        <h2 style={{ marginTop: 0 }}>{t("vendor.title")}</h2>
+        <p className="muted">{t("vendor.notAvailable")}</p>
+        {hint && <p className="muted" style={{ fontSize: 13 }}>{hint}</p>}
+      </div>
+    )
+  }
+
+  return (
+    <>
+      <div className="card" style={{ maxWidth: 720, marginBottom: 16 }}>
+        <h2 style={{ marginTop: 0 }}>{t("vendor.title")}</h2>
+        <p className="muted" style={{ fontSize: 13, lineHeight: 1.45 }}>
+          {t("vendor.subtitle")}
+        </p>
+        <div className="form-stack" style={{ marginTop: 12 }}>
+          <label className="field-label">{t("vendor.orgCode")}</label>
+          <input
+            className="input mono"
+            value={orgCode}
+            onChange={(e) => setOrgCode(e.target.value.toUpperCase())}
+            placeholder="ACME-2026"
+          />
+          <label className="field-label">{t("vendor.company")}</label>
+          <input
+            className="input"
+            value={company}
+            onChange={(e) => setCompany(e.target.value)}
+            placeholder="ACME SA"
+          />
+          <label className="field-label">{t("vendor.address")}</label>
+          <input
+            className="input"
+            value={address}
+            onChange={(e) => setAddress(e.target.value)}
+            placeholder="12 rue Exemple, 75008 Paris"
+          />
+          <label className="field-label">{t("vendor.email")}</label>
+          <input
+            className="input"
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="admin@acme.example"
+          />
+          <div className="row" style={{ gap: 12, flexWrap: "wrap" }}>
+            <div style={{ flex: "1 1 120px" }}>
+              <label className="field-label">{t("vendor.seats")}</label>
+              <input
+                className="input"
+                type="number"
+                min={1}
+                value={seats}
+                onChange={(e) => setSeats(Number(e.target.value) || 1)}
+              />
+            </div>
+            <div style={{ flex: "1 1 120px" }}>
+              <label className="field-label">{t("vendor.years")}</label>
+              <input
+                className="input"
+                type="number"
+                min={1}
+                max={10}
+                value={years}
+                onChange={(e) => setYears(Number(e.target.value) || 1)}
+              />
+            </div>
+            <div style={{ flex: "1 1 160px" }}>
+              <label className="field-label">{t("vendor.expires")}</label>
+              <input
+                className="input"
+                type="date"
+                value={expires}
+                onChange={(e) => setExpires(e.target.value)}
+              />
+            </div>
+          </div>
+          <label
+            className="row"
+            style={{ gap: 8, alignItems: "center", fontSize: 13 }}>
+            <input
+              type="checkbox"
+              checked={provision}
+              onChange={(e) => setProvision(e.target.checked)}
+            />
+            {t("vendor.provision")}
+          </label>
+          <button
+            type="button"
+            className="btn"
+            disabled={
+              busy ||
+              !orgCode.trim() ||
+              !company.trim() ||
+              !email.trim() ||
+              seats < 1
+            }
+            onClick={async () => {
+              setBusy(true)
+              setError(null)
+              setLastKey(null)
+              setLastMeta(null)
+              try {
+                const r = await api.vendorIssueLicense({
+                  org_code: orgCode.trim(),
+                  company_name: company.trim(),
+                  address: address.trim(),
+                  contact_email: email.trim(),
+                  seats,
+                  years: expires ? undefined : years,
+                  expires_at: expires || undefined,
+                  provision_org: provision
+                })
+                setLastKey(r.license_key)
+                const parts = [
+                  `${r.payload.company_name} · ${r.payload.org_code} · ${r.payload.seats} sièges · exp ${String(r.payload.expires_at).slice(0, 10)}`
+                ]
+                if (r.tenant?.created && r.tenant.temp_password) {
+                  parts.push(
+                    `Tenant créé · login ${r.tenant.principal_email} / mdp temporaire ${r.tenant.temp_password}`
+                  )
+                } else if (r.tenant && !r.tenant.created) {
+                  parts.push("Org existante — clé seule émise")
+                }
+                setLastMeta(parts.join("\n"))
+                setInfo(`${t("vendor.issued")} : ${r.license_key}`)
+                await load()
+              } catch (e) {
+                setError(String(e))
+              } finally {
+                setBusy(false)
+              }
+            }}>
+            {t("vendor.issue")}
+          </button>
+        </div>
+        {lastKey && (
+          <div
+            style={{
+              marginTop: 16,
+              padding: 12,
+              borderRadius: 6,
+              background: "var(--surface-2)",
+              border: "1px solid var(--line)"
+            }}>
+            <div className="field-label">{t("vendor.issued")}</div>
+            <code className="mono" style={{ fontSize: 16, wordBreak: "break-all" }}>
+              {lastKey}
+            </code>
+            {lastMeta && (
+              <pre
+                style={{
+                  margin: "8px 0 0",
+                  fontSize: 12,
+                  whiteSpace: "pre-wrap",
+                  color: "var(--muted)"
+                }}>
+                {lastMeta}
+              </pre>
+            )}
+            <button
+              type="button"
+              className="btn secondary"
+              style={{ marginTop: 8 }}
+              onClick={async () => {
+                try {
+                  await navigator.clipboard.writeText(lastKey)
+                  setInfo(t("vendor.copy") + " OK")
+                } catch {
+                  setError("Clipboard indisponible")
+                }
+              }}>
+              {t("vendor.copy")}
+            </button>
+          </div>
+        )}
+      </div>
+
+      <div className="card">
+        <div
+          className="row"
+          style={{
+            justifyContent: "space-between",
+            alignItems: "center",
+            marginBottom: 8
+          }}>
+          <h3 style={{ margin: 0 }}>{t("vendor.list")}</h3>
+          <button
+            type="button"
+            className="btn secondary"
+            disabled={busy}
+            onClick={() => void load()}>
+            {t("vendor.refresh")}
+          </button>
+        </div>
+        {list.length === 0 ? (
+          <p className="muted">{t("vendor.empty")}</p>
+        ) : (
+          <div style={{ overflowX: "auto" }}>
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Clé</th>
+                  <th>Org</th>
+                  <th>Société</th>
+                  <th>Email</th>
+                  <th>Sièges</th>
+                  <th>Exp.</th>
+                  <th>Statut</th>
+                  <th />
+                </tr>
+              </thead>
+              <tbody>
+                {list.map((row) => (
+                  <tr key={row.license_key}>
+                    <td className="mono" style={{ fontSize: 12 }}>
+                      {row.license_key}
+                    </td>
+                    <td className="mono">{row.org_code}</td>
+                    <td>{row.company_name}</td>
+                    <td style={{ fontSize: 12 }}>{row.contact_email}</td>
+                    <td>{row.seats}</td>
+                    <td>{String(row.expires_at).slice(0, 10)}</td>
+                    <td>{row.status}</td>
+                    <td>
+                      {row.status === "active" && (
+                        <button
+                          type="button"
+                          className="btn danger"
+                          style={{ fontSize: 12, padding: "4px 8px" }}
+                          disabled={busy}
+                          onClick={async () => {
+                            if (!confirm(`Révoquer ${row.license_key} ?`))
+                              return
+                            setBusy(true)
+                            try {
+                              await api.vendorRevokeIssued(row.license_key)
+                              setInfo(t("vendor.revoke") + " OK")
+                              await load()
+                            } catch (e) {
+                              setError(String(e))
+                            } finally {
+                              setBusy(false)
+                            }
+                          }}>
+                          {t("vendor.revoke")}
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
     </>
