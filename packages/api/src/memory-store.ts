@@ -431,6 +431,7 @@ export class MemoryStore implements OpsGateStore {
     contactEmail: string
     seats: number
     expiresAt: string
+    kind?: import("./license-keys").LicenseKind
   }) {
     const {
       generateShortLicenseKey,
@@ -442,6 +443,7 @@ export class MemoryStore implements OpsGateStore {
       id: `lic_${Date.now()}`,
       licenseKey: key,
       ...payload,
+      kind: payload.kind === "seat_topup" ? "seat_topup" : "full",
       revokedAt: null
     })
     return { licenseKey: key, payload }
@@ -927,11 +929,22 @@ export class MemoryStore implements OpsGateStore {
   async createAdminSession(
     email: string,
     password: string,
-    opts?: { force?: boolean; totpCode?: string }
+    opts?: {
+      force?: boolean
+      totpCode?: string
+      orgId?: string
+      orgCode?: string
+    }
   ) {
     const emailNorm = email.trim().toLowerCase()
     const hash = hashManagementPassword(password)
-    type Cand = { orgId: string; admin: OrgAdmin; personal: boolean }
+    type Cand = {
+      orgId: string
+      admin: OrgAdmin
+      personal: boolean
+      orgCode: string
+      orgName: string
+    }
     const candidates: Cand[] = []
     for (const [orgId, list] of this.admins) {
       const admin = list.find(
@@ -941,19 +954,46 @@ export class MemoryStore implements OpsGateStore {
       if (!admin.isPrincipal && !admin.permissions.includes("console_access")) {
         continue
       }
+      const org = this.orgs.get(orgId)
       candidates.push({
         orgId,
         admin,
-        personal: !!this.orgs.get(orgId)?.isPersonal
+        personal: !!org?.isPersonal,
+        orgCode: org?.orgCode || orgId,
+        orgName: org?.name || orgId
       })
     }
     candidates.sort((a, b) => Number(a.personal) - Number(b.personal))
-    const hit = candidates[0]
-    if (!hit) return { ok: false as const, error: "invalid_credentials" }
+    if (candidates.length === 0) {
+      return { ok: false as const, error: "invalid_credentials" }
+    }
+    let filtered = candidates
+    if (opts?.orgId) {
+      filtered = candidates.filter((c) => c.orgId === opts.orgId)
+    } else if (opts?.orgCode) {
+      const code = opts.orgCode.trim().toUpperCase()
+      filtered = candidates.filter(
+        (c) => c.orgCode.toUpperCase() === code
+      )
+    }
+    if (filtered.length === 0) {
+      return { ok: false as const, error: "invalid_credentials" }
+    }
+    if (filtered.length > 1 && !opts?.orgId && !opts?.orgCode) {
+      return {
+        ok: false as const,
+        error: "org_selection_required" as const,
+        orgs: filtered.map((c) => ({
+          org_id: c.orgId,
+          org_code: c.orgCode,
+          name: c.orgName
+        }))
+      }
+    }
+    const hit = filtered[0]!
     if (hit.admin.lockedAt) {
       return { ok: false as const, error: "account_locked" }
     }
-    // MFA TOTP
     if (hit.admin.totpEnabled && hit.admin.totpSecret) {
       const code = (opts?.totpCode || "").trim()
       if (!code) {

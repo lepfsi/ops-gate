@@ -40,18 +40,25 @@ Révoquer la licence full (retour essai 30 j) : même écran, **Supprimer la lic
 
 ### UI dédiée concepteur (recommandé)
 
-Hors console client — URL secrète (non liée dans le menu) :
+**Build client final** : ne pas définir `VITE_OPSGATE_VENDOR_DESK` → le code
+VendorDesk n’est **pas** inclus (moins de surface reverse-engineering).
 
+**Build / dev DailyOps** (PowerShell) :
+
+```powershell
+$env:VITE_OPSGATE_VENDOR_DESK = "true"
+pnpm console:dev
+# puis ouvrir :
+# http://127.0.0.1:5173/?desk=vendor
 ```
-http://127.0.0.1:5173/?desk=vendor
-```
 
-1. Définir `OPSGATE_VENDOR_LICENSE_SECRET` (≥12 car.) sur l’API  
-2. Ouvrir l’URL ci-dessus  
-3. Entrer la **même** clé + URL API → déverrouiller  
-4. Générer / lister / révoquer les licences  
+1. `OPSGATE_VENDOR_LICENSE_SECRET` (≥12 car.) sur l’API  
+2. URL `?desk=vendor`  
+3. Entrer la clé + URL API → générer / PDF / top-up / révoquer  
 
-Le client final **n’a pas** ce lien et ne peut pas appeler `/v1/vendor/*` sans le secret.
+**Augmenter les sièges** : type **Top-up** → nouvelle clé OPS-… ; le client
+l’active (Paramètres → Licences) → sièges **ajoutés** à l’org (pas de
+remplacement de la full).
 
 ### Prérequis
 

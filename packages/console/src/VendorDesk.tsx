@@ -1,11 +1,6 @@
 /**
  * Bureau concepteur DailyOps — émission de licences.
- * Accès : URL dédiée uniquement, jamais dans la nav client.
- *
- *   http://127.0.0.1:5173/?desk=vendor
- *   (ou #vendor-desk)
- *
- * Auth : clé X-OpsGate-Vendor-Key = OPSGATE_VENDOR_LICENSE_SECRET côté API.
+ * Build: VITE_OPSGATE_VENDOR_DESK=true + URL ?desk=vendor
  */
 import { useCallback, useEffect, useState } from "react"
 
@@ -14,8 +9,10 @@ import { getApiBase, setApiBase } from "./api"
 
 type Issued = {
   license_key: string
+  kind?: string
   org_code: string
   company_name: string
+  address?: string
   contact_email: string
   seats: number
   expires_at: string
@@ -36,6 +33,11 @@ async function vendorFetch<T>(
       ...(init?.headers || {})
     }
   })
+  if (
+    res.headers.get("content-type")?.includes("application/pdf")
+  ) {
+    return res as unknown as T
+  }
   const data = await res.json().catch(() => ({}))
   if (!res.ok) {
     const err = (data as { error?: string; message?: string }) || {}
@@ -58,6 +60,7 @@ export default function VendorDesk() {
   const [info, setInfo] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
+  const [kind, setKind] = useState<"full" | "seat_topup">("full")
   const [orgCode, setOrgCode] = useState("")
   const [company, setCompany] = useState("")
   const [address, setAddress] = useState("")
@@ -80,6 +83,29 @@ export default function VendorDesk() {
     document.title = "OpsGate · Bureau concepteur"
   }, [])
 
+  async function downloadPdf(licenseKey: string) {
+    const base = getApiBase().replace(/\/$/, "")
+    const res = await fetch(`${base}/v1/vendor/licenses/certificate`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-OpsGate-Vendor-Key": vendorKey
+      },
+      body: JSON.stringify({ license_key: licenseKey })
+    })
+    if (!res.ok) throw new Error(`PDF HTTP ${res.status}`)
+    const blob = await res.blob()
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement("a")
+    a.href = url
+    a.download =
+      res.headers
+        .get("Content-Disposition")
+        ?.match(/filename="([^"]+)"/)?.[1] || "OpsGate-Licence.pdf"
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
   if (!unlocked) {
     return (
       <div className="login-page">
@@ -89,13 +115,14 @@ export default function VendorDesk() {
             <div>
               <h1 style={{ margin: 0, fontSize: 20 }}>Bureau concepteur</h1>
               <p className="muted" style={{ margin: 0, fontSize: 12 }}>
-                DailyOps · émission de licences (hors console client)
+                DailyOps · licences (hors produit client)
               </p>
             </div>
           </div>
           <p className="muted" style={{ fontSize: 13, marginTop: 16 }}>
-            Cette page n’est pas liée depuis le produit client. URL réservée :
-            <code className="mono"> ?desk=vendor</code>
+            Build interne : <code>VITE_OPSGATE_VENDOR_DESK=true</code>
+            <br />
+            URL : <code>?desk=vendor</code>
           </p>
           <label className="field-label">URL API</label>
           <input
@@ -103,7 +130,7 @@ export default function VendorDesk() {
             value={apiUrl}
             onChange={(e) => setApiUrl(e.target.value)}
           />
-          <label className="field-label">Clé vendor (secret serveur)</label>
+          <label className="field-label">Clé vendor</label>
           <input
             className="input mono"
             type="password"
@@ -123,8 +150,6 @@ export default function VendorDesk() {
               setErr(null)
               try {
                 setApiBase(apiUrl.trim())
-                await vendorFetch("/v1/vendor/status", vendorKey.trim())
-                // status is public-ish but list proves key
                 await loadList(vendorKey.trim())
                 try {
                   sessionStorage.setItem(
@@ -143,10 +168,6 @@ export default function VendorDesk() {
             }}>
             Déverrouiller
           </button>
-          <p className="muted" style={{ fontSize: 11, marginTop: 12 }}>
-            Retour console client :{" "}
-            <a href={window.location.pathname || "/"}>ouvrir sans ?desk=vendor</a>
-          </p>
         </div>
       </div>
     )
@@ -159,7 +180,7 @@ export default function VendorDesk() {
           <BrandMark size={36} />
           <div className="brand-text">
             <h1>OpsGate · Concepteur</h1>
-            <p>Émission de licences clients · DailyOps</p>
+            <p>Licences clients · DailyOps</p>
           </div>
         </div>
         <div className="topbar-actions">
@@ -179,13 +200,32 @@ export default function VendorDesk() {
         </div>
       </header>
 
-      <main className="shell-main" style={{ padding: 24, maxWidth: 960, margin: "0 auto" }}>
+      <main
+        className="shell-main"
+        style={{ padding: 24, maxWidth: 1100, margin: "0 auto" }}>
         {err && <p className="err">{err}</p>}
         {info && <p className="ok">{info}</p>}
 
         <div className="card" style={{ marginBottom: 16 }}>
           <h2 style={{ marginTop: 0 }}>Nouvelle licence</h2>
           <div className="form-stack">
+            <label className="field-label">Type</label>
+            <select
+              className="input"
+              value={kind}
+              onChange={(e) =>
+                setKind(e.target.value === "seat_topup" ? "seat_topup" : "full")
+              }>
+              <option value="full">Licence complète (full)</option>
+              <option value="seat_topup">
+                Top-up sièges (+N sur org existante)
+              </option>
+            </select>
+            <p className="muted" style={{ fontSize: 12, margin: 0 }}>
+              {kind === "seat_topup"
+                ? "Génère une clé qui ajoute des sièges à l’org (sans remplacer la licence full)."
+                : "Licence initiale : sièges + société + activation full."}
+            </p>
             <label className="field-label">Code organisation</label>
             <input
               className="input mono"
@@ -193,28 +233,34 @@ export default function VendorDesk() {
               onChange={(e) => setOrgCode(e.target.value.toUpperCase())}
               placeholder="ACME-2026"
             />
-            <label className="field-label">Société</label>
-            <input
-              className="input"
-              value={company}
-              onChange={(e) => setCompany(e.target.value)}
-            />
-            <label className="field-label">Adresse</label>
-            <input
-              className="input"
-              value={address}
-              onChange={(e) => setAddress(e.target.value)}
-            />
-            <label className="field-label">Email contact</label>
-            <input
-              className="input"
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-            />
+            {kind === "full" && (
+              <>
+                <label className="field-label">Société</label>
+                <input
+                  className="input"
+                  value={company}
+                  onChange={(e) => setCompany(e.target.value)}
+                />
+                <label className="field-label">Adresse</label>
+                <input
+                  className="input"
+                  value={address}
+                  onChange={(e) => setAddress(e.target.value)}
+                />
+                <label className="field-label">Email contact</label>
+                <input
+                  className="input"
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                />
+              </>
+            )}
             <div className="row" style={{ gap: 12 }}>
               <div style={{ flex: 1 }}>
-                <label className="field-label">Sièges</label>
+                <label className="field-label">
+                  {kind === "seat_topup" ? "Sièges à ajouter" : "Sièges"}
+                </label>
                 <input
                   className="input"
                   type="number"
@@ -235,19 +281,24 @@ export default function VendorDesk() {
                 />
               </div>
             </div>
-            <label className="row" style={{ gap: 8, fontSize: 13 }}>
-              <input
-                type="checkbox"
-                checked={provision}
-                onChange={(e) => setProvision(e.target.checked)}
-              />
-              Créer le tenant si le code org n’existe pas
-            </label>
+            {kind === "full" && (
+              <label className="row" style={{ gap: 8, fontSize: 13 }}>
+                <input
+                  type="checkbox"
+                  checked={provision}
+                  onChange={(e) => setProvision(e.target.checked)}
+                />
+                Créer le tenant si le code org n’existe pas
+              </label>
+            )}
             <button
               className="btn"
               type="button"
               disabled={
-                busy || !orgCode.trim() || !company.trim() || !email.includes("@")
+                busy ||
+                !orgCode.trim() ||
+                (kind === "full" &&
+                  (!company.trim() || !email.includes("@")))
               }
               onClick={async () => {
                 setBusy(true)
@@ -256,24 +307,29 @@ export default function VendorDesk() {
                 try {
                   const r = await vendorFetch<{
                     license_key: string
-                    tenant?: { created?: boolean; temp_password?: string | null }
+                    kind?: string
+                    tenant?: {
+                      created?: boolean
+                      temp_password?: string | null
+                    }
                   }>("/v1/vendor/licenses", vendorKey, {
                     method: "POST",
                     body: JSON.stringify({
                       org_code: orgCode.trim(),
-                      company_name: company.trim(),
-                      address: address.trim(),
-                      contact_email: email.trim(),
+                      company_name: company.trim() || undefined,
+                      address: address.trim() || undefined,
+                      contact_email: email.trim() || undefined,
                       seats,
                       years,
-                      provision_org: provision
+                      provision_org: kind === "full" && provision,
+                      kind
                     })
                   })
                   setLastKey(r.license_key)
                   setInfo(
                     r.tenant?.created && r.tenant.temp_password
-                      ? `Licence OK · tenant créé · mdp temp : ${r.tenant.temp_password}`
-                      : "Licence générée"
+                      ? `OK · tenant créé · mdp temp : ${r.tenant.temp_password}`
+                      : `Licence générée (${r.kind || kind})`
                   )
                   await loadList(vendorKey)
                 } catch (e) {
@@ -282,7 +338,7 @@ export default function VendorDesk() {
                   setBusy(false)
                 }
               }}>
-              Générer la licence
+              Générer
             </button>
           </div>
           {lastKey && (
@@ -293,20 +349,38 @@ export default function VendorDesk() {
                 background: "var(--surface-2)",
                 borderRadius: 8
               }}>
-              <div className="field-label">Clé à transmettre au client</div>
-              <code className="mono" style={{ fontSize: 16 }}>
+              <div className="field-label">Clé client</div>
+              <code className="mono" style={{ fontSize: 15, wordBreak: "break-all" }}>
                 {lastKey}
               </code>
-              <button
-                className="btn secondary"
-                type="button"
-                style={{ marginTop: 8 }}
-                onClick={() => {
-                  void navigator.clipboard.writeText(lastKey)
-                  setInfo("Clé copiée")
-                }}>
-                Copier
-              </button>
+              <div className="row" style={{ gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+                <button
+                  className="btn secondary"
+                  type="button"
+                  onClick={() => {
+                    void navigator.clipboard.writeText(lastKey)
+                    setInfo("Clé copiée")
+                  }}>
+                  Copier
+                </button>
+                <button
+                  className="btn secondary"
+                  type="button"
+                  disabled={busy}
+                  onClick={async () => {
+                    setBusy(true)
+                    try {
+                      await downloadPdf(lastKey)
+                      setInfo("PDF téléchargé")
+                    } catch (e) {
+                      setErr(String(e))
+                    } finally {
+                      setBusy(false)
+                    }
+                  }}>
+                  Télécharger PDF
+                </button>
+              </div>
             </div>
           )}
         </div>
@@ -314,7 +388,12 @@ export default function VendorDesk() {
         <div className="card">
           <div
             className="row"
-            style={{ justifyContent: "space-between", marginBottom: 8 }}>
+            style={{
+              justifyContent: "space-between",
+              marginBottom: 12,
+              flexWrap: "wrap",
+              gap: 8
+            }}>
             <h3 style={{ margin: 0 }}>Licences émises</h3>
             <button
               className="btn secondary"
@@ -327,68 +406,123 @@ export default function VendorDesk() {
           {list.length === 0 ? (
             <p className="muted">Aucune licence.</p>
           ) : (
-            <div style={{ overflowX: "auto" }}>
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>Clé</th>
-                    <th>Org</th>
-                    <th>Société</th>
-                    <th>Sièges</th>
-                    <th>Exp.</th>
-                    <th>Statut</th>
-                    <th />
-                  </tr>
-                </thead>
-                <tbody>
-                  {list.map((row) => (
-                    <tr key={row.license_key}>
-                      <td className="mono" style={{ fontSize: 11 }}>
-                        {row.license_key}
-                      </td>
-                      <td className="mono">{row.org_code}</td>
-                      <td>{row.company_name}</td>
-                      <td>{row.seats}</td>
-                      <td>{String(row.expires_at).slice(0, 10)}</td>
-                      <td>{row.status}</td>
-                      <td>
-                        {row.status === "active" && (
-                          <button
-                            className="btn danger"
-                            type="button"
-                            style={{ fontSize: 11, padding: "4px 8px" }}
-                            disabled={busy}
-                            onClick={async () => {
-                              if (!confirm(`Révoquer ${row.license_key} ?`))
-                                return
-                              setBusy(true)
-                              try {
-                                await vendorFetch(
-                                  "/v1/vendor/licenses/revoke",
-                                  vendorKey,
-                                  {
-                                    method: "POST",
-                                    body: JSON.stringify({
-                                      license_key: row.license_key
-                                    })
-                                  }
-                                )
-                                setInfo("Clé révoquée")
-                                await loadList(vendorKey)
-                              } catch (e) {
-                                setErr(String(e))
-                              } finally {
-                                setBusy(false)
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {list.map((row) => (
+                <div
+                  key={row.license_key}
+                  style={{
+                    border: "1px solid var(--line)",
+                    borderRadius: 8,
+                    padding: 12,
+                    background: "var(--surface-2)"
+                  }}>
+                  <div
+                    className="row"
+                    style={{
+                      justifyContent: "space-between",
+                      flexWrap: "wrap",
+                      gap: 8
+                    }}>
+                    <code
+                      className="mono"
+                      style={{ fontSize: 13, wordBreak: "break-all" }}>
+                      {row.license_key}
+                    </code>
+                    <span className="badge" style={{ fontSize: 11 }}>
+                      {row.kind === "seat_topup" ? "top-up" : "full"} ·{" "}
+                      {row.status}
+                    </span>
+                  </div>
+                  <div
+                    style={{
+                      marginTop: 8,
+                      fontSize: 13,
+                      display: "grid",
+                      gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))",
+                      gap: 6
+                    }}>
+                    <div>
+                      <span className="muted">Org</span>
+                      <div className="mono">{row.org_code}</div>
+                    </div>
+                    <div>
+                      <span className="muted">Société</span>
+                      <div>{row.company_name}</div>
+                    </div>
+                    <div>
+                      <span className="muted">Contact</span>
+                      <div style={{ wordBreak: "break-all" }}>
+                        {row.contact_email}
+                      </div>
+                    </div>
+                    <div>
+                      <span className="muted">Sièges</span>
+                      <div>{row.seats}</div>
+                    </div>
+                    <div>
+                      <span className="muted">Expiration</span>
+                      <div>{String(row.expires_at).slice(0, 10)}</div>
+                    </div>
+                  </div>
+                  <div className="row" style={{ gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+                    <button
+                      className="btn secondary btn-sm"
+                      type="button"
+                      onClick={() => {
+                        void navigator.clipboard.writeText(row.license_key)
+                        setInfo("Clé copiée")
+                      }}>
+                      Copier clé
+                    </button>
+                    <button
+                      className="btn secondary btn-sm"
+                      type="button"
+                      disabled={busy}
+                      onClick={async () => {
+                        setBusy(true)
+                        try {
+                          await downloadPdf(row.license_key)
+                        } catch (e) {
+                          setErr(String(e))
+                        } finally {
+                          setBusy(false)
+                        }
+                      }}>
+                      PDF / Imprimer
+                    </button>
+                    {row.status === "active" && (
+                      <button
+                        className="btn danger btn-sm"
+                        type="button"
+                        disabled={busy}
+                        onClick={async () => {
+                          if (!confirm(`Révoquer ${row.license_key} ?`)) return
+                          setBusy(true)
+                          try {
+                            await vendorFetch(
+                              "/v1/vendor/licenses/revoke",
+                              vendorKey,
+                              {
+                                method: "POST",
+                                body: JSON.stringify({
+                                  license_key: row.license_key
+                                })
                               }
-                            }}>
-                            Révoquer
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+                            )
+                            setInfo("Révoquée")
+                            await loadList(vendorKey)
+                          } catch (e) {
+                            setErr(String(e))
+                          } finally {
+                            setBusy(false)
+                          }
+                        }}>
+                        Révoquer
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
             </div>
           )}
         </div>

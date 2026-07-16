@@ -8,6 +8,9 @@
  */
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto"
 
+/** full = licence initiale ; seat_topup = pack de sièges additionnels */
+export type LicenseKind = "full" | "seat_topup"
+
 export type IssuedLicensePayload = {
   v: 1
   orgCode: string
@@ -17,12 +20,26 @@ export type IssuedLicensePayload = {
   seats: number
   expiresAt: string
   issuedAt: string
+  kind?: LicenseKind
 }
 
 export type IssuedLicenseRecord = IssuedLicensePayload & {
   id: string
   licenseKey: string
   revokedAt?: string | null
+  kind: LicenseKind
+}
+
+/** Masque une clé pour les logs (évite fuite dans les terminaux) */
+export function maskLicenseKey(key: string): string {
+  const k = (key || "").trim().toUpperCase()
+  if (k.length < 12) return "OPS-****"
+  // OPS-XXXX-XXXX-XXXX-XXXX → OPS-****-****-****-last4
+  const parts = k.split("-")
+  if (parts.length >= 5) {
+    return `OPS-****-****-****-${parts[parts.length - 1]}`
+  }
+  return `${k.slice(0, 4)}…${k.slice(-4)}`
 }
 
 function licenseSecret(): string {
@@ -178,6 +195,8 @@ export function licenseKeyFingerprint(key: string): string {
 export function buildPayloadFromInput(
   input: Omit<IssuedLicensePayload, "v" | "issuedAt"> & { issuedAt?: string }
 ): IssuedLicensePayload {
+  const kind: LicenseKind =
+    input.kind === "seat_topup" ? "seat_topup" : "full"
   return {
     v: 1,
     orgCode: input.orgCode.trim().toUpperCase(),
@@ -186,6 +205,7 @@ export function buildPayloadFromInput(
     contactEmail: input.contactEmail.trim().toLowerCase(),
     seats: Math.max(0, Math.floor(input.seats) || 0),
     expiresAt: input.expiresAt,
-    issuedAt: input.issuedAt || new Date().toISOString()
+    issuedAt: input.issuedAt || new Date().toISOString(),
+    kind
   }
 }
