@@ -103,17 +103,36 @@ function handleHttp(
 
   const chunks: Buffer[] = []
   const observer =
-    allowlisted && cfg.mitm
-      ? createStreamObserver({ host })
-      : null
+    allowlisted && cfg.mitm ? createStreamObserver({ host }) : null
+  let blocked = false
 
   req.on("data", (c: Buffer) => {
+    if (blocked) return
     chunks.push(c)
-    observer?.onClientData(c)
+    if (observer?.onClientData(c)) {
+      blocked = true
+    }
   })
 
   req.on("end", () => {
-    observer?.flush()
+    if (observer?.flush()) blocked = true
+    if (blocked || observer?.isBlocked()) {
+      log("warn", "http_request_blocked", {
+        host,
+        reason: "sensitive_data_detected"
+      })
+      if (!res.headersSent) {
+        res.writeHead(403, {
+          "content-type": "text/plain; charset=utf-8",
+          "x-opsgate-block": "1",
+          "cache-control": "no-store"
+        })
+      }
+      res.end(
+        "OpsGate Proxy: requête bloquée — données sensibles détectées.\n"
+      )
+      return
+    }
     const body = Buffer.concat(chunks)
     const preq = http.request(
       {

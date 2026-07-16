@@ -177,7 +177,50 @@ function isFalsePositive(ruleId: string, raw: string, fullText: string): boolean
       const digits = raw.replace(/\D/g, "")
       if (!isValidLuhn(digits)) return true
       if (TEST_CARD_NUMBERS.has(digits)) return true
-      if ((raw.match(/\d/g) || []).length < 13) return true
+      if ((raw.match(/\d/g) || []).length < 13 || digits.length > 19) return true
+      // Préfixe carte courant (Visa 4, MC 5, Amex 3, Discover 6)
+      if (!/^[3-6]/.test(digits)) return true
+      // Rejeter suites monotones / zéros (IDs web, timestamps packés)
+      if (/^(\d)\1{12,}$/.test(digits)) return true
+      if (/^0{4,}/.test(digits) || /0{6,}/.test(digits)) return true
+      // Format groupé type 4111 1111 1111 1111 ou 4111-1111-…
+      const grouped =
+        /(?:\d{4}[ -]){2,4}\d{1,7}/.test(raw.trim()) ||
+        (/\d[ -]\d/.test(raw) && digits.length >= 13)
+      // Contexte bancaire strict (limites de mot — « pan » ne matche plus « span/panel »)
+      const lower = fullText.toLowerCase()
+      const hasCtx =
+        /\bvisa\b/.test(lower) ||
+        /\bmastercard\b/.test(lower) ||
+        /\bamex\b/.test(lower) ||
+        /\bcarte\s*bancaire\b/.test(lower) ||
+        /\bcredit\s*card\b/.test(lower) ||
+        /\bcard\s*number\b/.test(lower) ||
+        /\bcvv2?\b/.test(lower) ||
+        /\b\d{3,4}\s*cvc\b/.test(lower) ||
+        /\bpan\b/.test(lower) ||
+        /\bpayment\b/.test(lower) ||
+        /\bbilling\b/.test(lower)
+      // Sans format groupé ET sans contexte → faux positif (très fréquent en HTTP/proxy)
+      if (!grouped && !hasCtx) return true
+      // Chiffres collés : contexte doit être à proximité du match (±120 car.)
+      if (!grouped && hasCtx) {
+        const needle = digits.slice(0, 8)
+        const idx = lower.search(new RegExp(needle.split("").join("[\\s-]*")))
+        if (idx >= 0) {
+          const window = lower.slice(
+            Math.max(0, idx - 120),
+            idx + digits.length + 120
+          )
+          const near =
+            /\bvisa\b|\bmastercard\b|\bamex\b|\bcarte\s*bancaire\b|\bcredit\s*card\b|\bcard\s*number\b|\bcvv2?\b|\bpan\b|\bpayment\b|\bbilling\b/.test(
+              window
+            )
+          if (!near) return true
+        } else {
+          return true
+        }
+      }
       return false
     }
     case "iban": {
@@ -219,6 +262,31 @@ function isFalsePositive(ruleId: string, raw: string, fullText: string): boolean
         return true
       }
       if (/sk-test/i.test(raw) && raw.length < 20) return true
+      return false
+    }
+    case "jwt-token": {
+      // JWT de session navigateur (Authorization / cookie) ≠ secret collé dans un prompt
+      const lower = fullText.toLowerCase()
+      if (
+        lower.includes("authorization:") ||
+        lower.includes("bearer eyj") ||
+        lower.includes("cookie:") ||
+        lower.includes('"access_token"') ||
+        lower.includes('"session-token"')
+      ) {
+        // Contexte header/session : ne pas traiter comme fuite utilisateur
+        // (le proxy ignore déjà les headers ; ici pour extension/body JSON de session)
+        if (!lower.includes("paste") && !lower.includes("coller")) {
+          // Si le JWT est le seul contenu « collé » sans contexte de fuite volontaire
+          // on laisse passer en FP si entouré de structure auth JSON typique
+          if (
+            /"authorization"\s*:/.test(lower) ||
+            /"token"\s*:\s*"eyj/i.test(fullText)
+          ) {
+            return true
+          }
+        }
+      }
       return false
     }
     default:

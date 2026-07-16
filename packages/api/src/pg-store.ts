@@ -165,6 +165,7 @@ function rowPolicy(r: pg.QueryResultRow): Policy {
 }
 
 function rowAgent(r: pg.QueryResultRow): Agent {
+  const maint = r.maintenance_mode
   return {
     id: r.id,
     orgId: r.org_id,
@@ -187,7 +188,12 @@ function rowAgent(r: pg.QueryResultRow): Agent {
     groupId: r.group_id ?? undefined,
     deviceFingerprint: r.device_fingerprint ?? undefined,
     deviceType:
-      r.device_type === "proxy" ? "proxy" : r.device_type === "extension" ? "extension" : undefined
+      r.device_type === "proxy" ? "proxy" : r.device_type === "extension" ? "extension" : undefined,
+    maintenanceMode:
+      maint === "leave" || maint === "outage" || maint === "remote"
+        ? maint
+        : null,
+    maintenanceNote: r.maintenance_note ?? null
   }
 }
 
@@ -381,6 +387,8 @@ export class PgStore implements OpsGateStore {
       `ALTER TABLE policy_profiles ADD COLUMN IF NOT EXISTS priority INT NOT NULL DEFAULT 100`,
       `ALTER TABLE agents ADD COLUMN IF NOT EXISTS device_fingerprint TEXT`,
       `ALTER TABLE agents ADD COLUMN IF NOT EXISTS device_type TEXT NOT NULL DEFAULT 'extension'`,
+      `ALTER TABLE agents ADD COLUMN IF NOT EXISTS maintenance_mode TEXT`,
+      `ALTER TABLE agents ADD COLUMN IF NOT EXISTS maintenance_note TEXT`,
       `ALTER TABLE org_admins ADD COLUMN IF NOT EXISTS failed_login_count INT NOT NULL DEFAULT 0`,
       `ALTER TABLE org_admins ADD COLUMN IF NOT EXISTS locked_at TIMESTAMPTZ`,
       `CREATE TABLE IF NOT EXISTS issued_licenses (
@@ -1974,6 +1982,23 @@ export class PgStore implements OpsGateStore {
     return rowAgent(rows[0])
   }
 
+  async setAgentMaintenance(
+    orgId: string,
+    agentId: string,
+    mode: "leave" | "outage" | "remote" | null,
+    note?: string | null
+  ) {
+    const m =
+      mode === "leave" || mode === "outage" || mode === "remote" ? mode : null
+    const { rows } = await this.pool.query(
+      `UPDATE agents SET maintenance_mode = $3, maintenance_note = $4, last_seen_at = NOW()
+       WHERE org_id = $1 AND id = $2 RETURNING *`,
+      [orgId, agentId, m, note?.trim() || null]
+    )
+    if (!rows[0]) return undefined
+    return rowAgent(rows[0])
+  }
+
   private async resolveProfileForAgent(
     orgId: string,
     agent: Agent | undefined
@@ -3110,7 +3135,7 @@ export class PgStore implements OpsGateStore {
         matchValue: first.value,
         targetGroupId: r.target_group_id,
         priority: r.priority ?? 100,
-        onlyIfUnassigned: r.only_if_unassigned !== false,
+        onlyIfUnassigned: r.only_if_unassigned === true,
         createdAt: new Date(r.created_at).toISOString(),
         updatedAt: new Date(r.updated_at).toISOString()
       }
@@ -3139,6 +3164,7 @@ export class PgStore implements OpsGateStore {
     const first = conditions[0]
     const condJson = JSON.stringify(conditions)
     const now = new Date().toISOString()
+    const onlyUnassigned = input.onlyIfUnassigned === true
     if (input.id) {
       const { rows } = await this.pool.query(
         `UPDATE moving_rules SET
@@ -3157,7 +3183,7 @@ export class PgStore implements OpsGateStore {
           condJson,
           input.targetGroupId,
           input.priority ?? 100,
-          input.onlyIfUnassigned !== false,
+          onlyUnassigned,
           now
         ]
       )
@@ -3179,7 +3205,7 @@ export class PgStore implements OpsGateStore {
         condJson,
         input.targetGroupId,
         input.priority ?? 100,
-        input.onlyIfUnassigned !== false,
+        onlyUnassigned,
         now
       ]
     )
@@ -3234,9 +3260,18 @@ export class PgStore implements OpsGateStore {
             }
           ]
     return conds.every((c) => {
-      const fieldVal =
-        c.field === "host_name" ? agent.hostName || "" : agent.deviceLabel || ""
-      return this.matchMovingRule(fieldVal, c.op, c.value)
+      const label = agent.deviceLabel || ""
+      const host = agent.hostName || ""
+      if (c.field === "host_name") {
+        return (
+          this.matchMovingRule(host, c.op, c.value) ||
+          this.matchMovingRule(label, c.op, c.value)
+        )
+      }
+      return (
+        this.matchMovingRule(label, c.op, c.value) ||
+        this.matchMovingRule(host, c.op, c.value)
+      )
     })
   }
 
@@ -3246,7 +3281,7 @@ export class PgStore implements OpsGateStore {
     if (!agent) return { applied: false as const }
     const rules = (await this.listMovingRules(orgId)).filter((r) => r.enabled)
     for (const rule of rules) {
-      if (rule.onlyIfUnassigned && (agent.policyProfileId || agent.groupId)) {
+      if (rule.onlyIfUnassigned && agent.groupId) {
         continue
       }
       if (!this.ruleMatchesAgent(rule, agent)) continue
@@ -3430,7 +3465,6 @@ export class PgStore implements OpsGateStore {
     const agents_licensed: import("./store-types").SummaryAgentBrief[] = []
     const agents_unlicensed: import("./store-types").SummaryAgentBrief[] = []
     const agents_grace: import("./store-types").SummaryAgentBrief[] = []
-    const agents_offline_long: import("./store-types").SummaryAgentBrief[] = []
     const allBriefs: import("./store-types").SummaryAgentBrief[] = []
     let licensedN = 0
     let graceN = 0
@@ -3451,7 +3485,6 @@ export class PgStore implements OpsGateStore {
       (a) => !!licMap.get(a.id),
       (a) => scheduleMap.get(a.id)
     )
-    const offlineThreshold = conn.offline_long_ms
     for (const a of agents) {
       const lic = !!licMap.get(a.id)
       const b = briefAgent(a, lic)
@@ -3466,9 +3499,7 @@ export class PgStore implements OpsGateStore {
         unlicensedN++
         agents_unlicensed.push(b)
       }
-      if (b.offline_for_ms > offlineThreshold) agents_offline_long.push(b)
     }
-    agents_offline_long.sort((a, b) => b.offline_for_ms - a.offline_for_ms)
 
     const { rows: dayRows } = await this.pool.query(
       `SELECT to_char(date_trunc('day', ts AT TIME ZONE 'UTC'), 'YYYY-MM-DD') AS day,
@@ -3521,9 +3552,10 @@ export class PgStore implements OpsGateStore {
       agents_licensed,
       agents_unlicensed,
       agents_grace,
-      agents_offline_long,
+      agents_offline_long: conn.agents_offline_long || [],
       agents_stale: conn.agents_stale,
       agents_online: conn.agents_online,
+      agents_maintenance: conn.agents_maintenance || [],
       duplicate_fingerprints: findDuplicateFingerprints(allBriefs)
     }
   }

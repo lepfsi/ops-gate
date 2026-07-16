@@ -141,7 +141,10 @@ CREATE TABLE IF NOT EXISTS agents (
   /** Empreinte installation extension (anti-doublon re-enroll) */
   device_fingerprint TEXT,
   /** extension | proxy */
-  device_type TEXT NOT NULL DEFAULT 'extension'
+  device_type TEXT NOT NULL DEFAULT 'extension',
+  /** leave | outage | remote — hors alertes offline prolongé */
+  maintenance_mode TEXT,
+  maintenance_note TEXT
 );
 
 CREATE INDEX IF NOT EXISTS agents_org_idx ON agents(org_id);

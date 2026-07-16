@@ -1169,6 +1169,20 @@ export class MemoryStore implements OpsGateStore {
     return agent
   }
 
+  async setAgentMaintenance(
+    orgId: string,
+    agentId: string,
+    mode: "leave" | "outage" | "remote" | null,
+    note?: string | null
+  ) {
+    const agent = this.agents.get(agentId)
+    if (!agent || agent.orgId !== orgId) return undefined
+    agent.maintenanceMode = mode || null
+    agent.maintenanceNote = note?.trim() || null
+    agent.lastSeenAt = new Date().toISOString()
+    return agent
+  }
+
   private resolveProfileForAgent(
     orgId: string,
     agent: Agent | undefined
@@ -2000,7 +2014,6 @@ export class MemoryStore implements OpsGateStore {
     const agents_licensed: import("./store-types").SummaryAgentBrief[] = []
     const agents_unlicensed: import("./store-types").SummaryAgentBrief[] = []
     const agents_grace: import("./store-types").SummaryAgentBrief[] = []
-    const agents_offline_long: import("./store-types").SummaryAgentBrief[] = []
     const allBriefs: import("./store-types").SummaryAgentBrief[] = []
     let licensedN = 0
     let graceN = 0
@@ -2023,7 +2036,6 @@ export class MemoryStore implements OpsGateStore {
       (a) => !!licMap.get(a.id),
       (a) => scheduleMap.get(a.id)
     )
-    const offlineThreshold = conn.offline_long_ms
     for (const a of agents) {
       const lic = !!licMap.get(a.id)
       const b = briefAgent(a, lic)
@@ -2038,9 +2050,7 @@ export class MemoryStore implements OpsGateStore {
         unlicensedN++
         agents_unlicensed.push(b)
       }
-      if (b.offline_for_ms > offlineThreshold) agents_offline_long.push(b)
     }
-    agents_offline_long.sort((a, b) => b.offline_for_ms - a.offline_for_ms)
     return {
       org_id: orgId,
       agents: agents.length,
@@ -2071,9 +2081,10 @@ export class MemoryStore implements OpsGateStore {
       agents_licensed,
       agents_unlicensed,
       agents_grace,
-      agents_offline_long,
+      agents_offline_long: conn.agents_offline_long || [],
       agents_stale: conn.agents_stale,
       agents_online: conn.agents_online,
+      agents_maintenance: conn.agents_maintenance || [],
       duplicate_fingerprints: findDuplicateFingerprints(allBriefs)
     }
   }
@@ -2185,7 +2196,7 @@ export class MemoryStore implements OpsGateStore {
         priority: input.priority ?? list[idx].priority,
         onlyIfUnassigned:
           input.onlyIfUnassigned !== undefined
-            ? input.onlyIfUnassigned
+            ? input.onlyIfUnassigned === true
             : list[idx].onlyIfUnassigned,
         updatedAt: now
       }
@@ -2203,7 +2214,7 @@ export class MemoryStore implements OpsGateStore {
       matchValue: first.value,
       targetGroupId: input.targetGroupId,
       priority: input.priority ?? 100,
-      onlyIfUnassigned: input.onlyIfUnassigned !== false,
+      onlyIfUnassigned: input.onlyIfUnassigned === true,
       createdAt: now,
       updatedAt: now
     }
@@ -2256,9 +2267,19 @@ export class MemoryStore implements OpsGateStore {
             }
           ]
     return conds.every((c) => {
-      const fieldVal =
-        c.field === "host_name" ? agent.hostName || "" : agent.deviceLabel || ""
-      return this.matchMovingRule(fieldVal, c.op, c.value)
+      // Match label OU hostname si le champ demandé est vide / pour souplesse
+      const label = agent.deviceLabel || ""
+      const host = agent.hostName || ""
+      if (c.field === "host_name") {
+        return (
+          this.matchMovingRule(host, c.op, c.value) ||
+          this.matchMovingRule(label, c.op, c.value)
+        )
+      }
+      return (
+        this.matchMovingRule(label, c.op, c.value) ||
+        this.matchMovingRule(host, c.op, c.value)
+      )
     })
   }
 
@@ -2267,7 +2288,8 @@ export class MemoryStore implements OpsGateStore {
     if (!agent || agent.orgId !== orgId) return { applied: false as const }
     const rules = await this.listMovingRules(orgId)
     for (const rule of rules.filter((r) => r.enabled)) {
-      if (rule.onlyIfUnassigned && (agent.policyProfileId || agent.groupId)) {
+      // onlyIfUnassigned : ne bloque que si déjà dans un groupe (profil seul OK)
+      if (rule.onlyIfUnassigned && agent.groupId) {
         continue
       }
       if (!this.ruleMatchesAgent(rule, agent)) continue

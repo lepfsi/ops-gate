@@ -38,7 +38,28 @@ export function maskSensitiveData(
           if (rule.id === "credit-card") {
             const digits = match.replace(/\D/g, "")
             if (digits.length < 13) return match
+            // Garde les 4 derniers chiffres : XXXX-XXXX-XXXX-1234
+            const last4 = digits.slice(-4)
+            return `XXXX-XXXX-XXXX-${last4}`
           }
+          if (rule.id === "generic-api-key" || rule.id === "aws-access-key") {
+            // sk-XXXX…wxyz (garde préfixe court + 4 fin)
+            if (match.length <= 8) return "XXXX"
+            return `${match.slice(0, 3)}XXXX…${match.slice(-4)}`
+          }
+          if (rule.id === "email-address") {
+            const at = match.indexOf("@")
+            if (at > 1) {
+              return `${match[0]}XXX@${match.slice(at + 1)}`
+            }
+          }
+          if (rule.id === "iban") {
+            const clean = match.replace(/\s/g, "")
+            if (clean.length > 8) {
+              return `${clean.slice(0, 4)} XXXX XXXX ${clean.slice(-4)}`
+            }
+          }
+          // Défaut : placeholder lisible type [RULE] plutôt que wipe total
           return placeholder
         })
       } catch {

@@ -31,3 +31,10 @@ dist/
 
 # typescript
 .tsbuildinfo
+
+# python
+__pycache__/
+*.pyc
+packages/proxy/data/logs/
+packages/proxy/data/*.pid
+

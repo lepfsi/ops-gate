@@ -101,7 +101,8 @@ export function briefAgent(
     license_status: licenseStatusOf(licensed, a.unlicensedSince),
     offline_for_ms: offline,
     group_id: a.groupId || null,
-    device_fingerprint: a.deviceFingerprint || null
+    device_fingerprint: a.deviceFingerprint || null,
+    maintenance_mode: a.maintenanceMode || null
   }
 }
 
@@ -121,8 +122,11 @@ export function connectivityBuckets(
   let stale = 0
   let offline_long = 0
   let offline_long_alertable = 0
+  let maintenance = 0
   const agents_stale: SummaryAgentBrief[] = []
   const agents_online: SummaryAgentBrief[] = []
+  const agents_offline_long: SummaryAgentBrief[] = []
+  const agents_maintenance: SummaryAgentBrief[] = []
   for (const a of agents) {
     const age = Date.now() - new Date(a.lastSeenAt).getTime()
     const lic = licenseOf ? licenseOf(a) : a.licenseAssigned === true
@@ -132,6 +136,16 @@ export function connectivityBuckets(
       now,
       sch && sch.enabled ? sch : mon.schedule
     )
+    // Mode maintenance : pas de faux positif « hors ligne prolongé »
+    if (a.maintenanceMode) {
+      maintenance++
+      agents_maintenance.push(b)
+      if (age <= onlineMs) {
+        online++
+        agents_online.push(b)
+      }
+      continue
+    }
     if (age <= onlineMs) {
       online++
       agents_online.push(b)
@@ -140,22 +154,27 @@ export function connectivityBuckets(
       agents_stale.push(b)
     } else {
       offline_long++
+      agents_offline_long.push(b)
       if (inSchedule) offline_long_alertable++
     }
   }
   agents_stale.sort((a, b) => b.offline_for_ms - a.offline_for_ms)
+  agents_offline_long.sort((a, b) => b.offline_for_ms - a.offline_for_ms)
   return {
     online,
     stale,
     offline_long,
     offline_long_alertable,
+    maintenance,
     offline_long_ms: offlineLongMs,
     online_ms: onlineMs,
     schedule_active: !!mon.schedule.enabled,
     within_work_hours: orgInSchedule,
     monitoring: mon,
     agents_stale,
-    agents_online
+    agents_online,
+    agents_offline_long,
+    agents_maintenance
   }
 }
 

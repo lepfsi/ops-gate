@@ -1,8 +1,11 @@
 /**
  * Observe + enforce (P3) : scan trafic client→serveur décrypté.
  * - always journal (events API)
- * - enforce : signal block si sévérité medium/high (MITM coupe le flux)
+ * - enforce : signal block si sévérité medium/high (MITM ne doit PAS relayer)
  * - extrait noms de fichiers multipart (upload) comme l’extension file-scanner
+ *
+ * Important : en enforce, le MITM doit bufferiser avant de relayer (voir mitm.ts).
+ * Ici on décide block/observe sur chaque scan forcé.
  */
 import * as crypto from "node:crypto"
 import { inspectText } from "./inspect.js"
@@ -11,14 +14,22 @@ import { queueProxyEvent } from "./api-client.js"
 import type { AgentState } from "./agent-state.js"
 import { getProxyRemoteConfig } from "./sync.js"
 
-const MAX_WINDOW = 96 * 1024
-const MIN_INTERVAL_MS = 800
-const MIN_CHUNK = 24
+const MAX_WINDOW = 256 * 1024
+const MIN_CHUNK = 8
+/** Même host+règles : ne rejournalise pas avant ce délai (réduit la pluie de logs) */
+const DEDUP_TTL_MS = 90_000
 
 export type StreamObserver = {
-  /** @returns true si le flux doit être coupé (enforce block) */
+  /** @returns true si le flux doit être coupé (enforce block) — ne jamais relayer */
   onClientData: (chunk: Buffer) => boolean
-  flush: () => void
+  /** Scan final (idle / fin de requête). true = block */
+  flush: () => boolean
+  isBlocked: () => boolean
+  /**
+   * Réinitialise l’état pour la requête HTTP suivante (keep-alive).
+   * Le site reste accessible : on bloque la requête sensible, pas la session.
+   */
+  reset: () => void
 }
 
 type AgentStateGetter = () => AgentState | null
@@ -42,35 +53,87 @@ export function extractFileNames(buf: string): string[] {
   return [...new Set(out)].slice(0, 10)
 }
 
+/**
+ * Matériel scannable : corps HTTP / payload, pas les en-têtes d’auth de session.
+ * Sinon chaque requête ChatGPT (Authorization: Bearer eyJ…) est « bloquée ».
+ */
+export function materialForScan(raw: string): string {
+  let s = raw
+  // Lignes d’auth / cookies (HTTP/1.1 et fragments h2 textuels)
+  s = s.replace(
+    /(?:^|[\r\n])(?:authorization|cookie|set-cookie|x-access-token|x-auth-token)\s*:[^\r\n]*/gi,
+    "\n"
+  )
+  // Bearer JWT collé hors header
+  s = s.replace(/\bBearer\s+eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/gi, " ")
+  // Préférer le body après headers HTTP/1.1
+  const split = s.indexOf("\r\n\r\n")
+  if (split >= 0 && split < s.length - 8) {
+    const body = s.slice(split + 4)
+    if (body.length >= 8) return body
+  }
+  const splitLf = s.indexOf("\n\n")
+  if (splitLf >= 0 && splitLf < s.length - 8) {
+    const body = s.slice(splitLf + 2)
+    if (body.length >= 8) return body
+  }
+  return s
+}
+
 /** Extrait des fragments textuels utiles (JSON strings, ASCII, parties multipart). */
 export function extractTextCandidates(buf: string): string[] {
   const out: string[] = []
+  const src = materialForScan(buf)
   // Parties multipart : après headers, corps texte
-  const parts = buf.split(/\r?\n\r?\n/)
+  const parts = src.split(/\r?\n\r?\n/)
   for (const p of parts) {
-    if (p.length >= 20 && p.length < 8000 && !/[\x00-\x08\x0e-\x1f]/.test(p.slice(0, 200))) {
-      if (!/^--/.test(p) && (p.includes("=") || p.includes(" ") || /[a-zA-Z]{4,}/.test(p))) {
+    if (
+      p.length >= 20 &&
+      p.length < 8000 &&
+      !/[\x00-\x08\x0e-\x1f]/.test(p.slice(0, 200))
+    ) {
+      if (
+        !/^--/.test(p) &&
+        (p.includes("=") || p.includes(" ") || /[a-zA-Z]{4,}/.test(p))
+      ) {
         out.push(p.slice(0, 4000))
       }
     }
   }
   const reJson = /"((?:\\.|[^"\\]){8,2000})"/g
   let m: RegExpExecArray | null
-  while ((m = reJson.exec(buf)) !== null) {
+  while ((m = reJson.exec(src)) !== null) {
     try {
       out.push(JSON.parse(`"${m[1]}"`))
     } catch {
       out.push(m[1])
     }
   }
-  const reAscii = /[A-Za-z0-9_$/:.=+@\- ]{20,}/g
-  while ((m = reAscii.exec(buf)) !== null) {
+  // Aussi JSON non échappé long (payload ChatGPT / Claude)
+  const reJsonLoose =
+    /"(?:parts|content|input|prompt|message|text|query)"\s*:\s*"((?:\\.|[^"\\]){8,8000})"/gi
+  while ((m = reJsonLoose.exec(src)) !== null) {
+    try {
+      out.push(JSON.parse(`"${m[1]}"`))
+    } catch {
+      out.push(m[1].replace(/\\n/g, "\n").replace(/\\"/g, '"'))
+    }
+  }
+  const reAscii = /[A-Za-z0-9_$/:.=+@\- ]{16,}/g
+  while ((m = reAscii.exec(src)) !== null) {
+    // Skip JWT-looking ascii runs (session noise)
+    if (/^eyJ[A-Za-z0-9_-]+\./.test(m[0])) continue
     out.push(m[0])
   }
-  return [...new Set(out)].slice(0, 50)
+  // Fenêtre brute (utile HTTP/2 + JSON compact) — sans headers auth déjà strip
+  if (src.length >= 16) {
+    out.push(src.slice(0, 16_000))
+    if (src.length > 16_000) out.push(src.slice(-16_000))
+  }
+  return [...new Set(out)].slice(0, 80)
 }
 
-function resolveFilterMode(): "observe" | "enforce" {
+export function resolveFilterMode(): "observe" | "enforce" {
   const env = (process.env.OPSGATE_PROXY_MODE || "").toLowerCase()
   if (env === "observe" || env === "enforce") return env
   const cfg = getProxyRemoteConfig()
@@ -78,11 +141,41 @@ function resolveFilterMode(): "observe" | "enforce" {
   return "enforce"
 }
 
-function shouldEnforceBlock(severity: string | null): boolean {
+/**
+ * Règles qui ne doivent PAS couper le site (session navigateur, bruit auth).
+ * JWT de session ChatGPT/Claude = normal, pas un secret collé par l’utilisateur.
+ */
+const NEVER_ENFORCE_RULES = new Set([
+  "jwt-token",
+  "email-address",
+  "phone-fr",
+  "ip-private-block"
+])
+
+function shouldEnforceBlock(
+  severity: string | null,
+  ruleIds: string[]
+): boolean {
   const cfg = getProxyRemoteConfig()
   if (cfg.enabled === false) return false
   if (resolveFilterMode() !== "enforce") return false
-  return severity === "high" || severity === "medium"
+  const actionable = ruleIds.filter((id) => !NEVER_ENFORCE_RULES.has(id))
+  if (actionable.length === 0) return false
+  // high toujours ; medium seulement s’il reste une règle « métier »
+  if (severity === "high") return true
+  if (severity === "medium") return true
+  return false
+}
+
+/** Dédup journal uniquement (ne doit JAMAIS empêcher un block) */
+const globalLogDedup = new Map<string, number>()
+
+function pruneDedup(now: number) {
+  if (globalLogDedup.size < 400) return
+  for (const [k, t] of globalLogDedup) {
+    if (now - t > DEDUP_TTL_MS) globalLogDedup.delete(k)
+  }
+  if (globalLogDedup.size > 500) globalLogDedup.clear()
 }
 
 export function createStreamObserver(meta: {
@@ -90,105 +183,128 @@ export function createStreamObserver(meta: {
   direction?: "client_to_server"
 }): StreamObserver {
   let window = ""
-  let lastScan = 0
-  const seenKeys = new Set<string>()
+  const seenLogKeys = new Set<string>()
   let blocked = false
 
-  const scan = (force = false): boolean => {
+  const scan = (): boolean => {
     if (blocked) return true
-    const now = Date.now()
-    if (!force && now - lastScan < MIN_INTERVAL_MS) return false
     if (window.length < MIN_CHUNK) return false
-    lastScan = now
 
     const fileNames = extractFileNames(window)
     const candidates = extractTextCandidates(window)
     if (!candidates.length && !fileNames.length) return false
 
-    const blob = candidates.join("\n").slice(0, 32_000)
-    const result = inspectText(blob || window.slice(0, 8000))
+    const blob = candidates.join("\n").slice(0, 48_000)
+    const scanBase = materialForScan(window).slice(0, 16_000)
+    const result = inspectText(blob || scanBase)
     if (result.detection_count === 0) return false
 
-    const key =
-      result.rule_ids.sort().join(",") +
-      ":" +
-      result.highest_severity +
-      ":" +
-      fileNames.join(",")
-    if (seenKeys.has(key)) return false
-    seenKeys.add(key)
-    if (seenKeys.size > 200) seenKeys.clear()
-
-    const samples = result.detections.slice(0, 5).map((d) => ({
-      ruleId: d.ruleId,
-      severity: d.severity,
-      preview: d.preview
-    }))
-
-    const enforce = shouldEnforceBlock(result.highest_severity)
+    // Filtrer JWT pur : journal possible, jamais coupe site
+    const enforce = shouldEnforceBlock(
+      result.highest_severity,
+      result.rule_ids || []
+    )
     const decision = enforce ? "block" : "observe"
     const hasFile = fileNames.length > 0
+    const rulesKey = result.rule_ids.slice().sort().join(",")
+    const logKey = `${meta.host}|${rulesKey}|${decision}|${fileNames.join(",")}`
 
-    log("info", enforce ? "enforce_block" : "observe_detection", {
-      host: meta.host,
-      mode: enforce ? "enforce_mitm" : "observe_mitm",
-      source: "proxy",
-      decision,
-      detection_count: result.detection_count,
-      highest_severity: result.highest_severity,
-      rule_ids: result.rule_ids,
-      types: result.types,
-      file_names: fileNames.length ? fileNames : undefined,
-      samples
-    })
+    // ── BLOCK d’abord (indépendant de la dédup journal) ──
+    if (enforce) {
+      blocked = true
+    }
 
-    const state = getAgentState()
-    if (state?.agent_token) {
-      const sev = (result.highest_severity || "low") as
-        | "low"
-        | "medium"
-        | "high"
-      queueProxyEvent(state, {
-        client_event_id: crypto.randomUUID(),
-        ts: new Date().toISOString(),
-        hostname: meta.host,
+    // ── Journal (dédup seulement ici) ──
+    const now = Date.now()
+    const lastLog = globalLogDedup.get(logKey) || 0
+    const skipLog =
+      seenLogKeys.has(logKey) || now - lastLog < DEDUP_TTL_MS
+
+    if (!skipLog) {
+      seenLogKeys.add(logKey)
+      globalLogDedup.set(logKey, now)
+      pruneDedup(now)
+      if (seenLogKeys.size > 80) seenLogKeys.clear()
+
+      const samples = result.detections.slice(0, 5).map((d) => ({
+        ruleId: d.ruleId,
+        severity: d.severity,
+        preview: d.preview
+      }))
+
+      const primaryType = result.types[0] || rulesKey || "detection"
+      const types = [
+        primaryType,
+        ...(hasFile ? (["file_upload"] as const) : []),
+        ...(enforce ? (["proxy_block"] as const) : [])
+      ]
+
+      log("info", enforce ? "enforce_block" : "observe_detection", {
+        host: meta.host,
+        mode: enforce ? "enforce_mitm" : "observe_mitm",
+        source: "proxy",
         decision,
         detection_count: result.detection_count,
-        highest_severity:
-          sev === "low" || sev === "medium" || sev === "high" ? sev : "high",
+        highest_severity: result.highest_severity,
         rule_ids: result.rule_ids,
-        types: [
-          ...result.types,
-          ...(hasFile ? ["file_upload"] : []),
-          ...(enforce ? ["proxy_block"] : [])
-        ],
-        file_names: hasFile ? fileNames : null,
-        redacted_matches: samples.map((s) => ({
-          rule_id: s.ruleId,
-          preview: s.preview
-        }))
+        types,
+        file_names: fileNames.length ? fileNames : undefined,
+        samples
+      })
+
+      const state = getAgentState()
+      if (state?.agent_token) {
+        const sev = (result.highest_severity || "low") as
+          | "low"
+          | "medium"
+          | "high"
+        queueProxyEvent(state, {
+          client_event_id: crypto.randomUUID(),
+          ts: new Date().toISOString(),
+          hostname: meta.host,
+          decision,
+          detection_count: result.detection_count,
+          highest_severity:
+            sev === "low" || sev === "medium" || sev === "high" ? sev : "high",
+          rule_ids: result.rule_ids,
+          types: [...types],
+          file_names: hasFile ? fileNames : null,
+          redacted_matches: samples.map((s) => ({
+            rule_id: s.ruleId,
+            preview: s.preview
+          }))
+        })
+      }
+    } else if (enforce) {
+      log("debug", "enforce_block_deduped_log", {
+        host: meta.host,
+        note: "block actif, journal déjà émis récemment"
       })
     }
 
-    if (enforce) {
-      blocked = true
-      return true
-    }
-    return false
+    return blocked
   }
 
   return {
     onClientData(chunk: Buffer) {
       if (blocked) return true
-      window += chunk.toString("utf8")
+      // latin1 conserve les octets (HTTP/2 binaire + JSON utf8 mélangés)
+      window += chunk.toString("latin1")
       if (window.length > MAX_WINDOW) {
         window = window.slice(window.length - MAX_WINDOW)
       }
-      return scan(false)
+      return scan()
     },
     flush() {
-      scan(true)
+      return scan()
+    },
+    isBlocked() {
+      return blocked
+    },
+    reset() {
+      blocked = false
       window = ""
+      // keep seenLogKeys — dédup journal uniquement
     }
   }
 }

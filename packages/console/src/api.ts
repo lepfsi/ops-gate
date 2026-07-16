@@ -87,6 +87,7 @@ export type SummaryAgentBrief = {
   offline_for_ms: number
   group_id?: string | null
   device_fingerprint?: string | null
+  maintenance_mode?: "leave" | "outage" | "remote" | null
 }
 
 export type Summary = {
@@ -117,6 +118,7 @@ export type Summary = {
     stale: number
     offline_long: number
     offline_long_alertable?: number
+    maintenance?: number
     offline_long_ms: number
     online_ms: number
     schedule_active?: boolean
@@ -130,6 +132,7 @@ export type Summary = {
   agents_offline_long?: SummaryAgentBrief[]
   agents_stale?: SummaryAgentBrief[]
   agents_online?: SummaryAgentBrief[]
+  agents_maintenance?: SummaryAgentBrief[]
   duplicate_fingerprints?: Array<{
     fingerprint: string
     agents: SummaryAgentBrief[]
@@ -141,6 +144,53 @@ export type LogCategories = {
   adminLogin: boolean
   adminAudit: boolean
   agentLifecycle: boolean
+  /** Events proxy (source=proxy) — décocher pour réduire le bruit */
+  proxyEvents?: boolean
+}
+
+/** Rapport sécurité (dashboard compile) */
+export type SecurityReport = {
+  schema_version: 1
+  generated_at: string
+  org_id: string
+  org_name?: string
+  period: {
+    kind: string
+    from_ts: string
+    to_ts: string
+    label: string
+  }
+  kpis: {
+    events_total: number
+    agents_total: number
+    agents_online: number
+    agents_stale: number
+    agents_offline_long: number
+    agents_maintenance: number
+    licensed: number
+    unlicensed: number
+    grace: number
+    seats: number
+    seats_used: number
+    risky_sends: number
+    blocks: number
+    masks: number
+    observes: number
+    cancels: number
+  }
+  by_decision: Array<{ decision: string; count: number; pct: number }>
+  by_severity: Array<{ severity: string; count: number; pct: number }>
+  by_source: Array<{ source: string; count: number; pct: number }>
+  events_by_day: Array<{ day: string; count: number }>
+  top_rules: Array<{ rule_id: string; count: number }>
+  top_hosts: Array<{ hostname: string; count: number }>
+  top_devices: Array<{ device_label: string; count: number }>
+  connectivity: {
+    online: number
+    stale: number
+    offline_long: number
+    maintenance: number
+  }
 }
 
 export type NotificationSettings = {
@@ -210,6 +260,8 @@ export type AgentRow = {
   device_fingerprint?: string | null
   /** extension | proxy (P3) */
   device_type?: "extension" | "proxy"
+  maintenance_mode?: "leave" | "outage" | "remote" | null
+  maintenance_note?: string | null
 }
 
 export type EventRow = {
@@ -422,10 +474,13 @@ export const api = {
     only_if_unassigned?: boolean
     enabled?: boolean
   }) =>
-    request<{ ok: boolean; rule: MovingRuleRow }>("/v1/org/moving-rules", {
-      method: "POST",
-      body: JSON.stringify(body)
-    }),
+    request<{ ok: boolean; rule: MovingRuleRow; agents_applied?: number }>(
+      "/v1/org/moving-rules",
+      {
+        method: "POST",
+        body: JSON.stringify(body)
+      }
+    ),
 
   patchMovingRule: (
     id: string,
@@ -441,7 +496,7 @@ export const api = {
       enabled?: boolean
     }
   ) =>
-    request<{ ok: boolean; rule: MovingRuleRow }>(
+    request<{ ok: boolean; rule: MovingRuleRow; agents_applied?: number }>(
       `/v1/org/moving-rules/${encodeURIComponent(id)}`,
       { method: "PATCH", body: JSON.stringify(body) }
     ),
@@ -641,6 +696,22 @@ export const api = {
       }
     ),
 
+  setAgentMaintenance: (
+    agentId: string,
+    mode: "leave" | "outage" | "remote" | null,
+    note?: string | null
+  ) =>
+    request<{ ok: boolean }>(
+      `/v1/org/agents/${encodeURIComponent(agentId)}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({
+          maintenance_mode: mode,
+          maintenance_note: note ?? null
+        })
+      }
+    ),
+
   admins: () =>
     request<{
       org_id: string
@@ -800,6 +871,61 @@ export const api = {
       from_ts?: string
       to_ts?: string
     }>(`/v1/org/events/export?${q.toString()}`)
+  },
+
+  /** Rapport sécurité (agrégats + charts). format=json */
+  securityReport: (opts: {
+    range?: "week" | "current_week" | "custom" | "all"
+    from?: string
+    to?: string
+  }) => {
+    const q = new URLSearchParams({
+      range: opts.range || "current_week",
+      format: "json"
+    })
+    if (opts.from) q.set("from", opts.from)
+    if (opts.to) q.set("to", opts.to)
+    return request<{ ok: boolean; report: SecurityReport }>(
+      `/v1/org/reports/security?${q.toString()}`
+    )
+  },
+
+  /** Télécharge le PDF rapport (blob). */
+  securityReportPdf: async (opts: {
+    range?: "week" | "current_week" | "custom" | "all"
+    from?: string
+    to?: string
+  }): Promise<{ blob: Blob; filename: string }> => {
+    const q = new URLSearchParams({
+      range: opts.range || "current_week",
+      format: "pdf"
+    })
+    if (opts.from) q.set("from", opts.from)
+    if (opts.to) q.set("to", opts.to)
+    const base = getApiBase()
+    const token = getToken()
+    const res = await fetch(
+      `${base.replace(/\/$/, "")}/v1/org/reports/security?${q.toString()}`,
+      {
+        headers: {
+          accept: "application/pdf",
+          ...(token ? { Authorization: `Bearer ${token}` } : {})
+        }
+      }
+    )
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}))
+      throw new Error(
+        (err as { message?: string; error?: string }).message ||
+          (err as { error?: string }).error ||
+          `HTTP ${res.status}`
+      )
+    }
+    const cd = res.headers.get("content-disposition") || ""
+    const m = /filename="?([^";]+)"?/i.exec(cd)
+    const filename = m?.[1] || "opsgate-security-report.pdf"
+    const blob = await res.blob()
+    return { blob, filename }
   },
 
   listEventExports: () =>

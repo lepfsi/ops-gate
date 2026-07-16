@@ -49,6 +49,8 @@ export type SummaryAgentBrief = {
   offline_for_ms: number
   group_id?: string | null
   device_fingerprint?: string | null
+  /** leave | outage | remote — hors alertes offline prolongé */
+  maintenance_mode?: "leave" | "outage" | "remote" | null
 }
 
 export type OrgSummary = {
@@ -82,6 +84,8 @@ export type OrgSummary = {
     offline_long: number
     /** Hors-ligne long ET heures de travail (alertes actives) */
     offline_long_alertable?: number
+    /** Agents en mode maintenance (congé / panne / remote) */
+    maintenance?: number
     offline_long_ms: number
     online_ms: number
     schedule_active?: boolean
@@ -97,6 +101,7 @@ export type OrgSummary = {
   agents_offline_long?: SummaryAgentBrief[]
   agents_stale?: SummaryAgentBrief[]
   agents_online?: SummaryAgentBrief[]
+  agents_maintenance?: SummaryAgentBrief[]
   /** Doublons potentiels (même fingerprint, labels différents) */
   duplicate_fingerprints?: Array<{
     fingerprint: string
@@ -292,6 +297,13 @@ export interface OpsGateStore {
     orgId: string,
     agentId: string,
     userId: string | null
+  ): Promise<Agent | undefined>
+  /** Mode maintenance (congé / panne / remote) — exclut des alertes offline long */
+  setAgentMaintenance(
+    orgId: string,
+    agentId: string,
+    mode: "leave" | "outage" | "remote" | null,
+    note?: string | null
   ): Promise<Agent | undefined>
 
   getEffectivePolicyForAgent(

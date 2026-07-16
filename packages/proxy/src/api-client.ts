@@ -6,6 +6,7 @@ import {
   loadAgentState,
   saveAgentState,
   proxyFingerprint,
+  cleanProxyLabel,
   type AgentState
 } from "./agent-state.js"
 import * as os from "node:os"
@@ -22,7 +23,8 @@ export async function enrollProxy(opts: EnrollOpts): Promise<AgentState> {
   const body = {
     org_code: opts.orgCode,
     device_type: "proxy",
-    device_label: opts.deviceLabel || `OpsGate Proxy (${os.hostname()})`,
+    // Label = hostname seul (pas de préfixe « OpsGate Proxy »)
+    device_label: cleanProxyLabel(opts.deviceLabel || os.hostname()),
     host_name: os.hostname(),
     app_version: "proxy-0.4.0-p3",
     device_fingerprint: fp
@@ -99,7 +101,7 @@ export function queueProxyEvent(
     schema_version: 1,
     source: "proxy",
     masked: ev.decision === "block",
-    device_label: state.device_label,
+    device_label: cleanProxyLabel(state.device_label),
     file_names: ev.file_names ?? null,
     ...ev
   }

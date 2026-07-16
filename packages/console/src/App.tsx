@@ -1385,17 +1385,6 @@ function SummaryView({
           {renderAgentList(summary.agents_online, t("dash.noOnline"))}
         </div>
       )}
-      {panel === "stale" && (
-        <div className="card dash-context-panel">
-          <h3 style={{ marginTop: 0 }}>
-            {t("dash.panelStale")}{" "}
-            <button type="button" className="btn secondary btn-sm" onClick={() => setPanel(null)}>
-              {t("common.close")}
-            </button>
-          </h3>
-          {renderAgentList(summary.agents_stale, t("dash.noStale"))}
-        </div>
-      )}
       {panel === "licensed" && (
         <div className="card dash-context-panel">
           <h3 style={{ marginTop: 0 }}>
@@ -1429,6 +1418,20 @@ function SummaryView({
           {renderAgentList(summary.agents_grace, t("dash.noGrace"))}
         </div>
       )}
+      {panel === "stale" && (
+        <div className="card dash-context-panel">
+          <h3 style={{ marginTop: 0 }}>
+            {t("dash.panelStale")}{" "}
+            <button type="button" className="btn secondary btn-sm" onClick={() => setPanel(null)}>
+              {t("common.close")}
+            </button>
+          </h3>
+          <p className="muted" style={{ fontSize: 12 }}>
+            {t("dash.staleHint")}
+          </p>
+          {renderAgentList(summary.agents_stale, t("dash.noStale"))}
+        </div>
+      )}
       {panel === "offline" && (
         <div className="card dash-context-panel">
           <h3 style={{ marginTop: 0 }}>
@@ -1439,6 +1442,20 @@ function SummaryView({
           </h3>
           {renderAgentList(
             summary.agents_offline_long,
+            t("dash.allSynced")
+          )}
+        </div>
+      )}
+      {panel === "maintenance" && (
+        <div className="card dash-context-panel">
+          <h3 style={{ marginTop: 0 }}>
+            {t("dash.panelMaintenance")}{" "}
+            <button type="button" className="btn secondary btn-sm" onClick={() => setPanel(null)}>
+              {t("common.close")}
+            </button>
+          </h3>
+          {renderAgentList(
+            summary.agents_maintenance,
             t("dash.allSynced")
           )}
         </div>
@@ -1483,7 +1500,11 @@ function SummaryView({
                         {e.ts ? new Date(e.ts).toLocaleString("fr-FR") : " - "}
                       </td>
                       <td>
-                        <strong>{e.device_label || " - "}</strong>
+                        <strong>
+                          {(e.device_label || "")
+                            .replace(/^OpsGate\s+Proxy\s*[-:–—]?\s*/i, "")
+                            .trim() || " - "}
+                        </strong>
                       </td>
                       <td>
                         <strong>{decisionLabelFr(e.decision)}</strong>
@@ -1501,10 +1522,7 @@ function SummaryView({
                         </span>
                       </td>
                       <td className="muted" style={{ fontSize: 11 }}>
-                        {(e.types || []).join(", ") || " - "}
-                        {e.file_names?.length
-                          ? ` · fichiers: ${e.file_names.slice(0, 2).join(", ")}`
-                          : ""}
+                        {eventDetailSummary(e)}
                       </td>
                     </tr>
                   ))}
@@ -1632,7 +1650,7 @@ function SummaryView({
                 className="dash-link-row"
                 onClick={() => openPanel("stale")}>
                 <span className="dash-dot warn" /> {t("dash.stale")}{" "}
-                <strong>{conn.stale}</strong>
+                <strong>{conn.stale ?? 0}</strong>
               </button>
             </li>
             <li>
@@ -1641,28 +1659,37 @@ function SummaryView({
                 className="dash-link-row crit-text"
                 onClick={() => openPanel("offline")}>
                 <span className="dash-dot crit" /> {t("dash.offlineLongLabel")}{" "}
-                <strong>
-                  {conn.schedule_active && !conn.within_work_hours
-                    ? conn.offline_long_alertable ?? 0
-                    : conn.offline_long}
-                </strong>
-                {conn.schedule_active && !conn.within_work_hours ? (
-                  <span className="muted" style={{ fontSize: 11 }}>
-                    {" "}
-                    {t("dash.offHoursSilent")}
-                  </span>
-                ) : null}
+                <strong>{conn.offline_long ?? 0}</strong>
               </button>
             </li>
+            {(conn.maintenance ?? 0) > 0 ||
+            (summary.agents_maintenance?.length ?? 0) > 0 ? (
+              <li>
+                <button
+                  type="button"
+                  className="dash-link-row"
+                  onClick={() => openPanel("maintenance")}>
+                  <span className="dash-dot warn" /> {t("dash.maintenance")}{" "}
+                  <strong>
+                    {conn.maintenance ??
+                      summary.agents_maintenance?.length ??
+                      0}
+                  </strong>
+                </button>
+              </li>
+            ) : null}
           </ul>
           <p className="muted" style={{ fontSize: 11, marginBottom: 0 }}>
-            &gt; {Math.round(conn.offline_long_ms / 60000)} min ·{" "}
-            {conn.schedule_active
-              ? conn.within_work_hours
-                ? t("dash.workHours")
-                : t("dash.offHours")
-              : t("dash.scheduleOff")}
-            . {t("dash.clickList")}
+            En ligne &lt; {Math.round(conn.online_ms / 60000)} min · Inactif
+            jusqu’à {Math.round(conn.offline_long_ms / 60000)} min · Hors ligne
+            au-delà
+            {conn.schedule_active && !conn.within_work_hours
+              ? ` · ${t("dash.offHoursSilent")}`
+              : conn.schedule_active
+                ? ` · ${t("dash.workHours")}`
+                : ""}
+            {" · "}
+            {t("dash.clickList")}
           </p>
         </div>
 
@@ -1701,15 +1728,15 @@ function SummaryView({
         </div>
       </div>
 
-      <div id="dash-activity" className="dash-grid">
-        <div className="card dash-widget">
+      <div id="dash-activity" className="dash-grid dash-grid--equal2">
+        <div className="card dash-widget dash-widget--activity">
           <div className="dash-widget-head">
             <h2>{t("dash.activity")}</h2>
             <span className="muted" style={{ fontSize: 11 }}>
               {t("dash.clickDetail")}
             </span>
           </div>
-          <div className="dash-bars">
+          <div className="dash-bars dash-bars--compact">
             {(
               [
                 ["mask_send", t("dash.mask"), maskN, "ok"],
@@ -1729,7 +1756,7 @@ function SummaryView({
                   <span
                     className={`dash-bar-fill ${tone}`}
                     style={{
-                      width: `${totalDec ? Math.max(6, (n / totalDec) * 100) : 0}%`
+                      width: `${totalDec ? Math.max(4, (n / totalDec) * 100) : 0}%`
                     }}
                   />
                 </span>
@@ -1739,7 +1766,7 @@ function SummaryView({
           </div>
         </div>
 
-        <div className="card dash-widget" style={{ gridColumn: "span 2" }}>
+        <div className="card dash-widget dash-widget--timeline">
           <div className="dash-widget-head">
             <h2>{t("dash.events14")}</h2>
             <span className="muted" style={{ fontSize: 11 }}>
@@ -1881,6 +1908,204 @@ function SummaryView({
   )
 }
 
+function SecurityReportPanel({
+  t,
+  setError,
+  setInfo,
+  busy,
+  setBusy
+}: {
+  t: (k: string, vars?: Record<string, string | number>) => string
+  setError: (e: string | null) => void
+  setInfo: (i: string | null) => void
+  busy: boolean
+  setBusy: (b: boolean) => void
+}) {
+  const [range, setRange] = useState<
+    "current_week" | "week" | "custom" | "all"
+  >("current_week")
+  const [from, setFrom] = useState("")
+  const [to, setTo] = useState("")
+  const [preview, setPreview] = useState<
+    import("./api").SecurityReport | null
+  >(null)
+  const [localBusy, setLocalBusy] = useState(false)
+
+  const loadPreview = async () => {
+    setLocalBusy(true)
+    setError(null)
+    try {
+      const r = await api.securityReport({
+        range,
+        from: range === "custom" ? from : undefined,
+        to: range === "custom" ? to : undefined
+      })
+      setPreview(r.report)
+    } catch (e) {
+      setError(String(e))
+    } finally {
+      setLocalBusy(false)
+    }
+  }
+
+  const downloadPdf = async () => {
+    if (range === "custom" && (!from || !to)) {
+      setError("from/to required")
+      return
+    }
+    setBusy(true)
+    setError(null)
+    try {
+      const { blob, filename } = await api.securityReportPdf({
+        range,
+        from: range === "custom" ? from : undefined,
+        to: range === "custom" ? to : undefined
+      })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement("a")
+      a.href = url
+      a.download = filename
+      a.click()
+      URL.revokeObjectURL(url)
+      setInfo(t("rep.pdfOk"))
+    } catch (e) {
+      setError(String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const k = preview?.kpis
+
+  return (
+    <div
+      className="card"
+      style={{
+        marginTop: 20,
+        borderLeft: "4px solid var(--accent)",
+        maxWidth: 640
+      }}>
+      <h3 style={{ marginTop: 0 }}>{t("rep.securityTitle")}</h3>
+      <p className="muted" style={{ fontSize: 12 }}>
+        {t("rep.securityHint")}
+      </p>
+      <div className="form-stack" style={{ maxWidth: 480 }}>
+        <label className="field-label">{t("rep.range")}</label>
+        <select
+          className="input"
+          value={range}
+          onChange={(e) =>
+            setRange(e.target.value as typeof range)
+          }>
+          <option value="current_week">{t("rep.range.currentWeek")}</option>
+          <option value="week">{t("rep.range.week")}</option>
+          <option value="all">{t("rep.range.all")}</option>
+          <option value="custom">{t("rep.range.custom")}</option>
+        </select>
+        {range === "custom" && (
+          <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+            <div>
+              <label className="field-label">{t("events.from")}</label>
+              <input
+                className="input"
+                type="date"
+                value={from}
+                onChange={(e) => setFrom(e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="field-label">{t("events.to")}</label>
+              <input
+                className="input"
+                type="date"
+                value={to}
+                onChange={(e) => setTo(e.target.value)}
+              />
+            </div>
+          </div>
+        )}
+        <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+          <button
+            type="button"
+            className="btn secondary"
+            disabled={localBusy || busy}
+            onClick={() => void loadPreview()}>
+            {localBusy ? "…" : t("rep.refreshPreview")}
+          </button>
+          <button
+            type="button"
+            className="btn"
+            disabled={busy || localBusy}
+            onClick={() => void downloadPdf()}>
+            {busy ? t("rep.pdfBusy") : t("rep.pdf")}
+          </button>
+        </div>
+      </div>
+      {preview && k && (
+        <div style={{ marginTop: 16 }}>
+          <div className="field-label">{t("rep.preview")}</div>
+          <p className="muted" style={{ fontSize: 12, margin: "4px 0 10px" }}>
+            {preview.period.label} · {preview.period.from_ts.slice(0, 10)} →{" "}
+            {preview.period.to_ts.slice(0, 10)}
+          </p>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fill, minmax(100px, 1fr))",
+              gap: 8
+            }}>
+            {(
+              [
+                ["Events", k.events_total],
+                ["Blocks", k.blocks],
+                ["Mask", k.masks],
+                ["Risky", k.risky_sends],
+                ["Observe", k.observes],
+                ["Agents", k.agents_total],
+                ["Online", k.agents_online],
+                ["Unlic.", k.unlicensed]
+              ] as const
+            ).map(([lab, val]) => (
+              <div
+                key={lab}
+                style={{
+                  background: "var(--accent-soft)",
+                  borderRadius: 8,
+                  padding: "8px 10px",
+                  borderLeft: "3px solid var(--accent)"
+                }}>
+                <div
+                  style={{
+                    fontSize: 18,
+                    fontWeight: 700,
+                    color: "var(--navy)"
+                  }}>
+                  {val}
+                </div>
+                <div className="muted" style={{ fontSize: 11 }}>
+                  {lab}
+                </div>
+              </div>
+            ))}
+          </div>
+          {preview.top_rules?.length > 0 && (
+            <div style={{ marginTop: 12 }}>
+              <div className="field-label">Top rules</div>
+              <ul style={{ margin: "6px 0", paddingLeft: 18, fontSize: 12 }}>
+                {preview.top_rules.slice(0, 5).map((r) => (
+                  <li key={r.rule_id}>
+                    <span className="mono">{r.rule_id}</span> · {r.count}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function SystemSettingsView({
   busy,
   setBusy,
@@ -1923,6 +2148,7 @@ function SystemSettingsView({
   const [retentionDays, setRetentionDays] = useState(90)
   const [weeklyExport, setWeeklyExport] = useState(true)
   const [logDetection, setLogDetection] = useState(true)
+  const [logProxy, setLogProxy] = useState(true)
   const [logLogin, setLogLogin] = useState(true)
   const [logAudit, setLogAudit] = useState(true)
   const [logAgentLife, setLogAgentLife] = useState(true)
@@ -1975,6 +2201,7 @@ function SystemSettingsView({
         const lc = m.logCategories
         if (lc) {
           setLogDetection(lc.detectionEvents !== false)
+          setLogProxy(lc.proxyEvents !== false)
           setLogLogin(lc.adminLogin !== false)
           setLogAudit(lc.adminAudit !== false)
           setLogAgentLife(lc.agentLifecycle !== false)
@@ -2051,6 +2278,7 @@ function SystemSettingsView({
         weeklyExportEnabled: weeklyExport,
         logCategories: {
           detectionEvents: logDetection,
+          proxyEvents: logProxy,
           adminLogin: logLogin,
           adminAudit: logAudit,
           agentLifecycle: logAgentLife
@@ -2079,7 +2307,7 @@ function SystemSettingsView({
       } catch {
         /* ignore */
       }
-      setInfo(`${t("settings.saved")} · ${daysClamped} j`)
+      setInfo(t("settings.saved"))
     } catch (e) {
       setError(String(e))
     } finally {
@@ -2186,6 +2414,17 @@ function SystemSettingsView({
               />
               {t("logs.detection")}
             </label>
+            <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <input
+                type="checkbox"
+                checked={logProxy}
+                onChange={(e) => setLogProxy(e.target.checked)}
+              />
+              {t("logs.proxy")}
+            </label>
+            <p className="muted" style={{ fontSize: 11, margin: "0 0 0 24px" }}>
+              {t("logs.proxyHint")}
+            </p>
             <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
               <input
                 type="checkbox"
@@ -2487,7 +2726,7 @@ function SystemSettingsView({
         {settingsTab === "reports" && (
         <div className="settings-section">
           <h3>{t("settings.tab.reports")}</h3>
-          <div className="form-stack" style={{ maxWidth: 420 }}>
+          <div className="form-stack" style={{ maxWidth: 520 }}>
             <label className="field-label">{t("rep.format")}</label>
             <select
               className="input"
@@ -2498,7 +2737,19 @@ function SystemSettingsView({
               <option value="csv">{t("rep.csv")}</option>
               <option value="json">{t("rep.json")}</option>
             </select>
+            <p className="muted" style={{ fontSize: 12, margin: 0 }}>
+              {t("rep.format")} — events bruts (CSV/JSON). Le rapport PDF ci-dessous
+              compile les charts dashboard.
+            </p>
           </div>
+
+          <SecurityReportPanel
+            t={t}
+            setError={setError}
+            setInfo={setInfo}
+            busy={busy}
+            setBusy={setBusy}
+          />
         </div>
         )}
 
@@ -5214,24 +5465,210 @@ function AgentsView({
   const [bulkProfile, setBulkProfile] = useState("")
   const [pageSize, setPageSize] = useState(50)
   const [page, setPage] = useState(1)
+  const [searchQ, setSearchQ] = useState("")
+  const [sortBy, setSortBy] = useState<
+    "label" | "enrolled" | "last_seen" | "group" | "profile"
+  >("label")
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc")
+  const [filterStatus, setFilterStatus] = useState<
+    "all" | "active" | "maintenance"
+  >("all")
+  const [filterGroup, setFilterGroup] = useState("")
+  const [filterProfile, setFilterProfile] = useState("")
 
   useEffect(() => {
     void api.licenses().then(setStats).catch(() => setStats(null))
   }, [agents])
 
+  const agentLabel = (a: AgentRow) =>
+    (a.device_label || "")
+      .replace(/^OpsGate Proxy\s*/i, "")
+      .trim() ||
+    a.host_name ||
+    a.id
+
+  const filteredAgents = useMemo(() => {
+    const q = searchQ.trim().toLowerCase()
+    let list = agents.filter((a) => {
+      if (filterStatus === "active" && a.maintenance_mode) return false
+      if (filterStatus === "maintenance" && !a.maintenance_mode) return false
+      if (filterGroup && (a.group_id || "") !== filterGroup) return false
+      if (filterProfile && (a.policy_profile_id || "") !== filterProfile)
+        return false
+      if (q) {
+        const hay = [
+          a.device_label,
+          a.host_name,
+          a.id,
+          a.app_version,
+          a.group_id
+            ? groups.find((g) => g.id === a.group_id)?.name
+            : "",
+          a.policy_profile_id
+            ? profiles.find((p) => p.id === a.policy_profile_id)?.name
+            : "",
+          a.maintenance_mode || "active"
+        ]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase()
+        if (!hay.includes(q)) return false
+      }
+      return true
+    })
+    const dir = sortDir === "asc" ? 1 : -1
+    list = [...list].sort((a, b) => {
+      let cmp = 0
+      if (sortBy === "label") {
+        cmp = agentLabel(a).localeCompare(agentLabel(b), "fr", {
+          sensitivity: "base"
+        })
+      } else if (sortBy === "enrolled") {
+        cmp =
+          new Date(a.enrolled_at).getTime() - new Date(b.enrolled_at).getTime()
+      } else if (sortBy === "last_seen") {
+        cmp =
+          new Date(a.last_seen_at).getTime() -
+          new Date(b.last_seen_at).getTime()
+      } else if (sortBy === "group") {
+        const ga =
+          groups.find((g) => g.id === a.group_id)?.name || a.group_id || ""
+        const gb =
+          groups.find((g) => g.id === b.group_id)?.name || b.group_id || ""
+        cmp = ga.localeCompare(gb, "fr", { sensitivity: "base" })
+      } else if (sortBy === "profile") {
+        const pa =
+          profiles.find((p) => p.id === a.policy_profile_id)?.name ||
+          a.policy_profile_id ||
+          ""
+        const pb =
+          profiles.find((p) => p.id === b.policy_profile_id)?.name ||
+          b.policy_profile_id ||
+          ""
+        cmp = pa.localeCompare(pb, "fr", { sensitivity: "base" })
+      }
+      return cmp * dir
+    })
+    return list
+  }, [
+    agents,
+    searchQ,
+    sortBy,
+    sortDir,
+    filterStatus,
+    filterGroup,
+    filterProfile,
+    groups,
+    profiles
+  ])
+
   useEffect(() => {
     setPage(1)
-  }, [agents.length, pageSize])
+  }, [
+    filteredAgents.length,
+    pageSize,
+    searchQ,
+    sortBy,
+    sortDir,
+    filterStatus,
+    filterGroup,
+    filterProfile
+  ])
 
   const pagedAgents = useMemo(() => {
     const start = (page - 1) * pageSize
-    return agents.slice(start, start + pageSize)
-  }, [agents, page, pageSize])
+    return filteredAgents.slice(start, start + pageSize)
+  }, [filteredAgents, page, pageSize])
 
   const toggleSel = (id: string) =>
     setSelected((prev) =>
       prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
     )
+
+  const toggleSort = (col: typeof sortBy) => {
+    if (sortBy === col) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"))
+    } else {
+      setSortBy(col)
+      setSortDir(col === "enrolled" || col === "last_seen" ? "desc" : "asc")
+    }
+  }
+
+  const sortMark = (col: typeof sortBy) =>
+    sortBy === col ? (sortDir === "asc" ? " ↑" : " ↓") : ""
+
+  const exportAgents = (fmt: "csv" | "json") => {
+    const rows = filteredAgents.map((a) => ({
+      id: a.id,
+      device_label: agentLabel(a),
+      host_name: a.host_name || "",
+      device_type: a.device_type || "extension",
+      app_version: a.app_version || "",
+      enrolled_at: a.enrolled_at,
+      last_seen_at: a.last_seen_at,
+      license_status: a.license_status || (a.licensed ? "licensed" : "unlicensed"),
+      licensed: !!a.licensed,
+      group_id: a.group_id || "",
+      group_name:
+        groups.find((g) => g.id === a.group_id)?.name || "",
+      policy_profile_id: a.policy_profile_id || "",
+      policy_profile_name:
+        profiles.find((p) => p.id === a.policy_profile_id)?.name || "",
+      user_id: a.user_id || "",
+      user_name:
+        users.find((u) => u.id === a.user_id)?.displayName || "",
+      maintenance_mode: a.maintenance_mode || "",
+      maintenance_note: a.maintenance_note || "",
+      device_fingerprint: a.device_fingerprint || "",
+      status: a.maintenance_mode ? `maintenance:${a.maintenance_mode}` : "active"
+    }))
+    const stamp = new Date().toISOString().slice(0, 10)
+    if (fmt === "json") {
+      downloadTextFile(
+        `opsgate-agents-${stamp}.json`,
+        JSON.stringify(rows, null, 2),
+        "application/json"
+      )
+      setInfo(`Export JSON · ${rows.length} agent(s)`)
+      return
+    }
+    const cols = [
+      "id",
+      "device_label",
+      "host_name",
+      "device_type",
+      "app_version",
+      "enrolled_at",
+      "last_seen_at",
+      "license_status",
+      "licensed",
+      "group_name",
+      "group_id",
+      "policy_profile_name",
+      "policy_profile_id",
+      "user_name",
+      "user_id",
+      "maintenance_mode",
+      "maintenance_note",
+      "status",
+      "device_fingerprint"
+    ] as const
+    const esc = (v: unknown) => {
+      const s = v == null ? "" : String(v)
+      if (/[",\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`
+      return s
+    }
+    const lines = [
+      cols.join(","),
+      ...rows.map((r) => cols.map((c) => esc(r[c])).join(","))
+    ]
+    downloadTextFile(
+      `opsgate-agents-${stamp}.csv`,
+      "\uFEFF" + lines.join("\n"),
+      "text/csv;charset=utf-8"
+    )
+    setInfo(`Export CSV · ${rows.length} agent(s)`)
+  }
 
   return (
     <>
@@ -5292,7 +5729,112 @@ function AgentsView({
       </div>
 
       <div className="card">
-        <h2>Agents enrollés</h2>
+        <div
+          className="row"
+          style={{
+            justifyContent: "space-between",
+            alignItems: "center",
+            flexWrap: "wrap",
+            gap: 8,
+            marginBottom: 8
+          }}>
+          <h2 style={{ margin: 0 }}>Agents enrollés</h2>
+          <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+            <button
+              type="button"
+              className="btn secondary btn-sm"
+              disabled={filteredAgents.length === 0}
+              onClick={() => exportAgents("csv")}
+              title="Exporte la vue filtrée (CSV)">
+              Export CSV
+            </button>
+            <button
+              type="button"
+              className="btn secondary btn-sm"
+              disabled={filteredAgents.length === 0}
+              onClick={() => exportAgents("json")}
+              title="Exporte la vue filtrée (JSON)">
+              Export JSON
+            </button>
+          </div>
+        </div>
+        <div
+          className="filters-bar"
+          style={{
+            marginBottom: 12,
+            display: "flex",
+            flexWrap: "wrap",
+            gap: 8,
+            alignItems: "center"
+          }}>
+          <input
+            className="input"
+            style={{ minWidth: 200, flex: "1 1 180px" }}
+            placeholder="Rechercher (label, host, id, groupe…)"
+            value={searchQ}
+            onChange={(e) => setSearchQ(e.target.value)}
+            aria-label="Rechercher un agent"
+          />
+          <select
+            className="input"
+            value={filterStatus}
+            onChange={(e) =>
+              setFilterStatus(e.target.value as typeof filterStatus)
+            }
+            title="Statut">
+            <option value="all">Tous statuts</option>
+            <option value="active">Actifs uniquement</option>
+            <option value="maintenance">Maintenance uniquement</option>
+          </select>
+          <select
+            className="input"
+            value={filterGroup}
+            onChange={(e) => setFilterGroup(e.target.value)}
+            title="Groupe">
+            <option value="">Tous groupes</option>
+            {groups.map((g) => (
+              <option key={g.id} value={g.id}>
+                {g.name}
+              </option>
+            ))}
+          </select>
+          <select
+            className="input"
+            value={filterProfile}
+            onChange={(e) => setFilterProfile(e.target.value)}
+            title="Profil">
+            <option value="">Tous profils</option>
+            {profiles.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
+          </select>
+          <select
+            className="input"
+            value={`${sortBy}:${sortDir}`}
+            onChange={(e) => {
+              const [b, d] = e.target.value.split(":") as [
+                typeof sortBy,
+                "asc" | "desc"
+              ]
+              setSortBy(b)
+              setSortDir(d)
+            }}
+            title="Tri">
+            <option value="label:asc">Label A→Z</option>
+            <option value="label:desc">Label Z→A</option>
+            <option value="enrolled:desc">Enrôlement récent</option>
+            <option value="enrolled:asc">Enrôlement ancien</option>
+            <option value="last_seen:desc">Vu récemment</option>
+            <option value="last_seen:asc">Vu il y a longtemps</option>
+            <option value="group:asc">Groupe A→Z</option>
+            <option value="profile:asc">Profil A→Z</option>
+          </select>
+          <span className="muted" style={{ fontSize: 12 }}>
+            {filteredAgents.length}/{agents.length}
+          </span>
+        </div>
         {selected.length > 0 && (
           <div
             className="row"
@@ -5364,38 +5906,77 @@ function AgentsView({
         )}
         {agents.length === 0 ? (
           <div className="empty">Aucun agent</div>
+        ) : filteredAgents.length === 0 ? (
+          <div className="empty">Aucun agent ne correspond aux filtres</div>
         ) : (
           <>
           <PagerBar
             page={page}
             pageSize={pageSize}
-            total={agents.length}
+            total={filteredAgents.length}
             onPage={setPage}
             onPageSize={setPageSize}
           />
-          <div className="table-wrap"><table className="table">
+          <div className="table-wrap table-wrap--scroll-x">
+            <table className="table table-resizable table-agents">
             <thead>
               <tr>
-                <th>
+                <th style={{ width: 40, minWidth: 36 }}>
                   <input
                     type="checkbox"
                     checked={
-                      agents.length > 0 && selected.length === agents.length
+                      filteredAgents.length > 0 &&
+                      selected.length === filteredAgents.length
                     }
                     onChange={(e) =>
                       setSelected(
-                        e.target.checked ? agents.map((a) => a.id) : []
+                        e.target.checked
+                          ? filteredAgents.map((a) => a.id)
+                          : []
                       )
                     }
                   />
                 </th>
-                <th>Label appareil</th>
-                <th>Licence</th>
-                <th>Groupe</th>
-                <th>User</th>
-                <th>Profil</th>
-                <th>Last seen</th>
-                <th></th>
+                <th
+                  className="col-label"
+                  style={{ cursor: "pointer" }}
+                  onClick={() => toggleSort("label")}
+                  title="Trier par label">
+                  Label appareil{sortMark("label")}
+                </th>
+                <th style={{ width: 100, minWidth: 80 }}>Licence</th>
+                <th
+                  style={{ cursor: "pointer", minWidth: 100 }}
+                  onClick={() => toggleSort("group")}
+                  title="Trier par groupe">
+                  Groupe{sortMark("group")}
+                </th>
+                <th style={{ minWidth: 120 }}>User</th>
+                <th
+                  style={{ cursor: "pointer", minWidth: 120 }}
+                  onClick={() => toggleSort("profile")}
+                  title="Trier par profil">
+                  Profil{sortMark("profile")}
+                </th>
+                <th
+                  title="Congé / panne / hors site — hors alertes offline long"
+                  style={{ width: 120, minWidth: 100 }}>
+                  Maint.
+                </th>
+                <th
+                  className="col-time"
+                  style={{ cursor: "pointer", minWidth: 140 }}
+                  onClick={() => toggleSort("last_seen")}
+                  title="Trier par last seen">
+                  Last seen{sortMark("last_seen")}
+                </th>
+                <th
+                  style={{ cursor: "pointer", minWidth: 140 }}
+                  onClick={() => toggleSort("enrolled")}
+                  title="Trier par date d’enrôlement">
+                  Enrôlé{sortMark("enrolled")}
+                </th>
+                <th style={{ minWidth: 200 }}></th>
               </tr>
             </thead>
             <tbody>
@@ -5409,7 +5990,7 @@ function AgentsView({
                     />
                   </td>
                   <td>
-                    <strong>{a.device_label || " - "}</strong>
+                    <strong>{agentLabel(a)}</strong>
                     {a.device_type === "proxy" ||
                     (a.app_version || "").startsWith("proxy") ? (
                       <span
@@ -5422,6 +6003,24 @@ function AgentsView({
                         }}
                         title="Agent proxy local (data-plane)">
                         Proxy
+                      </span>
+                    ) : null}
+                    {a.maintenance_mode ? (
+                      <span
+                        className="meta-tag"
+                        style={{
+                          marginLeft: 6,
+                          background: "rgba(217, 119, 6, 0.12)",
+                          color: "#b45309",
+                          border: "1px solid rgba(217, 119, 6, 0.3)",
+                          fontSize: 10
+                        }}
+                        title={a.maintenance_note || a.maintenance_mode}>
+                        {a.maintenance_mode === "leave"
+                          ? "congé"
+                          : a.maintenance_mode === "outage"
+                            ? "panne"
+                            : "remote"}
                       </span>
                     ) : null}
                     <div className="mono muted" style={{ fontSize: 11 }}>
@@ -5479,8 +6078,46 @@ function AgentsView({
                       ))}
                     </select>
                   </td>
+                  <td className="cell-select">
+                    <select
+                      className="input"
+                      disabled={busy}
+                      value={a.maintenance_mode || ""}
+                      title="Mode maintenance — exclut des alertes hors-ligne prolongé"
+                      onChange={async (e) => {
+                        const v = e.target.value
+                        const mode =
+                          v === "leave" || v === "outage" || v === "remote"
+                            ? v
+                            : null
+                        setBusy(true)
+                        try {
+                          await api.setAgentMaintenance(a.id, mode)
+                          setInfo(
+                            mode
+                              ? `Maintenance « ${mode} » → ${a.device_label || a.id}`
+                              : `Maintenance désactivée → ${a.device_label || a.id}`
+                          )
+                          onReload()
+                        } catch (err) {
+                          setError(String(err))
+                        } finally {
+                          setBusy(false)
+                        }
+                      }}>
+                      <option value="">Actif</option>
+                      <option value="leave">Congé / mission</option>
+                      <option value="outage">Panne</option>
+                      <option value="remote">Hors site</option>
+                    </select>
+                  </td>
                   <td className="cell-narrow muted">
                     {new Date(a.last_seen_at).toLocaleString("fr-FR")}
+                  </td>
+                  <td className="cell-narrow muted" style={{ fontSize: 11 }}>
+                    {a.enrolled_at
+                      ? new Date(a.enrolled_at).toLocaleString("fr-FR")
+                      : "—"}
                   </td>
                   <td className="cell-actions">
                     <div className="btn-group">
@@ -5544,11 +6181,16 @@ function AgentsView({
                 </tr>
               ))}
             </tbody>
-          </table></div>
+          </table>
+          </div>
+          <p className="muted" style={{ fontSize: 11, marginTop: 6 }}>
+            Astuce : redimensionnez les colonnes (bord droit de l’en-tête) ·
+            scrollbar horizontal en bas si débordement · Export = vue filtrée.
+          </p>
           <PagerBar
             page={page}
             pageSize={pageSize}
-            total={agents.length}
+            total={filteredAgents.length}
             onPage={setPage}
             onPageSize={setPageSize}
           />
@@ -5572,9 +6214,9 @@ function decisionLabelFr(d: string): string {
     case "unenroll":
       return "Désenrôlement"
     case "observe":
-      return "Observé (proxy)"
+      return "Observé (réseau proxy)"
     case "block":
-      return "Bloqué (proxy)"
+      return "Bloqué au réseau (proxy)"
     default:
       return d || " - "
   }
@@ -5594,6 +6236,56 @@ function sourceLabelFr(s: string): string {
     default:
       return s || ""
   }
+}
+
+/** Libellés courts pour types / règles (évite « Carte bancaire, proxy_block, credit-card… ») */
+function ruleShortLabel(id: string): string {
+  const map: Record<string, string> = {
+    "credit-card": "Carte bancaire",
+    "generic-api-key": "Clé API",
+    "aws-access-key": "AWS key",
+    "aws-secret-key": "AWS secret",
+    "private-key": "Clé privée",
+    "password-assignment": "Mot de passe",
+    "email-address": "E-mail",
+    iban: "IBAN",
+    "phone-fr": "Téléphone",
+    "license-key": "Licence",
+    "fortinet-config": "Fortinet",
+    file_upload: "Upload",
+    proxy_block: "Blocage proxy",
+    detection: "Détection"
+  }
+  return map[id] || id.replace(/^system\./, "")
+}
+
+function eventDetailSummary(e: {
+  types?: string[]
+  rule_ids?: string[]
+  file_names?: string[] | null
+  decision?: string
+  source?: string
+}): string {
+  const rules = (e.rule_ids || []).filter((r) => !r.startsWith("system."))
+  const types = e.types || []
+  // Priorité : règles métier, puis flags techniques (proxy_block, file_upload)
+  const primary = rules.length
+    ? rules.slice(0, 2).map(ruleShortLabel)
+    : types
+        .filter((t) => t !== "proxy_block" && t !== "file_upload")
+        .slice(0, 2)
+        .map(ruleShortLabel)
+  const flags: string[] = []
+  if (types.includes("proxy_block") || e.decision === "block") flags.push("bloqué")
+  if (types.includes("file_upload") || (e.file_names && e.file_names.length)) {
+    flags.push("fichier")
+  }
+  const parts = [...primary]
+  if (flags.length) parts.push(flags.join(" · "))
+  if (e.file_names?.length) {
+    parts.push(e.file_names.slice(0, 2).join(", "))
+  }
+  return parts.filter(Boolean).join(" · ") || "—"
 }
 
 function downloadTextFile(filename: string, content: string, mime: string) {
@@ -6079,7 +6771,11 @@ function EventsView({
                         {e.ts ? new Date(e.ts).toLocaleString("fr-FR") : " - "}
                       </td>
                       <td>
-                        <strong>{e.device_label || " - "}</strong>
+                        <strong>
+                          {(e.device_label || "")
+                            .replace(/^OpsGate\s+Proxy\s*[-:–—]?\s*/i, "")
+                            .trim() || " - "}
+                        </strong>
                         {e.source === "proxy" ? (
                           <span
                             className="meta-tag"
@@ -6131,26 +6827,14 @@ function EventsView({
                           {e.highest_severity}
                         </span>
                       </td>
-                      <td className="muted">
-                        {(e.types || []).join(", ")}
+                      <td className="muted" style={{ fontSize: 12 }}>
+                        {eventDetailSummary(e)}
                         {e.rule_ids?.length ? (
-                          <div className="mono" style={{ fontSize: 10 }}>
-                            {e.rule_ids.slice(0, 4).join(", ")}
-                          </div>
-                        ) : null}
-                        {e.file_names?.length ? (
-                          <div style={{ fontSize: 11 }}>
-                            fichiers · {e.file_names.slice(0, 3).join(", ")}
-                            {e.masked === false
-                              ? " (non masqué)"
-                              : e.masked
-                                ? " (masqué)"
-                                : ""}
-                          </div>
-                        ) : null}
-                        {e.rule_ids?.length ? (
-                          <div className="mono" style={{ fontSize: 11 }}>
-                            {e.rule_ids.join(", ")}
+                          <div
+                            className="mono muted"
+                            style={{ fontSize: 10 }}
+                            title={e.rule_ids.join(", ")}>
+                            {e.rule_ids.slice(0, 3).map(ruleShortLabel).join(" · ")}
                           </div>
                         ) : null}
                       </td>
@@ -6477,7 +7161,7 @@ function MovingRulesView({
   const [conds, setConds] = useState<CondDraft[]>([emptyCond()])
   const [groupId, setGroupId] = useState("")
   const [priority, setPriority] = useState(100)
-  const [onlyUnassigned, setOnlyUnassigned] = useState(true)
+  const [onlyUnassigned, setOnlyUnassigned] = useState(false)
   const [enabled, setEnabled] = useState(true)
 
   const load = useCallback(async () => {
@@ -6499,7 +7183,7 @@ function MovingRulesView({
     setConds([emptyCond()])
     setGroupId("")
     setPriority(100)
-    setOnlyUnassigned(true)
+    setOnlyUnassigned(false)
     setEnabled(true)
   }
 
@@ -6840,8 +7524,12 @@ function MovingRulesView({
                   checked={onlyUnassigned}
                   onChange={(e) => setOnlyUnassigned(e.target.checked)}
                 />
-                Uniquement si agent pas encore assigné
+                Uniquement si agent sans groupe (sinon la règle déplace aussi les déjà groupés)
               </label>
+              <p className="muted" style={{ fontSize: 11, margin: 0 }}>
+                Ex. label « contient mon » matche « mon-pc ». Après création, les
+                agents déjà enrollés sont réévalués automatiquement.
+              </p>
               <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
                 <input
                   type="checkbox"
@@ -6875,11 +7563,15 @@ function MovingRulesView({
                         enabled
                       }
                       if (editId) {
-                        await api.patchMovingRule(editId, body)
-                        setInfo("Règle mise à jour")
+                        const r = await api.patchMovingRule(editId, body)
+                        setInfo(
+                          `Règle mise à jour · ${r.agents_applied ?? 0} agent(s) déplacé(s)`
+                        )
                       } else {
-                        await api.createMovingRule(body)
-                        setInfo("Règle créée")
+                        const r = await api.createMovingRule(body)
+                        setInfo(
+                          `Règle créée · ${r.agents_applied ?? 0} agent(s) déplacé(s)`
+                        )
                       }
                       resetForm()
                       setFormOpen(false)
