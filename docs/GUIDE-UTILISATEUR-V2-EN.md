@@ -103,7 +103,16 @@ Windows production: `pnpm proxy:msi` (portable Node included).
 
 ---
 
-## 8. Admin best practices
+## 8. Licenses (customer side)
+
+- 30-day trial from organization creation.  
+- Full license: paste the key provided by **DailyOps** (`OPS-XXXX-…`) under **Settings → License management → Add**.  
+- Company / seats / expiry fields are **filled by the key** (read-only).  
+- You **do not issue** licenses from the console — issuance is vendor-only (see `LICENCES-CLIENTS.md` for DailyOps ops).
+
+---
+
+## 9. Admin best practices
 
 1. Durable Postgres (`DATABASE_URL`) for real pilots.  
 2. Force-install the extension (MDM / AMO) + policy lock.  
@@ -114,10 +123,11 @@ Windows production: `pnpm proxy:msi` (portable Node included).
 
 ---
 
-## 9. Support
+## 10. Support
 
 - Technical trail: `CHANGELOG-TECHNIQUE.md`, `architecture/*`  
 - Privacy: `PRIVACY.md`  
 - Proxy runbook: `architecture/PROXY-RUNBOOK.md`  
+- Licenses (vendor vs customer): `LICENCES-CLIENTS.md`  
 
 © DailyOps.Tech — OpsGate

@@ -1,12 +1,15 @@
 #!/usr/bin/env node
 /**
- * Constructeur : émet une licence courte OPS-XXXX-XXXX-XXXX-XXXX liée à un orgCode.
+ * Constructeur DailyOps UNIQUEMENT — hors console client.
+ * Émet une licence courte OPS-XXXX-XXXX-XXXX-XXXX liée à un orgCode + coordonnées.
  *
  * Usage:
+ *   pnpm license:issue -- --org ACME-2026 --company "ACME SA" --email admin@acme.example --seats 50
  *   node scripts/issue-license.mjs --org SAMPLE-OPSGATE --company "Sample Enterprise" ...
  *
  * Avec DATABASE_URL (et module pg disponible) : stocke en base.
  * Sinon : affiche la clé + SQL.
+ * Activation côté client : console → Paramètres → Gestion des licences.
  */
 import { createHash, randomBytes } from "node:crypto"
 import { createRequire } from "node:module"

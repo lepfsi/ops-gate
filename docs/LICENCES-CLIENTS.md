@@ -1,67 +1,80 @@
-# Licences clients — émission & activation
+# Licences clients — émission (vendeur) vs activation (client)
 
-## Qui fait quoi ?
+## Principe de séparation
 
-| Acteur | Où | Action |
-|--------|-----|--------|
-| **DailyOps (vendeur)** | Console → **Licences clients** *ou* CLI | Génère une clé `OPS-XXXX-…` + coordonnées |
-| **Client (admin principal)** | Console → Paramètres → **Gestion des licences** | Colle la clé → sièges + société activés |
+| Qui | Voit / fait | Où |
+|-----|-------------|-----|
+| **DailyOps (vendeur / constructeur)** | **Génère** les clés `OPS-…` avec coordonnées client | **Hors** console produit : CLI ou API secrète |
+| **Client final (admin org)** | **Active** une clé reçue ; voit sièges, société, expiration | Console MMC → Paramètres → **Gestion des licences** |
 
-Ce n’est **pas** la signature Authenticode du MSI. C’est une **clé métier** liée à un `org_code`.
+La console livrée au client **ne contient pas** de moteur d’émission de licences.  
+Un admin client ne peut pas fabriquer de clés pour d’autres organisations.
 
----
-
-## 1. Console (recommandé)
-
-1. Connectez-vous en **administrateur principal** sur votre control plane.
-2. Menu latéral → **Licences clients**.
-3. Remplir :
-   - Code organisation (ex. `ACME-2026`)
-   - Raison sociale, adresse, email contact
-   - Nombre de sièges, durée (années) ou date d’expiration
-   - Option : **Créer le tenant** si le code n’existe pas encore
-4. **Générer la licence** → copier la clé `OPS-…`
-5. Transmettre au client : clé + code org (+ mdp temporaire si tenant créé).
-
-Côté client :
-
-1. Login console de **son** org  
-2. Paramètres → Gestion des licences → **Ajouter une licence**  
-3. Coller `OPS-…` → Activer  
-
-Désactiver le bureau vendeur chez un client purement consommateur :
-
-```powershell
-$env:OPSGATE_VENDOR_UI = "off"
+```
+[DailyOps ops]  pnpm license:issue  ou  POST /v1/vendor/licenses + secret
+        │
+        ▼  clé OPS-… stockée (issued_licenses)
+[Client admin]  Paramètres → Licences → coller la clé
+        │
+        ▼  org en mode full + sièges
 ```
 
 ---
 
-## 2. Ligne de commande
+## Côté client final (produit vendu)
+
+1. Recevoir de DailyOps : **code organisation** + clé `OPS-XXXX-XXXX-XXXX-XXXX`  
+2. Se connecter à **sa** console (admin principal recommandé)  
+3. **Paramètres → Gestion des licences → Ajouter une licence**  
+4. Coller la clé → Activer  
+5. Vérifier : société, email, sièges, date d’expiration (champs en lecture seule)  
+6. Assigner les sièges aux agents / groupes  
+
+Révoquer la licence full (retour essai 30 j) : même écran, **Supprimer la licence** (principal).
+
+**Pas d’accès** à `/v1/vendor/*` depuis la session console client.
+
+---
+
+## Côté DailyOps (émission uniquement)
+
+### Prérequis
+
+- API avec Postgres (`DATABASE_URL`)  
+- Secret fort (min. 12 caractères) :
+
+```powershell
+$env:OPSGATE_VENDOR_LICENSE_SECRET = "votre-secret-constructeur-long"
+# ou, fallback :
+$env:OPSGATE_LICENSE_SECRET = "votre-secret-constructeur-long"
+```
+
+Sans secret configuré, `POST /v1/vendor/licenses` répond `503 vendor_secret_not_configured`.
+
+### A. CLI (recommandé au quotidien)
 
 ```powershell
 cd C:\Users\Utilisateur\ops-gate
 $env:DATABASE_URL = "postgres://opsgate:opsgate@127.0.0.1:5432/opsgate"
 
-pnpm license:issue -- --org ACME-2026 --company "ACME SA" --address "12 rue Exemple, Paris" --email admin@acme.example --seats 50 --expires 2027-12-31
+pnpm license:issue -- `
+  --org ACME-2026 `
+  --company "ACME SA" `
+  --address "12 rue Exemple, 75008 Paris" `
+  --email admin@acme.example `
+  --seats 50 `
+  --expires 2027-12-31
 ```
 
-Sans `DATABASE_URL` : la clé s’affiche + un SQL `INSERT` à exécuter manuellement.
+Sortie JSON : `key` (à envoyer au client), `payload`, `stored`.
 
----
+Sans `DATABASE_URL` : la clé s’affiche + un `INSERT` SQL à exécuter sur Postgres.
 
-## 3. API (automation / scripts)
-
-Header optionnel si secret configuré :
-
-```
-X-OpsGate-Vendor-Key: <OPSGATE_VENDOR_LICENSE_SECRET ou OPSGATE_LICENSE_SECRET>
-```
-
-Ou session console principal (Bearer).
+### B. API HTTP (automation) — secret obligatoire
 
 ```http
 POST /v1/vendor/licenses
+X-OpsGate-Vendor-Key: <même valeur que OPSGATE_VENDOR_LICENSE_SECRET>
 Content-Type: application/json
 
 {
@@ -75,32 +88,81 @@ Content-Type: application/json
 }
 ```
 
-```http
-GET  /v1/vendor/licenses
-POST /v1/vendor/licenses/revoke  { "license_key": "OPS-…" }
-GET  /v1/vendor/status
+Autres endpoints (même header) :
+
+| Méthode | Path | Rôle |
+|---------|------|------|
+| `GET` | `/v1/vendor/status` | `secret_configured`, pas de secret renvoyé |
+| `GET` | `/v1/vendor/licenses` | Liste des clés émises |
+| `POST` | `/v1/vendor/licenses/revoke` | `{ "license_key": "OPS-…" }` |
+
+`provision_org: true` : crée le tenant (org + policy + pack + admin) **si** le `org_code` n’existe pas encore ; renvoie un mdp temporaire à communiquer une seule fois.
+
+### Exemple curl
+
+```powershell
+$env:OPSGATE_VENDOR_LICENSE_SECRET = "votre-secret-constructeur-long"
+# API déjà démarrée avec le même secret
+
+curl -s http://127.0.0.1:8787/v1/vendor/licenses `
+  -H "X-OpsGate-Vendor-Key: $env:OPSGATE_VENDOR_LICENSE_SECRET" `
+  -H "Content-Type: application/json" `
+  -d '{
+    "org_code":"ACME-2026",
+    "company_name":"ACME SA",
+    "address":"Paris",
+    "contact_email":"admin@acme.example",
+    "seats":50,
+    "years":1,
+    "provision_org":true
+  }'
 ```
 
 ---
 
-## 4. Variables d’environnement
+## Variables d’environnement
 
-| Variable | Rôle |
-|----------|------|
-| `OPSGATE_LICENSE_SECRET` | Secret HMAC licences legacy OG1 + clé header vendor |
-| `OPSGATE_VENDOR_LICENSE_SECRET` | Prioritaire pour le header vendor |
-| `OPSGATE_VENDOR_UI` | `off` pour masquer l’émission aux principals |
+| Variable | Qui | Rôle |
+|----------|-----|------|
+| `OPSGATE_VENDOR_LICENSE_SECRET` | Serveur DailyOps | Secret d’émission (prioritaire), header `X-OpsGate-Vendor-Key` |
+| `OPSGATE_LICENSE_SECRET` | Serveur DailyOps | Fallback secret + HMAC licences legacy `OG1.…` |
+| `DATABASE_URL` | Serveur | Stockage `issued_licenses` + tenants |
+
+~~`OPSGATE_VENDOR_UI`~~ : **obsolète** — plus d’onglet console d’émission.
 
 ---
 
-## 5. Flux résumé
+## Ce que le client voit encore (normal)
 
-```
-[Vous] génère OPS-… (org_code + société + sièges + email)
-           │
-           ▼  stockée dans issued_licenses
-[Client] active la clé sur son org (code doit correspondre)
-           │
-           ▼  licenseDisplay full + licenseSeats
-[Agents] sièges assignés via groupes / manuellement
-```
+- Dashboard licences / sièges  
+- Paramètres → **Gestion des licences** : statut essai ou full, activation d’une clé fournie  
+- Assignation de sièges aux agents  
+
+## Ce qu’il ne voit plus / jamais
+
+- Génération de clés  
+- Liste globale des licences de tous les clients  
+- Secret constructeur  
+- Endpoints `/v1/vendor/*` (refusés sans secret, indépendamment du login console)
+
+---
+
+## Sécurité opérationnelle
+
+1. Ne **jamais** déployer `OPSGATE_VENDOR_LICENSE_SECRET` sur une instance **hébergée chez le client** s’il gère lui-même l’API — ou le garder uniquement sur votre control plane multi-tenant.  
+2. Préférer un control plane DailyOps (SaaS / MSP) : vous émettez les clés ; le client n’a que l’activation.  
+3. Rotation du secret : les clés `OPS-…` déjà en base restent valides (lookup par clé stockée) ; le secret protège l’**API d’émission**, pas le format court.  
+4. Révoquer une clé émise n’enlève pas automatiquement le full d’une org déjà activée : le client (ou vous en support) doit aussi **Supprimer la licence** dans Paramètres.
+
+---
+
+## Fichiers code
+
+| Fichier | Rôle |
+|---------|------|
+| `scripts/issue-license.mjs` | CLI émission |
+| `packages/api/src/license-keys.ts` | Format clé + legacy |
+| `packages/api/src/app.ts` | `/v1/vendor/*` (secret) + `/v1/org/license/activate` (client) |
+| Console MMC | Activation uniquement (Paramètres → Licences) |
+
+© DailyOps.Tech — OpsGate
