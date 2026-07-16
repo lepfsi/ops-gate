@@ -2508,21 +2508,66 @@ export class PgStore implements OpsGateStore {
     }
   }
 
-  async requestPasswordResetOtp(orgId: string) {
+  async ensurePasswordResetColumns() {
+    await this.pool.query(`
+      ALTER TABLE password_reset_challenges
+        ADD COLUMN IF NOT EXISTS admin_id TEXT,
+        ADD COLUMN IF NOT EXISTS target_email TEXT
+    `)
+  }
+
+  async resolveAdminForPasswordReset(
+    orgId: string,
+    target?: { email?: string; adminId?: string }
+  ) {
+    if (target?.adminId) {
+      const { rows } = await this.pool.query(
+        `SELECT * FROM org_admins WHERE org_id = $1 AND id = $2 AND active = TRUE`,
+        [orgId, target.adminId]
+      )
+      return rows[0] ? rowAdmin(rows[0]) : undefined
+    }
+    const email = (target?.email || "").trim().toLowerCase()
+    if (email) {
+      const { rows } = await this.pool.query(
+        `SELECT * FROM org_admins WHERE org_id = $1 AND lower(email) = $2 AND active = TRUE`,
+        [orgId, email]
+      )
+      return rows[0] ? rowAdmin(rows[0]) : undefined
+    }
+    return undefined
+  }
+
+  async requestPasswordResetOtp(
+    orgId: string,
+    target?: { email?: string; adminId?: string }
+  ) {
+    await this.ensurePasswordResetColumns()
+    const admin = await this.resolveAdminForPasswordReset(orgId, target)
+    if (!admin) {
+      return { ok: false as const, error: "admin_not_found" }
+    }
+    const targetEmail = admin.email.trim()
     const otp = newOtpCode(6)
     const expiresIn = 10 * 60
     await this.pool.query(
-      `INSERT INTO password_reset_challenges (org_id, code_hash, expires_at, created_at)
-       VALUES ($1, $2, to_timestamp($3/1000.0), NOW())
+      `INSERT INTO password_reset_challenges (org_id, code_hash, expires_at, created_at, admin_id, target_email)
+       VALUES ($1, $2, to_timestamp($3/1000.0), NOW(), $4, $5)
        ON CONFLICT (org_id) DO UPDATE SET
          code_hash = EXCLUDED.code_hash,
          expires_at = EXCLUDED.expires_at,
-         created_at = NOW()`,
-      [orgId, hashManagementPassword(otp), Date.now() + expiresIn * 1000]
+         created_at = NOW(),
+         admin_id = EXCLUDED.admin_id,
+         target_email = EXCLUDED.target_email`,
+      [
+        orgId,
+        hashManagementPassword(otp),
+        Date.now() + expiresIn * 1000,
+        admin.id,
+        targetEmail
+      ]
     )
     const org = await this.getOrg(orgId)
-    const principal = await this.getPrincipalAdmin(orgId)
-    const targetEmail = (principal?.email || org?.primaryEmail || "").trim()
     const { mergeMonitoringSettings } = await import("./types")
     const mon = mergeMonitoringSettings(org?.monitoring)
     const {
@@ -2533,24 +2578,22 @@ export class PgStore implements OpsGateStore {
     } = await import("./mail")
     let mailed = false
     let delivery: "smtp" | "log" | "failed" | "disabled" = "disabled"
-    if (targetEmail) {
-      const sent = await sendPasswordResetOtpEmail({
-        to: targetEmail,
-        otp,
-        expiresMin: Math.floor(expiresIn / 60),
-        orgName: org?.name,
-        smtp: mon.smtp
-      })
-      mailed = sent.ok && sent.delivery === "smtp"
-      delivery = sent.delivery
-    }
+    const sent = await sendPasswordResetOtpEmail({
+      to: targetEmail,
+      otp,
+      expiresMin: Math.floor(expiresIn / 60),
+      orgName: org?.name,
+      smtp: mon.smtp
+    })
+    mailed = sent.ok && sent.delivery === "smtp"
+    delivery = sent.delivery
     const expose = shouldExposeDevOtp(mon.smtp)
     if (expose) {
       console.log(
-        `[opsgate-otp] DEV OTP org=${orgId} ${maskEmail(targetEmail)} = ${otp} (delivery=${delivery})`
+        `[opsgate-otp] DEV OTP admin=${admin.id} ${maskEmail(targetEmail)} = ${otp} (delivery=${delivery})`
       )
     }
-    const masked = targetEmail ? maskEmail(targetEmail) : "—"
+    const masked = maskEmail(targetEmail)
     return {
       ok: true as const,
       expires_in_sec: expiresIn,
@@ -2561,11 +2604,11 @@ export class PgStore implements OpsGateStore {
       message: mailed
         ? `Un code OTP a été envoyé à ${masked}.`
         : delivery === "log"
-          ? `SMTP non configuré : OTP journalisé côté serveur${expose ? " et affiché en lab" : ""}. Paramètres → E-mail / SMTP ou OPSGATE_SMTP_*.`
+          ? `SMTP non configuré : OTP journalisé côté serveur${expose ? " et affiché en lab" : ""}. Paramètres → E-mail / SMTP.`
           : delivery === "failed"
             ? `Échec d'envoi SMTP vers ${masked}. Vérifiez la config mail.`
             : isMailConfigured(mon.smtp)
-              ? `OTP généré (destinataire manquant).`
+              ? `OTP généré.`
               : `OTP généré sans e-mail (configurez Paramètres → E-mail / SMTP).`
     }
   }
@@ -2574,8 +2617,9 @@ export class PgStore implements OpsGateStore {
     orgId: string,
     otp: string,
     newPassword: string,
-    _adminId?: string
+    target?: { email?: string; adminId?: string }
   ) {
+    await this.ensurePasswordResetColumns()
     const { rows } = await this.pool.query(
       `SELECT * FROM password_reset_challenges WHERE org_id = $1`,
       [orgId]
@@ -2594,15 +2638,46 @@ export class PgStore implements OpsGateStore {
     if (!newPassword || newPassword.length < 6) {
       return { ok: false as const, error: "password_too_short" }
     }
-    const principal = await this.getPrincipalAdmin(orgId)
-    if (!principal) return { ok: false as const, error: "principal_missing" }
+    const chAdminId = (rows[0].admin_id as string) || ""
+    const chEmail = ((rows[0].target_email as string) || "").toLowerCase()
+    if (target?.adminId && chAdminId && target.adminId !== chAdminId) {
+      return { ok: false as const, error: "admin_mismatch" }
+    }
+    if (
+      target?.email &&
+      chEmail &&
+      target.email.trim().toLowerCase() !== chEmail
+    ) {
+      return { ok: false as const, error: "admin_mismatch" }
+    }
+    // Cible = admin du challenge, sinon fallback email fourni
+    let adminId = chAdminId
+    if (!adminId && target?.adminId) adminId = target.adminId
+    if (!adminId && (chEmail || target?.email)) {
+      const a = await this.resolveAdminForPasswordReset(orgId, {
+        email: chEmail || target?.email
+      })
+      adminId = a?.id || ""
+    }
+    if (!adminId) {
+      // legacy challenges sans admin_id : ne pas retomber sur DEMO seed
+      return { ok: false as const, error: "admin_missing_on_challenge" }
+    }
+    const { rows: admRows } = await this.pool.query(
+      `SELECT * FROM org_admins WHERE id = $1 AND org_id = $2`,
+      [adminId, orgId]
+    )
+    if (!admRows[0]) return { ok: false as const, error: "admin_not_found" }
+    const isPrincipal = admRows[0].is_principal === true
     const hash = hashManagementPassword(newPassword)
     await this.pool.query(
       `UPDATE org_admins SET password_hash = $2, must_change_password = FALSE, updated_at = NOW()
        WHERE id = $1`,
-      [principal.id, hash]
+      [adminId, hash]
     )
-    await this.updatePolicy(orgId, { managementPasswordHash: hash })
+    if (isPrincipal) {
+      await this.updatePolicy(orgId, { managementPasswordHash: hash })
+    }
     await this.pool.query(
       `DELETE FROM password_reset_challenges WHERE org_id = $1`,
       [orgId]

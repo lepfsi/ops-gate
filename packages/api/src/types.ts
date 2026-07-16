@@ -887,6 +887,9 @@ export interface Agent {
 
 export interface PasswordResetChallenge {
   orgId: string
+  /** Admin dont le mdp sera réinitialisé (pas forcément le seed DEMO) */
+  adminId: string
+  targetEmail: string
   codeHash: string
   expiresAt: number
   createdAt: number

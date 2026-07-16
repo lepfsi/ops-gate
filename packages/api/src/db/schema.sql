@@ -236,7 +236,9 @@ CREATE TABLE IF NOT EXISTS password_reset_challenges (
   org_id TEXT PRIMARY KEY REFERENCES organizations(id) ON DELETE CASCADE,
   code_hash TEXT NOT NULL,
   expires_at TIMESTAMPTZ NOT NULL,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  admin_id TEXT,
+  target_email TEXT
 );
 
 -- ── Admin audit (console) ──────────────────────────────────────

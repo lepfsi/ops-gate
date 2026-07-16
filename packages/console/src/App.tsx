@@ -6070,11 +6070,10 @@ function PeopleView({
       {isPrincipal && (
         <>
           <div className="card">
-            <h2>OTP Administrator principal</h2>
+            <h2>OTP — mon compte</h2>
             <p className="muted" style={{ fontSize: 13 }}>
-              Envoie un code par e-mail (SMTP) à l’admin principal pour
-              réinitialiser son mot de passe. Sans SMTP : mode lab (log serveur /
-              OTP affiché si autorisé).
+              Envoie un code par e-mail à <strong>votre</strong> compte connecté
+              (pas l’ancien compte démo). Configurez SMTP dans l’onglet E-mail.
             </p>
             <button
               className="btn secondary"
@@ -6083,9 +6082,13 @@ function PeopleView({
               onClick={async () => {
                 setBusy(true)
                 try {
-                  const r = await api.requestPrincipalOtp()
+                  const r = await api.requestSessionOtp()
                   setDevOtp(r.dev_otp || null)
-                  setInfo(r.message)
+                  setInfo(
+                    r.target_email_masked
+                      ? `${r.message} → ${r.target_email_masked}`
+                      : r.message
+                  )
                 } catch (e) {
                   setError(String(e))
                 } finally {
@@ -6120,8 +6123,8 @@ function PeopleView({
                 onClick={async () => {
                   setBusy(true)
                   try {
-                    await api.confirmPrincipalOtp(otp, otpNewPwd)
-                    setInfo("Mot de passe Administrator mis à jour")
+                    await api.confirmSessionOtp(otp, otpNewPwd)
+                    setInfo("Mot de passe mis à jour pour votre compte")
                     setOtp("")
                     setOtpNewPwd("")
                     setDevOtp(null)

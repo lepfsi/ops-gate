@@ -1551,14 +1551,38 @@ export class MemoryStore implements OpsGateStore {
     }
   }
 
-  async requestPasswordResetOtp(orgId: string) {
+  async resolveAdminForPasswordReset(
+    orgId: string,
+    target?: { email?: string; adminId?: string }
+  ) {
+    const list = this.admins.get(orgId) || []
+    if (target?.adminId) {
+      const a = list.find((x) => x.id === target.adminId && x.active)
+      return a
+    }
+    const email = (target?.email || "").trim().toLowerCase()
+    if (email) {
+      return list.find((x) => x.active && x.email.toLowerCase() === email)
+    }
+    return undefined
+  }
+
+  async requestPasswordResetOtp(
+    orgId: string,
+    target?: { email?: string; adminId?: string }
+  ) {
     const org = this.orgs.get(orgId)
-    const principal = await this.getPrincipalAdmin(orgId)
-    const targetEmail = (principal?.email || org?.primaryEmail || "").trim()
+    const admin = await this.resolveAdminForPasswordReset(orgId, target)
+    if (!admin) {
+      return { ok: false as const, error: "admin_not_found" }
+    }
+    const targetEmail = admin.email.trim()
     const otp = newOtpCode(6)
     const expiresIn = 10 * 60
     this.otpChallenges.set(orgId, {
       orgId,
+      adminId: admin.id,
+      targetEmail,
       codeHash: hashManagementPassword(otp),
       expiresAt: Date.now() + expiresIn * 1000,
       createdAt: Date.now()
@@ -1573,31 +1597,27 @@ export class MemoryStore implements OpsGateStore {
     } = await import("./mail")
     let mailed = false
     let delivery: "smtp" | "log" | "failed" | "disabled" = "disabled"
-    if (targetEmail) {
-      const sent = await sendPasswordResetOtpEmail({
-        to: targetEmail,
-        otp,
-        expiresMin: Math.floor(expiresIn / 60),
-        orgName: org?.name,
-        smtp: mon.smtp
-      })
-      mailed = sent.ok && sent.delivery === "smtp"
-      delivery = sent.delivery
-      if (!sent.ok && sent.delivery === "failed") {
-        console.warn(
-          `[opsgate-otp] email failed for ${maskEmail(targetEmail)} — OTP still valid in challenge`
-        )
-      }
-    } else {
-      console.warn("[opsgate-otp] no principal email — cannot send OTP mail")
+    const sent = await sendPasswordResetOtpEmail({
+      to: targetEmail,
+      otp,
+      expiresMin: Math.floor(expiresIn / 60),
+      orgName: org?.name,
+      smtp: mon.smtp
+    })
+    mailed = sent.ok && sent.delivery === "smtp"
+    delivery = sent.delivery
+    if (!sent.ok && sent.delivery === "failed") {
+      console.warn(
+        `[opsgate-otp] email failed for ${maskEmail(targetEmail)} — OTP still valid in challenge`
+      )
     }
     const expose = shouldExposeDevOtp(mon.smtp)
     if (expose) {
       console.log(
-        `[opsgate-otp] DEV OTP for ${maskEmail(targetEmail)} = ${otp} (delivery=${delivery})`
+        `[opsgate-otp] DEV OTP admin=${admin.id} ${maskEmail(targetEmail)} = ${otp} (delivery=${delivery})`
       )
     }
-    const masked = targetEmail ? maskEmail(targetEmail) : "—"
+    const masked = maskEmail(targetEmail)
     return {
       ok: true as const,
       expires_in_sec: expiresIn,
@@ -1608,11 +1628,11 @@ export class MemoryStore implements OpsGateStore {
       message: mailed
         ? `Un code OTP a été envoyé à ${masked}.`
         : delivery === "log"
-          ? `SMTP non configuré : OTP journalisé côté serveur${expose ? " et affiché en lab" : ""}. Paramètres → E-mail / SMTP ou OPSGATE_SMTP_*.`
+          ? `SMTP non configuré : OTP journalisé côté serveur${expose ? " et affiché en lab" : ""}. Paramètres → E-mail / SMTP.`
           : delivery === "failed"
             ? `Échec d'envoi SMTP vers ${masked}. Vérifiez la config mail.`
             : isMailConfigured(mon.smtp)
-              ? `OTP généré (destinataire manquant).`
+              ? `OTP généré.`
               : `OTP généré sans e-mail (configurez Paramètres → E-mail / SMTP).`
     }
   }
@@ -1621,7 +1641,7 @@ export class MemoryStore implements OpsGateStore {
     orgId: string,
     otp: string,
     newPassword: string,
-    _adminId?: string
+    target?: { email?: string; adminId?: string }
   ) {
     const ch = this.otpChallenges.get(orgId)
     if (!ch) return { ok: false as const, error: "no_challenge" }
@@ -1632,18 +1652,30 @@ export class MemoryStore implements OpsGateStore {
     if (hashManagementPassword(otp.trim()) !== ch.codeHash) {
       return { ok: false as const, error: "otp_invalid" }
     }
-    // Principal : min 6 après reset (plus de 0000)
     if (!newPassword || newPassword.length < 6) {
       return { ok: false as const, error: "password_too_short" }
     }
-    const principal = await this.getPrincipalAdmin(orgId)
-    if (!principal) return { ok: false as const, error: "principal_missing" }
+    // Vérifie que le confirm cible le même admin que le challenge
+    if (target?.adminId && target.adminId !== ch.adminId) {
+      return { ok: false as const, error: "admin_mismatch" }
+    }
+    if (
+      target?.email &&
+      target.email.trim().toLowerCase() !== ch.targetEmail.toLowerCase()
+    ) {
+      return { ok: false as const, error: "admin_mismatch" }
+    }
+    const list = this.admins.get(orgId) || []
+    const admin = list.find((a) => a.id === ch.adminId)
+    if (!admin) return { ok: false as const, error: "admin_not_found" }
     const hash = hashManagementPassword(newPassword)
-    principal.passwordHash = hash
-    principal.mustChangePassword = false
-    principal.updatedAt = new Date().toISOString()
-    await this.syncLegacyMgmtHash(orgId)
-    await this.updatePolicy(orgId, { managementPasswordHash: hash })
+    admin.passwordHash = hash
+    admin.mustChangePassword = false
+    admin.updatedAt = new Date().toISOString()
+    if (admin.isPrincipal) {
+      await this.syncLegacyMgmtHash(orgId)
+      await this.updatePolicy(orgId, { managementPasswordHash: hash })
+    }
     this.otpChallenges.delete(orgId)
     return { ok: true as const }
   }
