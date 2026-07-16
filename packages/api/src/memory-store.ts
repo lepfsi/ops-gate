@@ -477,7 +477,13 @@ export class MemoryStore implements OpsGateStore {
             ...(org.monitoring?.schedule || {}),
             ...monitoring.schedule
           }
-        : org.monitoring?.schedule
+        : org.monitoring?.schedule,
+      ldap: monitoring.ldap
+        ? {
+            ...(org.monitoring?.ldap || {}),
+            ...monitoring.ldap
+          }
+        : org.monitoring?.ldap
     })
     return org
   }

@@ -2147,7 +2147,13 @@ function SystemSettingsView({
   t: (k: string) => string
 }) {
   const [settingsTab, setSettingsTab] = useState<
-    "general" | "logs" | "license" | "notifications" | "monitoring" | "reports"
+    | "general"
+    | "logs"
+    | "license"
+    | "notifications"
+    | "monitoring"
+    | "ldap"
+    | "reports"
   >("general")
   const [addLicOpen, setAddLicOpen] = useState(false)
   const [licenseKeyInput, setLicenseKeyInput] = useState("")
@@ -2183,6 +2189,20 @@ function SystemSettingsView({
   const [quotaEventsDay, setQuotaEventsDay] = useState(0)
   const [quotaEventsMin, setQuotaEventsMin] = useState(0)
   const [quotaAgents, setQuotaAgents] = useState(0)
+  const [ldapOn, setLdapOn] = useState(false)
+  const [ldapUrl, setLdapUrl] = useState("ldaps://dc.example.com:636")
+  const [ldapBindDn, setLdapBindDn] = useState("")
+  const [ldapBindPwd, setLdapBindPwd] = useState("")
+  const [ldapBaseDn, setLdapBaseDn] = useState("")
+  const [ldapUserFilter, setLdapUserFilter] = useState(
+    "(&(objectCategory=person)(objectClass=user)(!(userAccountControl:1.2.840.113556.1.4.803:=2)))"
+  )
+  const [ldapGroupFilter, setLdapGroupFilter] = useState("(objectClass=group)")
+  const [ldapSyncUsers, setLdapSyncUsers] = useState(true)
+  const [ldapSyncGroups, setLdapSyncGroups] = useState(true)
+  const [ldapTlsInsecure, setLdapTlsInsecure] = useState(false)
+  const [ldapPwdSet, setLdapPwdSet] = useState(false)
+  const [ldapLastMsg, setLdapLastMsg] = useState("")
   const [mfaSecret, setMfaSecret] = useState("")
   const [mfaOtpUrl, setMfaOtpUrl] = useState("")
   const [mfaCode, setMfaCode] = useState("")
@@ -2260,6 +2280,27 @@ function SystemSettingsView({
         setQuotaEventsDay(m.quotas?.maxEventsPerDay ?? 0)
         setQuotaEventsMin(m.quotas?.maxEventsPerMinute ?? 0)
         setQuotaAgents(m.quotas?.maxAgents ?? 0)
+        const ld = m.ldap
+        if (ld) {
+          setLdapOn(!!ld.enabled)
+          setLdapUrl(ld.url || "ldaps://dc.example.com:636")
+          setLdapBindDn(ld.bindDn || "")
+          setLdapBaseDn(ld.baseDn || "")
+          if (ld.userFilter) setLdapUserFilter(ld.userFilter)
+          if (ld.groupFilter) setLdapGroupFilter(ld.groupFilter)
+          setLdapSyncUsers(ld.syncUsers !== false)
+          setLdapSyncGroups(ld.syncGroups !== false)
+          setLdapTlsInsecure(!!ld.tlsInsecure)
+          setLdapLastMsg(ld.lastSyncMessage || "")
+        }
+        try {
+          const st = await api.ldapStatus()
+          setLdapPwdSet(!!st.ldap?.bind_password_set)
+          if (st.ldap?.lastSyncMessage)
+            setLdapLastMsg(st.ldap.lastSyncMessage)
+        } catch {
+          /* ignore */
+        }
         setLoaded(true)
       } catch (e) {
         setError(String(e))
@@ -2360,8 +2401,24 @@ function SystemSettingsView({
           maxEventsPerDay: Math.max(0, Math.floor(quotaEventsDay) || 0),
           maxEventsPerMinute: Math.max(0, Math.floor(quotaEventsMin) || 0),
           maxAgents: Math.max(0, Math.floor(quotaAgents) || 0)
+        },
+        ldap: {
+          enabled: ldapOn,
+          url: ldapUrl.trim(),
+          bindDn: ldapBindDn.trim(),
+          ...(ldapBindPwd.trim()
+            ? { bindPassword: ldapBindPwd.trim() }
+            : {}),
+          baseDn: ldapBaseDn.trim(),
+          userFilter: ldapUserFilter.trim(),
+          groupFilter: ldapGroupFilter.trim(),
+          syncUsers: ldapSyncUsers,
+          syncGroups: ldapSyncGroups,
+          tlsInsecure: ldapTlsInsecure
         }
       })
+      setLdapBindPwd("")
+      if (ldapBindPwd.trim()) setLdapPwdSet(true)
       try {
         localStorage.setItem("opsgate_report_format", reportFormat)
         setStoredLang(lang)
@@ -2386,6 +2443,7 @@ function SystemSettingsView({
     | "license"
     | "notifications"
     | "monitoring"
+    | "ldap"
     | "reports"
   > = [
     "general",
@@ -2393,6 +2451,7 @@ function SystemSettingsView({
     "license",
     "notifications",
     "monitoring",
+    "ldap",
     "reports"
   ]
 
@@ -2409,7 +2468,7 @@ function SystemSettingsView({
               aria-selected={settingsTab === id}
               className={`settings-tab ${settingsTab === id ? "active" : ""}`}
               onClick={() => setSettingsTab(id)}>
-              {t(`settings.tab.${id === "general" ? "general" : id === "logs" ? "logs" : id === "license" ? "license" : id === "notifications" ? "notifications" : id === "monitoring" ? "monitoring" : "reports"}`)}
+              {t(`settings.tab.${id}`)}
             </button>
           ))}
         </div>
@@ -3173,6 +3232,184 @@ function SystemSettingsView({
             />
           </div>
         </div>
+        )}
+
+        {settingsTab === "ldap" && (
+          <div className="stack" style={{ gap: 10, marginTop: 12 }}>
+            <h3 style={{ margin: 0, fontSize: 15 }}>{t("ldap.title")}</h3>
+            <p className="muted" style={{ fontSize: 12, margin: 0 }}>
+              {t("ldap.hint")}
+            </p>
+            <label className="row" style={{ gap: 8, alignItems: "center" }}>
+              <input
+                type="checkbox"
+                checked={ldapOn}
+                onChange={(e) => setLdapOn(e.target.checked)}
+              />
+              {t("ldap.enabled")}
+            </label>
+            <label className="field-label">{t("ldap.url")}</label>
+            <input
+              className="input mono"
+              value={ldapUrl}
+              onChange={(e) => setLdapUrl(e.target.value)}
+              placeholder="ldaps://dc.example.com:636"
+            />
+            <label className="field-label">{t("ldap.bindDn")}</label>
+            <input
+              className="input mono"
+              value={ldapBindDn}
+              onChange={(e) => setLdapBindDn(e.target.value)}
+              placeholder="CN=svc-opsgate,OU=Service,DC=example,DC=com"
+            />
+            <label className="field-label">
+              {t("ldap.bindPassword")}
+              {ldapPwdSet ? ` (${t("ldap.passwordSet")})` : ""}
+            </label>
+            <input
+              className="input"
+              type="password"
+              autoComplete="new-password"
+              value={ldapBindPwd}
+              onChange={(e) => setLdapBindPwd(e.target.value)}
+              placeholder={
+                ldapPwdSet ? t("ldap.passwordKeep") : t("ldap.passwordNew")
+              }
+            />
+            <label className="field-label">{t("ldap.baseDn")}</label>
+            <input
+              className="input mono"
+              value={ldapBaseDn}
+              onChange={(e) => setLdapBaseDn(e.target.value)}
+              placeholder="DC=example,DC=com"
+            />
+            <label className="field-label">{t("ldap.userFilter")}</label>
+            <input
+              className="input mono"
+              value={ldapUserFilter}
+              onChange={(e) => setLdapUserFilter(e.target.value)}
+            />
+            <label className="field-label">{t("ldap.groupFilter")}</label>
+            <input
+              className="input mono"
+              value={ldapGroupFilter}
+              onChange={(e) => setLdapGroupFilter(e.target.value)}
+            />
+            <label className="row" style={{ gap: 8, alignItems: "center" }}>
+              <input
+                type="checkbox"
+                checked={ldapSyncGroups}
+                onChange={(e) => setLdapSyncGroups(e.target.checked)}
+              />
+              {t("ldap.syncGroups")}
+            </label>
+            <label className="row" style={{ gap: 8, alignItems: "center" }}>
+              <input
+                type="checkbox"
+                checked={ldapSyncUsers}
+                onChange={(e) => setLdapSyncUsers(e.target.checked)}
+              />
+              {t("ldap.syncUsers")}
+            </label>
+            <label className="row" style={{ gap: 8, alignItems: "center" }}>
+              <input
+                type="checkbox"
+                checked={ldapTlsInsecure}
+                onChange={(e) => setLdapTlsInsecure(e.target.checked)}
+              />
+              {t("ldap.tlsInsecure")}
+            </label>
+            {ldapLastMsg && (
+              <p className="muted" style={{ fontSize: 12 }}>
+                {t("ldap.lastSync")}: {ldapLastMsg}
+              </p>
+            )}
+            <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+              <button
+                className="btn secondary"
+                type="button"
+                disabled={busy}
+                onClick={async () => {
+                  setBusy(true)
+                  setError(null)
+                  try {
+                    await saveMonitoring()
+                    const r = await api.ldapTest({
+                      enabled: true,
+                      url: ldapUrl.trim(),
+                      bindDn: ldapBindDn.trim(),
+                      bindPassword: ldapBindPwd.trim() || undefined,
+                      baseDn: ldapBaseDn.trim(),
+                      userFilter: ldapUserFilter,
+                      groupFilter: ldapGroupFilter,
+                      tlsInsecure: ldapTlsInsecure
+                    })
+                    setInfo(
+                      r.ok
+                        ? `${t("ldap.testOk")} (${r.entry_count ?? 0})`
+                        : r.message
+                    )
+                    if (!r.ok) setError(r.message)
+                  } catch (e) {
+                    setError(String(e))
+                  } finally {
+                    setBusy(false)
+                  }
+                }}>
+                {t("ldap.test")}
+              </button>
+              <button
+                className="btn secondary"
+                type="button"
+                disabled={busy || !ldapOn}
+                onClick={async () => {
+                  setBusy(true)
+                  setError(null)
+                  try {
+                    await saveMonitoring()
+                    const r = await api.ldapSync(true)
+                    setLdapLastMsg(r.message || "")
+                    setInfo(
+                      r.ok
+                        ? `${t("ldap.dryOk")} g=${r.groups_seen} u=${r.users_seen}`
+                        : r.message || t("ldap.fail")
+                    )
+                    if (!r.ok) setError(r.message || t("ldap.fail"))
+                  } catch (e) {
+                    setError(String(e))
+                  } finally {
+                    setBusy(false)
+                  }
+                }}>
+                {t("ldap.dryRun")}
+              </button>
+              <button
+                className="btn"
+                type="button"
+                disabled={busy || !ldapOn}
+                onClick={async () => {
+                  setBusy(true)
+                  setError(null)
+                  try {
+                    await saveMonitoring()
+                    const r = await api.ldapSync(false)
+                    setLdapLastMsg(r.message || "")
+                    setInfo(
+                      r.ok
+                        ? `${t("ldap.syncOk")} g=${r.groups_upserted}/${r.groups_seen} u=${r.users_upserted}/${r.users_seen}`
+                        : r.message || t("ldap.fail")
+                    )
+                    if (!r.ok) setError(r.message || t("ldap.fail"))
+                  } catch (e) {
+                    setError(String(e))
+                  } finally {
+                    setBusy(false)
+                  }
+                }}>
+                {t("ldap.sync")}
+              </button>
+            </div>
+          </div>
         )}
 
         {settingsTab !== "license" && (

@@ -1211,7 +1211,13 @@ export class PgStore implements OpsGateStore {
             ...(org.monitoring?.schedule || {}),
             ...monitoring.schedule
           }
-        : org.monitoring?.schedule
+        : org.monitoring?.schedule,
+      ldap: monitoring.ldap
+        ? {
+            ...(org.monitoring?.ldap || {}),
+            ...monitoring.ldap
+          }
+        : org.monitoring?.ldap
     })
     await this.pool.query(
       `UPDATE organizations SET monitoring_json = $2 WHERE id = $1`,
