@@ -52,6 +52,21 @@ async function main() {
       `[opsgate-api] Postgres RLS mode=${rls} (off|on|strict) — isolation org_id`
     )
   }
+  try {
+    const { getMailStatus } = await import("./mail")
+    const m = getMailStatus()
+    if (m.configured) {
+      console.log(
+        `[opsgate-api] SMTP mail=${m.host}:${m.port} from=${m.from} auth=${m.auth}`
+      )
+    } else {
+      console.log(
+        "[opsgate-api] SMTP non configuré (OPSGATE_SMTP_HOST) — OTP reset en LOG / lab dev_otp"
+      )
+    }
+  } catch {
+    /* ignore */
+  }
 
   // LDAP cron multi-org (optionnel)
   try {

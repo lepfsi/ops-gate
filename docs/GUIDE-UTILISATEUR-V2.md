@@ -105,7 +105,19 @@ Production Windows : `pnpm proxy:msi` (Node portable inclus).
 
 ---
 
-## 8. Licences (côté client)
+## 8. Mot de passe oublié (OTP e-mail)
+
+1. Écran de login → récupération mot de passe.  
+2. Saisir l’e-mail de l’**administrateur principal**.  
+3. Un **OTP** est envoyé par e-mail (SMTP configuré côté API : `OPSGATE_SMTP_*`).  
+4. Saisir l’OTP + nouveau mot de passe.  
+
+Sans SMTP (lab) : l’OTP peut apparaître dans les logs API / mode dev uniquement.  
+Détail ops : `architecture/SMTP-MAIL.md`.
+
+---
+
+## 9. Licences (côté client)
 
 - Essai 30 jours à la création de l’organisation.  
 - Licence full : coller la clé fournie par **DailyOps** (`OPS-XXXX-…`) dans **Paramètres → Gestion des licences → Ajouter**.  
@@ -114,18 +126,19 @@ Production Windows : `pnpm proxy:msi` (Node portable inclus).
 
 ---
 
-## 9. Bonnes pratiques admin
+## 10. Bonnes pratiques admin
 
 1. Postgres durable (`DATABASE_URL`) en pilote réel.  
 2. Force-install extension (MDM / AMO) + policy lock.  
 3. SSO + MFA pour les admins.  
-4. SIEM branché pour le SOC.  
-5. Tester un secret **volontaire** chaque mois (contrôle d’efficacité).  
-6. Ne jamais committer secrets IdP / bind LDAP.
+4. SMTP réel pour reset mdp / OTP (`OPSGATE_SMTP_*`).  
+5. SIEM branché pour le SOC.  
+6. Tester un secret **volontaire** chaque mois (contrôle d’efficacité).  
+7. Ne jamais committer secrets IdP / bind LDAP / SMTP.
 
 ---
 
-## 10. Support
+## 11. Support
 
 - Cahier technique : `CHANGELOG-TECHNIQUE.md`, `architecture/*`  
 - Privacy : `PRIVACY.md`  
