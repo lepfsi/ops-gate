@@ -2153,6 +2153,7 @@ function SystemSettingsView({
     | "notifications"
     | "monitoring"
     | "ldap"
+    | "mail"
     | "reports"
   >("general")
   const [addLicOpen, setAddLicOpen] = useState(false)
@@ -2203,6 +2204,16 @@ function SystemSettingsView({
   const [ldapTlsInsecure, setLdapTlsInsecure] = useState(false)
   const [ldapPwdSet, setLdapPwdSet] = useState(false)
   const [ldapLastMsg, setLdapLastMsg] = useState("")
+  const [smtpOn, setSmtpOn] = useState(false)
+  const [smtpHost, setSmtpHost] = useState("")
+  const [smtpPort, setSmtpPort] = useState(587)
+  const [smtpSecure, setSmtpSecure] = useState(false)
+  const [smtpUser, setSmtpUser] = useState("")
+  const [smtpPass, setSmtpPass] = useState("")
+  const [smtpFrom, setSmtpFrom] = useState("")
+  const [smtpTlsInsecure, setSmtpTlsInsecure] = useState(false)
+  const [smtpPwdSet, setSmtpPwdSet] = useState(false)
+  const [smtpStatusLine, setSmtpStatusLine] = useState("")
   const [mfaSecret, setMfaSecret] = useState("")
   const [mfaOtpUrl, setMfaOtpUrl] = useState("")
   const [mfaCode, setMfaCode] = useState("")
@@ -2280,6 +2291,38 @@ function SystemSettingsView({
         setQuotaEventsDay(m.quotas?.maxEventsPerDay ?? 0)
         setQuotaEventsMin(m.quotas?.maxEventsPerMinute ?? 0)
         setQuotaAgents(m.quotas?.maxAgents ?? 0)
+        const sm = m.smtp
+        if (sm) {
+          setSmtpOn(!!sm.enabled)
+          setSmtpHost(sm.host || "")
+          setSmtpPort(sm.port || 587)
+          setSmtpSecure(!!sm.secure)
+          setSmtpUser(sm.user || "")
+          setSmtpFrom(sm.from || "")
+          setSmtpTlsInsecure(!!sm.tlsInsecure)
+          setSmtpPwdSet(!!sm.password_set)
+        }
+        try {
+          const ms = await api.mailStatus()
+          setSmtpStatusLine(
+            ms.configured
+              ? `${t("mail.configured")} · ${t("mail.source")}: ${ms.source || "—"} · ${ms.host || ""}:${ms.port || ""}`
+              : t("mail.notConfigured") +
+                  (ms.env_configured ? ` (${t("mail.envFallback")})` : "")
+          )
+          if (ms.smtp) {
+            setSmtpOn(!!ms.smtp.enabled)
+            setSmtpHost(ms.smtp.host || "")
+            setSmtpPort(ms.smtp.port || 587)
+            setSmtpSecure(!!ms.smtp.secure)
+            setSmtpUser(ms.smtp.user || "")
+            setSmtpFrom(ms.smtp.from || "")
+            setSmtpTlsInsecure(!!ms.smtp.tlsInsecure)
+            setSmtpPwdSet(!!ms.smtp.password_set)
+          }
+        } catch {
+          /* mail status optional */
+        }
         const ld = m.ldap
         if (ld) {
           setLdapOn(!!ld.enabled)
@@ -2444,6 +2487,7 @@ function SystemSettingsView({
     | "notifications"
     | "monitoring"
     | "ldap"
+    | "mail"
     | "reports"
   > = [
     "general",
@@ -2452,6 +2496,7 @@ function SystemSettingsView({
     "notifications",
     "monitoring",
     "ldap",
+    "mail",
     "reports"
   ]
 
@@ -3234,6 +3279,202 @@ function SystemSettingsView({
         </div>
         )}
 
+        {settingsTab === "mail" && (
+          <div className="stack" style={{ gap: 10, marginTop: 12 }}>
+            <h3 style={{ margin: 0, fontSize: 15 }}>{t("mail.title")}</h3>
+            <p className="muted" style={{ fontSize: 12, margin: 0 }}>
+              {t("mail.help")}
+            </p>
+            {smtpStatusLine && (
+              <p style={{ fontSize: 13, margin: 0 }}>
+                <strong>{t("mail.status")} :</strong> {smtpStatusLine}
+              </p>
+            )}
+            <label className="row" style={{ gap: 8, alignItems: "center" }}>
+              <input
+                type="checkbox"
+                checked={smtpOn}
+                onChange={(e) => setSmtpOn(e.target.checked)}
+              />
+              {t("mail.enabled")}
+            </label>
+            <label className="field-label">{t("mail.host")}</label>
+            <input
+              className="input mono"
+              value={smtpHost}
+              onChange={(e) => setSmtpHost(e.target.value)}
+              placeholder="smtp.office365.com"
+              disabled={!smtpOn}
+            />
+            <div className="row" style={{ gap: 12, flexWrap: "wrap" }}>
+              <div style={{ flex: "1 1 120px" }}>
+                <label className="field-label">{t("mail.port")}</label>
+                <input
+                  className="input"
+                  type="number"
+                  min={1}
+                  max={65535}
+                  value={smtpPort}
+                  onChange={(e) => setSmtpPort(Number(e.target.value) || 587)}
+                  disabled={!smtpOn}
+                />
+              </div>
+              <label
+                className="row"
+                style={{
+                  gap: 8,
+                  alignItems: "center",
+                  marginTop: 22,
+                  flex: "1 1 180px"
+                }}>
+                <input
+                  type="checkbox"
+                  checked={smtpSecure}
+                  onChange={(e) => setSmtpSecure(e.target.checked)}
+                  disabled={!smtpOn}
+                />
+                {t("mail.secure")}
+              </label>
+            </div>
+            <label className="field-label">{t("mail.user")}</label>
+            <input
+              className="input mono"
+              value={smtpUser}
+              onChange={(e) => setSmtpUser(e.target.value)}
+              placeholder="noreply@entreprise.com"
+              disabled={!smtpOn}
+              autoComplete="off"
+            />
+            <label className="field-label">{t("mail.password")}</label>
+            <input
+              className="input mono"
+              type="password"
+              value={smtpPass}
+              onChange={(e) => setSmtpPass(e.target.value)}
+              placeholder={
+                smtpPwdSet ? "••••••••" : t("mail.passwordKeep")
+              }
+              disabled={!smtpOn}
+              autoComplete="new-password"
+            />
+            <p className="muted" style={{ fontSize: 11, margin: 0 }}>
+              {t("mail.passwordKeep")}
+              {smtpPwdSet ? " · mot de passe déjà enregistré" : ""}
+            </p>
+            <label className="field-label">{t("mail.from")}</label>
+            <input
+              className="input"
+              value={smtpFrom}
+              onChange={(e) => setSmtpFrom(e.target.value)}
+              placeholder="OpsGate <noreply@entreprise.com>"
+              disabled={!smtpOn}
+            />
+            <label className="row" style={{ gap: 8, alignItems: "center" }}>
+              <input
+                type="checkbox"
+                checked={smtpTlsInsecure}
+                onChange={(e) => setSmtpTlsInsecure(e.target.checked)}
+                disabled={!smtpOn}
+              />
+              {t("mail.tlsInsecure")}
+            </label>
+            <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+              <button
+                className="btn"
+                type="button"
+                disabled={busy}
+                onClick={async () => {
+                  setBusy(true)
+                  setError(null)
+                  try {
+                    const body: Parameters<typeof api.saveMailSettings>[0] = {
+                      enabled: smtpOn,
+                      host: smtpHost.trim(),
+                      port: smtpPort,
+                      secure: smtpSecure,
+                      user: smtpUser.trim(),
+                      from: smtpFrom.trim(),
+                      tlsInsecure: smtpTlsInsecure
+                    }
+                    if (smtpPass.trim()) body.password = smtpPass.trim()
+                    const r = await api.saveMailSettings(body)
+                    setSmtpPass("")
+                    setSmtpPwdSet(!!r.smtp.password_set)
+                    setSmtpStatusLine(
+                      r.status.configured
+                        ? `${t("mail.configured")} · ${t("mail.source")}: ${r.status.source || "—"} · ${r.status.host || ""}`
+                        : t("mail.notConfigured")
+                    )
+                    setInfo(t("mail.save") + " OK")
+                  } catch (e) {
+                    setError(String(e))
+                  } finally {
+                    setBusy(false)
+                  }
+                }}>
+                {t("mail.save")}
+              </button>
+              <button
+                className="btn secondary"
+                type="button"
+                disabled={busy}
+                onClick={async () => {
+                  setBusy(true)
+                  setError(null)
+                  try {
+                    const r = await api.testMail()
+                    if (!r.ok || !r.verify?.ok) {
+                      setError(
+                        r.verify?.error || r.error || "SMTP verify failed"
+                      )
+                    } else {
+                      setInfo(
+                        `${t("mail.test")} OK (${r.verify.source || "—"})`
+                      )
+                    }
+                  } catch (e) {
+                    setError(String(e))
+                  } finally {
+                    setBusy(false)
+                  }
+                }}>
+                {t("mail.test")}
+              </button>
+              <button
+                className="btn secondary"
+                type="button"
+                disabled={busy}
+                onClick={async () => {
+                  setBusy(true)
+                  setError(null)
+                  try {
+                    const r = await api.testMail()
+                    if (!r.verify?.ok) {
+                      setError(r.verify?.error || "SMTP verify failed")
+                    } else if (r.test_email && !r.test_email.ok) {
+                      setError(
+                        r.test_email.error || "Envoi test échoué"
+                      )
+                    } else {
+                      setInfo(
+                        `${t("mail.testSend")} OK` +
+                          (r.test_email?.delivery
+                            ? ` (${r.test_email.delivery})`
+                            : "")
+                      )
+                    }
+                  } catch (e) {
+                    setError(String(e))
+                  } finally {
+                    setBusy(false)
+                  }
+                }}>
+                {t("mail.testSend")}
+              </button>
+            </div>
+          </div>
+        )}
+
         {settingsTab === "ldap" && (
           <div className="stack" style={{ gap: 10, marginTop: 12 }}>
             <h3 style={{ margin: 0, fontSize: 15 }}>{t("ldap.title")}</h3>
@@ -3412,7 +3653,7 @@ function SystemSettingsView({
           </div>
         )}
 
-        {settingsTab !== "license" && (
+        {settingsTab !== "license" && settingsTab !== "mail" && (
         <div className="row" style={{ marginTop: 8 }}>
           <button
             className="btn"

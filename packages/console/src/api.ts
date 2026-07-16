@@ -248,6 +248,20 @@ export type MonitoringSettings = {
     maxAgents?: number
   }
   ldap?: LdapSettings
+  smtp?: SmtpSettings
+}
+
+export type SmtpSettings = {
+  enabled: boolean
+  host: string
+  port: number
+  secure: boolean
+  user: string
+  /** write-only ; never returned on GET */
+  password?: string
+  from: string
+  tlsInsecure?: boolean
+  password_set?: boolean
 }
 
 export type LdapSettings = {
@@ -1169,6 +1183,53 @@ export const api = {
     }>("/v1/org/ldap/sync", {
       method: "POST",
       body: JSON.stringify({ dry_run: !!dryRun })
+    }),
+
+  mailStatus: () =>
+    request<{
+      org_id: string
+      configured: boolean
+      source: string | null
+      host: string | null
+      port: number | null
+      from: string | null
+      auth: boolean
+      org_enabled: boolean
+      env_configured: boolean
+      mode: string
+      smtp: SmtpSettings
+      verify?: { ok: boolean; error?: string; source?: string } | null
+    }>("/v1/org/mail/status"),
+
+  saveMailSettings: (body: Partial<SmtpSettings>) =>
+    request<{
+      ok: boolean
+      smtp: SmtpSettings
+      status: {
+        configured: boolean
+        source: string | null
+        host: string | null
+        mode: string
+      }
+    }>("/v1/org/mail/settings", {
+      method: "PUT",
+      body: JSON.stringify(body)
+    }),
+
+  testMail: (send_test_to?: string) =>
+    request<{
+      ok: boolean
+      verify: { ok: boolean; error?: string; source?: string }
+      test_email?: {
+        ok: boolean
+        delivery?: string
+        error?: string
+      } | null
+      smtp: SmtpSettings
+      error?: string
+    }>("/v1/org/mail/test", {
+      method: "POST",
+      body: JSON.stringify({ send_test_to: send_test_to || undefined })
     }),
 
   updateMonitoring: (body: Partial<MonitoringSettings>) =>

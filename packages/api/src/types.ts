@@ -183,6 +183,39 @@ export interface OrgMonitoringSettings {
    * Bind password : préférer env OPSGATE_LDAP_BIND_PASSWORD.
    */
   ldap?: OrgLdapSettings
+  /**
+   * SMTP transactionnel (OTP reset mdp, notifications).
+   * Prioritaire sur OPSGATE_SMTP_* env si enabled + host renseigné.
+   * Mot de passe : non renvoyé en API (comme LDAP bind).
+   */
+  smtp?: OrgSmtpSettings
+}
+
+/** Config SMTP org (console Paramètres → E-mail / SMTP) */
+export interface OrgSmtpSettings {
+  enabled: boolean
+  host: string
+  port: number
+  /** true = TLS implicite (465) */
+  secure: boolean
+  user: string
+  /** stocké en monitoring_json ; jamais exposé en GET */
+  password?: string
+  /** ex. OpsGate <noreply@entreprise.com> */
+  from: string
+  /** lab : accepter certificat auto-signé */
+  tlsInsecure?: boolean
+}
+
+export const DEFAULT_SMTP_SETTINGS: OrgSmtpSettings = {
+  enabled: false,
+  host: "",
+  port: 587,
+  secure: false,
+  user: "",
+  password: "",
+  from: "",
+  tlsInsecure: false
 }
 
 /** Config sync LDAP/AD → users & groups OpsGate */
@@ -370,7 +403,8 @@ export const DEFAULT_MONITORING_SETTINGS: OrgMonitoringSettings = {
   },
   siem: { ...DEFAULT_SIEM_SETTINGS },
   quotas: { ...DEFAULT_QUOTA_SETTINGS },
-  ldap: { ...DEFAULT_LDAP_SETTINGS }
+  ldap: { ...DEFAULT_LDAP_SETTINGS },
+  smtp: { ...DEFAULT_SMTP_SETTINGS }
 }
 
 export function mergeMonitoringSettings(
@@ -558,6 +592,30 @@ export function mergeMonitoringSettings(
           : prev.lastSyncMessage,
       lastSyncStats:
         l.lastSyncStats !== undefined ? l.lastSyncStats : prev.lastSyncStats
+    }
+  }
+  if (partial.smtp && typeof partial.smtp === "object") {
+    const s = partial.smtp
+    const prev = base.smtp || DEFAULT_SMTP_SETTINGS
+    base.smtp = {
+      ...DEFAULT_SMTP_SETTINGS,
+      ...prev,
+      enabled: s.enabled !== undefined ? !!s.enabled : prev.enabled,
+      host: typeof s.host === "string" ? s.host.trim() : prev.host,
+      port:
+        typeof s.port === "number" && s.port >= 1 && s.port <= 65535
+          ? Math.floor(s.port)
+          : prev.port,
+      secure: s.secure !== undefined ? !!s.secure : prev.secure,
+      user: typeof s.user === "string" ? s.user.trim() : prev.user,
+      // empty keeps previous secret
+      password:
+        typeof s.password === "string" && s.password.length > 0
+          ? s.password
+          : prev.password || "",
+      from: typeof s.from === "string" ? s.from.trim() : prev.from,
+      tlsInsecure:
+        s.tlsInsecure !== undefined ? !!s.tlsInsecure : prev.tlsInsecure
     }
   }
   if (partial.schedule && typeof partial.schedule === "object") {

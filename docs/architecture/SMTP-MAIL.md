@@ -10,22 +10,34 @@ Remplacer le mode « OTP affiché en log / dev » par un **vrai envoi SMTP** pou
 
 La MFA TOTP (Authenticator) reste **dans l’app** (pas d’e-mail) — c’est un second facteur hors bande e-mail.
 
-## Configuration
+## Configuration (2 façons)
+
+### A. Console (recommandé pour le client / admin principal)
+
+**Paramètres système → E-mail / SMTP**
+
+1. Cocher **Activer SMTP**  
+2. Host, port (587 ou 465), utilisateur, mot de passe, From  
+3. **Enregistrer SMTP**  
+4. **Tester la connexion** / **Tester + envoyer un e-mail**  
+
+Prioritaire sur les variables d’environnement si `enabled` + host renseignés.  
+Le mot de passe n’est **jamais** renvoyé en lecture (comme le bind LDAP).
+
+### B. Variables d’environnement (serveur / Docker)
 
 | Variable | Exemple | Rôle |
 |----------|---------|------|
-| `OPSGATE_SMTP_HOST` | `smtp.office365.com` | Serveur SMTP (**requis** pour envoi réel) |
+| `OPSGATE_SMTP_HOST` | `smtp.office365.com` | Serveur SMTP |
 | `OPSGATE_SMTP_PORT` | `587` | Port (587 STARTTLS, 465 TLS) |
 | `OPSGATE_SMTP_SECURE` | `1` | Forcer TLS (typ. 465) |
-| `OPSGATE_SMTP_USER` | `noreply@…` | Auth (optionnel si relais ouvert) |
+| `OPSGATE_SMTP_USER` | `noreply@…` | Auth |
 | `OPSGATE_SMTP_PASS` | `…` | Mot de passe / app password |
 | `OPSGATE_SMTP_FROM` | `OpsGate <noreply@dailyops.tech>` | Expéditeur |
-| `OPSGATE_SMTP_TLS_REJECT` | `0` | Lab : accepter cert self-signed |
-| `OPSGATE_MAIL_DEV_OTP` | `1` | **Lab** : renvoyer l’OTP dans la réponse JSON |
+| `OPSGATE_SMTP_TLS_REJECT` | `0` | Lab : cert self-signed |
+| `OPSGATE_MAIL_DEV_OTP` | `1` | **Lab** : OTP dans la réponse JSON |
 
-Alias acceptés : `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM`.
-
-### Exemple PowerShell (API)
+Alias : `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM`.
 
 ```powershell
 $env:OPSGATE_SMTP_HOST = "smtp.office365.com"
@@ -33,7 +45,6 @@ $env:OPSGATE_SMTP_PORT = "587"
 $env:OPSGATE_SMTP_USER = "noreply@votre-domaine.com"
 $env:OPSGATE_SMTP_PASS = "********"
 $env:OPSGATE_SMTP_FROM = "OpsGate <noreply@votre-domaine.com>"
-# Ne pas mettre OPSGATE_MAIL_DEV_OTP en production
 pnpm api:dev
 ```
 
@@ -66,7 +77,9 @@ Console « Mot de passe oublié »
 | `POST /v1/auth/password-reset/request` | public | Envoie OTP |
 | `POST /v1/auth/password-reset/confirm` | public | Applique le nouveau mdp |
 | `GET /health` | public | Champ `mail: { configured, host, … }` |
-| `GET /v1/org/mail/status` | console | Statut + `verify` SMTP si principal |
+| `GET /v1/org/mail/status` | console | Statut org + env (sans secret) |
+| `PUT /v1/org/mail/settings` | principal | Enregistre SMTP org |
+| `POST /v1/org/mail/test` | principal | Verify + e-mail de test optionnel |
 
 ## Code
 
