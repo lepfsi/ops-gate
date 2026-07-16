@@ -693,6 +693,9 @@ export const api = {
       { method: "PATCH", body: JSON.stringify(body) }
     ),
 
+  /**
+   * Forgot password (écran login) — public, email obligatoire.
+   */
   requestPrincipalOtp: (email?: string) =>
     request<{
       ok: boolean
@@ -719,6 +722,32 @@ export const api = {
           new_password,
           email: email || undefined
         })
+      }
+    ),
+
+  /**
+   * Reset pour l’admin de la session active (Paramètres).
+   */
+  requestSessionOtp: () =>
+    request<{
+      ok: boolean
+      expires_in_sec?: number
+      mailed?: boolean
+      delivery?: string
+      dev_otp?: string
+      target_email_masked?: string
+      message: string
+    }>("/v1/org/password-reset/request", {
+      method: "POST",
+      body: "{}"
+    }),
+
+  confirmSessionOtp: (otp: string, new_password: string) =>
+    request<{ ok: boolean; message?: string }>(
+      "/v1/org/password-reset/confirm",
+      {
+        method: "POST",
+        body: JSON.stringify({ otp, new_password })
       }
     ),
 

@@ -381,22 +381,30 @@ export interface OpsGateStore {
     | { ok: false; error: string }
   >
 
-  requestPasswordResetOtp(orgId: string): Promise<{
-    ok: true
-    expires_in_sec: number
-    /** true si SMTP a accepté l’envoi */
-    mailed: boolean
-    delivery: "smtp" | "log" | "failed" | "disabled"
-    /** OTP en clair uniquement en lab (OPSGATE_MAIL_DEV_OTP ou SMTP absent hors prod) */
-    dev_otp?: string
-    message: string
-    target_email_masked?: string
-  }>
+  /**
+   * OTP reset pour un admin précis (email ou adminId).
+   * Ne plus cibler aveuglément le premier principal DEMO.
+   */
+  requestPasswordResetOtp(
+    orgId: string,
+    target?: { email?: string; adminId?: string }
+  ): Promise<
+    | {
+        ok: true
+        expires_in_sec: number
+        mailed: boolean
+        delivery: "smtp" | "log" | "failed" | "disabled"
+        dev_otp?: string
+        message: string
+        target_email_masked?: string
+      }
+    | { ok: false; error: string }
+  >
   confirmPasswordResetOtp(
     orgId: string,
     otp: string,
     newPassword: string,
-    adminId?: string
+    target?: { email?: string; adminId?: string }
   ): Promise<{ ok: true } | { ok: false; error: string }>
 
   /** Audit + revoke avec acteur de sortie */

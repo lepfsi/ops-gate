@@ -3660,28 +3660,27 @@ export function createApp() {
   })
 
   /**
-   * OTP reset mot de passe — principal (e-mail).
-   * Public. Envoi SMTP si OPSGATE_SMTP_* configuré.
-   * Body: { email } — résout l’org via findAdminsByEmail (fallback DEMO).
+   * OTP reset mdp — cible l’admin de l’e-mail saisi (plus le seed DEMO).
+   * Public : body.email obligatoire.
+   * Session console : POST /org/password-reset/* utilise l’admin connecté.
    */
-  async function resolveOrgForPasswordReset(emailRaw: string) {
+  async function resolveAdminByEmailForReset(emailRaw: string) {
     const email = (emailRaw || "").trim().toLowerCase()
-    if (email) {
-      const hits = await store.findAdminsByEmail(email)
-      const principalHit = hits.find((a) => a.isPrincipal && a.active)
-      if (principalHit) {
-        const org = await store.getOrg(principalHit.orgId)
-        if (org) return { org, principal: principalHit, email }
-      }
-      // e-mail connu mais non principal : réponse générique (anti-énumération)
-      if (hits.length > 0) {
-        return { org: null as null, principal: null as null, email, deny: true as const }
-      }
+    if (!email || !email.includes("@")) {
+      return { error: "email_required" as const }
     }
-    const org = await demoOrg()
-    if (!org) return { org: null as null, principal: null as null, email }
-    const principal = await store.getPrincipalAdmin(org.id)
-    return { org, principal, email }
+    const hits = await store.findAdminsByEmail(email)
+    const active = hits.filter((a) => a.active)
+    if (active.length === 0) {
+      // anti-énumération
+      return { soft: true as const, email }
+    }
+    // Préférer un principal si plusieurs (même email multi-org rare)
+    const admin =
+      active.find((a) => a.isPrincipal) || active[0]!
+    const org = await store.getOrg(admin.orgId)
+    if (!org) return { soft: true as const, email }
+    return { org, admin, email }
   }
 
   v1.post("/auth/password-reset/request", async (c) => {
@@ -3692,30 +3691,42 @@ export function createApp() {
       body = {}
     }
     const email = (body.email || "").trim().toLowerCase()
-    const resolved = await resolveOrgForPasswordReset(email)
-    // Toujours message générique si email fourni et ne matche pas le principal
-    if (email && resolved.deny) {
+    if (!email) {
+      return c.json(
+        { error: "email_required", message: "Saisissez l’e-mail du compte admin." },
+        400
+      )
+    }
+    const resolved = await resolveAdminByEmailForReset(email)
+    if ("error" in resolved) {
+      return c.json({ error: resolved.error }, 400)
+    }
+    if ("soft" in resolved && resolved.soft) {
       return c.json({
         ok: true,
         message:
-          "Si l'email correspond à un administrateur principal, un OTP a été envoyé."
+          "Si un compte admin correspond à cet e-mail, un code OTP a été envoyé."
       })
     }
-    if (!resolved.org) {
-      return c.json({ error: "no_org" }, 404)
+    if (!("org" in resolved) || !resolved.org || !resolved.admin) {
+      return c.json({
+        ok: true,
+        message:
+          "Si un compte admin correspond à cet e-mail, un code OTP a été envoyé."
+      })
     }
-    if (email && resolved.principal) {
-      const pe = resolved.principal.email.toLowerCase()
-      const oe = (resolved.org.primaryEmail || "").toLowerCase()
-      if (email !== pe && email !== oe) {
-        return c.json({
-          ok: true,
-          message:
-            "Si l'email correspond à un administrateur principal, un OTP a été envoyé."
-        })
-      }
+    const result = await store.requestPasswordResetOtp(resolved.org.id, {
+      email: resolved.admin.email,
+      adminId: resolved.admin.id
+    })
+    if (!result.ok) {
+      // ne pas révéler
+      return c.json({
+        ok: true,
+        message:
+          "Si un compte admin correspond à cet e-mail, un code OTP a été envoyé."
+      })
     }
-    const result = await store.requestPasswordResetOtp(resolved.org.id)
     return c.json(result)
   })
 
@@ -3729,35 +3740,46 @@ export function createApp() {
     if (!body.otp || !body.new_password) {
       return c.json({ error: "otp_and_new_password_required" }, 400)
     }
-    const resolved = await resolveOrgForPasswordReset(body.email || "")
-    if (!resolved.org) return c.json({ error: "no_org" }, 404)
+    const email = (body.email || "").trim().toLowerCase()
+    if (!email) {
+      return c.json({ error: "email_required" }, 400)
+    }
+    const resolved = await resolveAdminByEmailForReset(email)
+    if (!("org" in resolved) || !resolved.org || !resolved.admin) {
+      return c.json({ error: "invalid_or_expired" }, 400)
+    }
     const result = await store.confirmPasswordResetOtp(
       resolved.org.id,
       body.otp,
-      body.new_password
+      body.new_password,
+      { email: resolved.admin.email, adminId: resolved.admin.id }
     )
     if (!result.ok) return c.json({ error: result.error }, 400)
     return c.json({
       ok: true,
       message:
-        "Mot de passe Administrator mis à jour. Connectez-vous avec le nouveau mot de passe."
+        "Mot de passe mis à jour. Connectez-vous avec le nouveau mot de passe."
     })
   })
 
-  // Compat anciens chemins console
+  /**
+   * Session console : reset pour l’admin CONNECTÉ (pas DEMO seed).
+   */
   v1.post("/org/password-reset/request", async (c) => {
-    let body: { email?: string }
-    try {
-      body = await c.req.json()
-    } catch {
-      body = {}
-    }
-    const resolved = await resolveOrgForPasswordReset(body.email || "")
-    if (!resolved.org) return c.json({ error: "no_org" }, 404)
-    return c.json(await store.requestPasswordResetOtp(resolved.org.id))
+    const gate = await requireConsoleAuth(c, "console_access")
+    if (!gate.ok) return c.json({ error: gate.error }, gate.status)
+    const result = await store.requestPasswordResetOtp(gate.orgId, {
+      adminId: gate.admin.id,
+      email: gate.admin.email
+    })
+    if (!result.ok) return c.json({ error: result.error }, 400)
+    return c.json(result)
   })
+
   v1.post("/org/password-reset/confirm", async (c) => {
-    let body: { otp?: string; new_password?: string; email?: string }
+    const gate = await requireConsoleAuth(c, "console_access")
+    if (!gate.ok) return c.json({ error: gate.error }, gate.status)
+    let body: { otp?: string; new_password?: string }
     try {
       body = await c.req.json()
     } catch {
@@ -3766,15 +3788,14 @@ export function createApp() {
     if (!body.otp || !body.new_password) {
       return c.json({ error: "otp_and_new_password_required" }, 400)
     }
-    const resolved = await resolveOrgForPasswordReset(body.email || "")
-    if (!resolved.org) return c.json({ error: "no_org" }, 404)
     const result = await store.confirmPasswordResetOtp(
-      resolved.org.id,
+      gate.orgId,
       body.otp,
-      body.new_password
+      body.new_password,
+      { adminId: gate.admin.id, email: gate.admin.email }
     )
     if (!result.ok) return c.json({ error: result.error }, 400)
-    return c.json({ ok: true })
+    return c.json({ ok: true, message: "Mot de passe mis à jour." })
   })
 
   /** Statut SMTP (org + env) — sans secrets */
