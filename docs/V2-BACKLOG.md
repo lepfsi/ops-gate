@@ -15,7 +15,7 @@ Voir le journal détaillé : [`CHANGELOG-TECHNIQUE.md`](./CHANGELOG-TECHNIQUE.md
 |------|------|--------|
 | **P0 ✅** | **SIEM / Syslog** | **Livré** : UDP/TCP, RFC 5424 + CEF, config org console Monitoring. Voir `siem.ts` + `docs/grafana/README.md`. |
 | **P0 ✅** | **Métriques + Grafana** | **Livré** : `GET /metrics`, counters + gauges multi-org, dashboard `docs/grafana/opsgate-dashboard.json`. |
-| **P1 ✅ partiel** | **Proxy prod** | **Livré** : service/tâche Windows, PAC/GPO, soft-mask **on-wire** (rewrite body) + local 422. Reste : MSI packagé, HTTP/2 stream-aware. |
+| **P1 ✅ partiel** | **Proxy prod** | **Livré** : service/tâche Windows, PAC/GPO, soft-mask on-wire, **MSI** (`pnpm proxy:msi` → `dist/opsgate-proxy-*.msi`). Reste : HTTP/2 stream-aware, Node embarqué optionnel. |
 | **P1 ✅** | **SSO + MFA** | **Livré** : MFA TOTP + OIDC Authorization Code+PKCE (`/auth/oidc/start|callback`, mapping email→admin, bouton console). Reste optionnel : JIT, JWKS, WebAuthn, SAML, `sso_enforce`. |
 | **P1 ✅ partiel** | **Multi-tenant prod** | **Livré** : rate limit login, quota events/jour. Reste : Redis multi-instance, RLS, quotas étendus. |
 | **P2** | **Multi-navigateur** | Chromium OK. **Firefox** MV3 puis Safari. |

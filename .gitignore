@@ -25,6 +25,9 @@ yarn-error.log*
 out/
 build/
 dist/
+# WiX toolset binaries (auto-downloaded by build-proxy-msi.ps1)
+tools/wix314/
+packaging/proxy/proxy.ico
 
 # plasmo
 .plasmo

@@ -15,6 +15,47 @@ Remplacer les terminaux `pnpm proxy:dev` par un **démarrage silencieux** (servi
 
 ## Installation
 
+### A. MSI packagé (recommandé prod / GPO)
+
+```powershell
+cd ops-gate
+pnpm install
+# Build stage + MSI (télécharge WiX 3.14 dans tools\wix314 si besoin)
+pnpm proxy:msi
+# Artefacts :
+#   dist\opsgate-proxy-1.2.0.msi
+#   dist\opsgate-proxy-1.2.0-win-x64.zip   (portable)
+```
+
+Install machine :
+
+```powershell
+# UI
+msiexec /i dist\opsgate-proxy-1.2.0.msi
+# Silent
+msiexec /i dist\opsgate-proxy-1.2.0.msi /qn
+```
+
+- Binaries : `C:\Program Files\OpsGate\Proxy\`
+- Data (CA, agent, logs) : `%ProgramData%\OpsGate\Proxy\`
+- Registry : `HKLM\SOFTWARE\OpsGate\Proxy`
+- Post-install auto (CA + tache + enroll) via custom action ; si skip :
+
+```powershell
+powershell -ExecutionPolicy Bypass -File "C:\Program Files\OpsGate\Proxy\scripts\post-install.ps1"
+```
+
+Prérequis runtime : **Node.js 20+ LTS** dans le PATH (le MSI n’embarque pas Node).
+
+Stage seul (sans MSI) :
+
+```powershell
+pnpm proxy:package
+# → dist\proxy-stage + ZIP
+```
+
+### B. Dev monorepo (scripts)
+
 ```powershell
 cd ops-gate
 pnpm install
@@ -83,11 +124,13 @@ pnpm proxy:dev
 ## Checklist prod
 
 1. API durable (Postgres) joignable  
-2. CA trustée  
-3. Enroll proxy OK (`pnpm proxy:status`)  
-4. Service/tâche auto  
-5. PAC/GPO  
-6. SIEM org si requis  
-7. Test : envoi sensible → 403/422, puis navigation site OK  
+2. MSI installé **ou** stage + post-install  
+3. Node.js 20+ sur le poste  
+4. CA trustée (`%ProgramData%\OpsGate\Proxy\ca\ca-cert.pem`)  
+5. Enroll proxy OK (`node bin\opsgate-proxy.mjs status`)  
+6. Service/tâche auto  
+7. PAC/GPO  
+8. SIEM org si requis  
+9. Test : envoi sensible → mask/403/422, puis navigation site OK  
 
-Voir aussi `PROXY-RUNBOOK.md`.
+Voir aussi `PROXY-RUNBOOK.md` · packaging WiX : `packaging/proxy/`.
