@@ -1,14 +1,20 @@
 /**
- * MITM TLS borné allowlist — observe + enforce **par requête** (P3).
+ * MITM TLS borné allowlist — observe + enforce **par requête / stream** (P3).
  *
- * Enforce :
+ * Enforce HTTP/1.1 :
  * - bufferise client→serveur, scanne, ne relaie qu’après scan propre ;
- * - si sensible : soft-block 403, soft-mask local 422, ou soft-mask **on-wire** (rewrite) ;
- * - TLS conservé (keep-alive) ; ne détruit plus la connexion (sauf erreur / h2).
+ * - soft-block 403 / soft-mask local 422 / soft-mask on-wire rewrite ;
+ * - TLS keep-alive.
+ *
+ * Enforce HTTP/2 :
+ * - demux frames, hold par stream jusqu’à END_STREAM ;
+ * - sensible → RST_STREAM (connexion multiplexée conservée) ou mask on-wire DATA ;
+ * - voir http2-mitm.ts / http2-frames.ts.
  */
 import * as net from "node:net"
 import * as tls from "node:tls"
 import { getHostCert } from "./certs.js"
+import { createHttp2Mitm, http2Enabled } from "./http2-mitm.js"
 import { log } from "./log.js"
 import {
   createStreamObserver,
@@ -326,14 +332,16 @@ export function mitmConnect(opts: {
   }
 
   const pendingHead = head?.length ? head : null
+  const h2ok = http2Enabled()
+  /** Client ALPN : h2 autorisé même en enforce (stream-aware). */
+  const alpnOffer = h2ok ? (["h2", "http/1.1"] as string[]) : ["http/1.1"]
 
   try {
     tlsClient = new tls.TLSSocket(clientSocket, {
       isServer: true,
       key: hostPem.key,
       cert: hostPem.cert,
-      // HTTP/1.1 en priorité : soft-block par requête fiable (keep-alive)
-      ALPNProtocols: enforceMode ? ["http/1.1"] : ["http/1.1", "h2"],
+      ALPNProtocols: alpnOffer,
       rejectUnauthorized: false
     })
   } catch (e) {
@@ -353,6 +361,8 @@ export function mitmConnect(opts: {
     cleanup("client_tls_error")
   })
 
+  let h2handles: ReturnType<typeof createHttp2Mitm> | null = null
+
   tlsClient.once("secure", () => {
     const alpn =
       typeof tlsClient!.alpnProtocol === "string" && tlsClient!.alpnProtocol
@@ -360,13 +370,17 @@ export function mitmConnect(opts: {
         : "http/1.1"
 
     const modeLabel = enforceMode ? "enforce_mitm" : "observe_mitm"
+    const isH2 = alpn === "h2" || alpn === "h2-14" || alpn === "h2-16"
+
+    // Amont : négocier le même ALPN (h2 si client h2)
+    const upAlpn = isH2 ? (["h2", "http/1.1"] as string[]) : ["http/1.1"]
 
     upstream = tls.connect(
       {
         host: targetHost,
         port: targetPort,
         servername: targetHost,
-        ALPNProtocols: [alpn, "http/1.1"],
+        ALPNProtocols: upAlpn,
         rejectUnauthorized: true
       },
       () => {
@@ -376,8 +390,13 @@ export function mitmConnect(opts: {
           alpn_client: tlsClient?.alpnProtocol || null,
           alpn_upstream: upstream?.alpnProtocol || null,
           mode: modeLabel,
-          block_scope: enforceMode ? "request_soft" : "n/a",
-          soft_mask: maskMode
+          block_scope: enforceMode
+            ? isH2
+              ? "h2_stream"
+              : "request_soft"
+            : "n/a",
+          soft_mask: maskMode,
+          http2: isH2
         })
       }
     )
@@ -390,17 +409,46 @@ export function mitmConnect(opts: {
       cleanup("upstream_tls_error")
     })
 
-    // Ne pas cleanup sur close upstream seul si on soft-block (upstream peut rester up)
     upstream.on("close", () => {
       if (!cleaned && !discardingRequest) {
         cleanup("upstream_close")
       }
     })
 
+    // ── HTTP/2 path ──
+    if (isH2) {
+      h2handles = createHttp2Mitm({
+        host: targetHost,
+        tlsClient: tlsClient!,
+        getUpstream: () => upstream,
+        enforceMode,
+        maskMode,
+        onFatal: (why) => cleanup(why)
+      })
+
+      const onClientH2 = (chunk: Buffer) => {
+        if (cleaned || !h2handles) return
+        h2handles.onClientData(chunk)
+      }
+      tlsClient!.on("data", onClientH2)
+      if (pendingHead?.length) onClientH2(pendingHead)
+
+      upstream.on("data", (chunk: Buffer) => {
+        if (cleaned || !h2handles) return
+        h2handles.onUpstreamData(chunk)
+      })
+
+      tlsClient!.on("close", () => {
+        h2handles?.destroy()
+        cleanup("client_close_h2")
+      })
+      return
+    }
+
+    // ── HTTP/1.1 path (existant) ──
     const onClientChunk = (chunk: Buffer) => {
       if (cleaned) return
 
-      // Soft-block en cours : on jette le reste de la requête, puis idle → reset
       if (discardingRequest) {
         scheduleRelease()
         return
@@ -412,7 +460,6 @@ export function mitmConnect(opts: {
         const block = observer.onClientData(chunk)
         if (block) {
           if (maskMode === "onwire") {
-            // Continuer à bufferiser jusqu’à idle pour rewrite Content-Length
             maskPending = true
             if (holdBytes >= MAX_HOLD_BYTES) {
               softBlockRequest("enforce_buffer_overflow", true)
@@ -438,7 +485,6 @@ export function mitmConnect(opts: {
         return
       }
 
-      // observe : pass-through + journal
       observer.onClientData(chunk)
       if (upstream && !upstream.destroyed) {
         try {
@@ -467,6 +513,11 @@ export function mitmConnect(opts: {
   })
 
   tlsClient.on("close", () => {
+    if (h2handles) {
+      h2handles.destroy()
+      cleanup("client_close")
+      return
+    }
     if (enforceMode && !cleaned && !observer.isBlocked() && holdBytes > 0) {
       flushHoldToUpstream()
     }

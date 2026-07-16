@@ -203,14 +203,25 @@ Prod future : services Windows / silent scripts ; pas 3 terminaux ouverts.
 | Post-install | CA + trust + enroll + tâche planifiée | `scripts/post-install.ps1` (dans le stage) |
 | npm scripts | `pnpm proxy:package` · `pnpm proxy:msi` | `package.json` |
 
-## 11. Suite recommandée
+## 11. V2 P1 suite — HTTP/2 stream-aware (16 juillet 2026)
 
-1. HTTP/2 stream-aware enforce  
-2. MSI : Node portable embarqué (option)  
-3. Firefox MV3  
-4. Chrome Web Store / MDM force-install  
-5. Redis pour rate-limit multi-instance  
-6. OIDC : JIT admin, JWKS verify, `sso_enforce`, SAML  
+| Sujet | Détail | Fichiers |
+|-------|--------|----------|
+| Frames | Parse/encode DATA, RST, preface | `packages/proxy/src/http2-frames.ts` |
+| Session MITM | Hold par stream, END_STREAM, idle | `http2-mitm.ts` |
+| Enforce | RST_STREAM (CANCEL) sans tuer la connexion | `mitm.ts` ALPN h2 |
+| Soft-mask h2 | Rewrite payloads DATA on-wire | `rewriteStreamDataMasked` |
+| Kill-switch | `OPSGATE_PROXY_HTTP2=0` → h1 only | health `http2` |
+| Docs | PROXY-PROD / RUNBOOK | |
+
+## 12. Suite recommandée
+
+1. MSI : Node portable embarqué (option)  
+2. Firefox MV3  
+3. Chrome Web Store / MDM force-install  
+4. Redis pour rate-limit multi-instance  
+5. OIDC : JIT admin, JWKS verify, `sso_enforce`, SAML  
+6. H2 : HPACK decode (scan headers) si besoin terrain  
 
 Détail : `docs/V2-BACKLOG.md` · `docs/architecture/PLATFORM-v2.md`.
 
