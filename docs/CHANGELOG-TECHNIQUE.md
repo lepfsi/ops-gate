@@ -225,13 +225,24 @@ Prod future : services Windows / silent scripts ; pas 3 terminaux ouverts.
 | Scripts | `run-proxy.cmd` / `opsgate-proxy.cmd` / post-install préfèrent runtime | |
 | Opt-out | `-SkipEmbeddedNode` | stage sans Node |
 
-## 13. Suite recommandée
+## 13. V2 P1 suite — Multi-tenant Redis + quotas étendus (16 juillet 2026)
 
-1. Firefox MV3  
-2. Chrome Web Store / MDM force-install  
-3. Redis pour rate-limit multi-instance  
+| Sujet | Détail | Fichiers |
+|-------|--------|----------|
+| Redis optionnel | RESP sans npm ; `OPSGATE_REDIS_URL` | `packages/api/src/redis.ts` |
+| Rate-limit partagé | login, OIDC, events/org → Redis ou mémoire | `rate-limit.ts` |
+| Quotas | day + **minute** + **maxAgents** | types, app enroll/events, console |
+| Env | `OPSGATE_RATE_EVENTS_PER_MIN` | events/batch |
+| Health | `rate_limit_backend`, `redis` | `/health` |
+| Docs | `MULTI-TENANT-QUOTAS.md` | |
+
+## 14. Suite recommandée
+
+1. RLS Postgres (multi-tenant dur)  
+2. Firefox MV3  
+3. Chrome Web Store / MDM force-install  
 4. OIDC : JIT admin, JWKS verify, `sso_enforce`, SAML  
-5. H2 : HPACK decode (scan headers) si besoin terrain  
+5. H2 : HPACK decode si besoin terrain  
 
 Détail : `docs/V2-BACKLOG.md` · `docs/architecture/PLATFORM-v2.md`.
 

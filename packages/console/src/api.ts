@@ -242,7 +242,11 @@ export type MonitoringSettings = {
   /** SIEM / Syslog (V2 P0) */
   siem?: SiEmSettings
   proxy?: { enabled: boolean; mode: "observe" | "enforce" }
-  quotas?: { maxEventsPerDay: number }
+  quotas?: {
+    maxEventsPerDay: number
+    maxEventsPerMinute?: number
+    maxAgents?: number
+  }
 }
 
 export type PackListItem = {

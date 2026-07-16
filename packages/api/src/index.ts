@@ -35,6 +35,17 @@ async function main() {
       "[opsgate-api] store=postgres — données durables (volume Docker opsgate_pg_data)"
     )
   }
+  const redisUrl =
+    process.env.OPSGATE_REDIS_URL?.trim() || process.env.REDIS_URL?.trim()
+  if (redisUrl) {
+    console.log(
+      "[opsgate-api] Redis configuré — rate-limit/quotas multi-instance (fallback mémoire si down)"
+    )
+  } else {
+    console.log(
+      "[opsgate-api] Rate-limit/quotas = mémoire process (set OPSGATE_REDIS_URL pour multi-instance)"
+    )
+  }
 
   serve({ fetch: app.fetch, port, hostname: "127.0.0.1" })
 }

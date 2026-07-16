@@ -61,13 +61,18 @@ export function createApp() {
     })
   )
 
-  app.get("/health", (c) =>
-    c.json({
+  app.get("/health", async (c) => {
+    const { redisStatus } = await import("./redis")
+    const { rateLimitBackend } = await import("./rate-limit")
+    const redis = redisStatus()
+    return c.json({
       ok: true,
       service: "opsgate-api",
       version: "1.2.0",
       ts: new Date().toISOString(),
       store: getStore().kind,
+      rate_limit_backend: await rateLimitBackend(),
+      redis,
       features: [
         "enroll",
         "config",
@@ -82,10 +87,12 @@ export function createApp() {
         "console-auth",
         "siem-syslog",
         "prometheus-metrics",
-        "security-report-pdf"
+        "security-report-pdf",
+        "redis-rate-limit",
+        "multi-tenant-quotas"
       ]
     })
-  )
+  })
 
   /**
    * Prometheus scrape endpoint (V2 P0).
@@ -171,6 +178,37 @@ export function createApp() {
 
     const policy = await store.getPolicy(org.id)
     if (!policy) return c.json({ error: "policy_missing" }, 500)
+
+    // Quota max agents (multi-tenant) — sauf re-enroll même fingerprint
+    {
+      const { mergeMonitoringSettings } = await import("./types")
+      const mon = mergeMonitoringSettings(org.monitoring)
+      const maxAgents = mon.quotas?.maxAgents ?? 0
+      if (maxAgents > 0) {
+        const existing = await store.listAgents(org.id)
+        const fp =
+          body.device_fingerprint ||
+          (body.device_type === "proxy"
+            ? `proxy:${body.host_name || "local"}:${org.id.slice(0, 8)}`
+            : undefined)
+        const isReenroll =
+          !!fp &&
+          existing.some(
+            (a) => a.deviceFingerprint && a.deviceFingerprint === fp
+          )
+        if (!isReenroll && existing.length >= maxAgents) {
+          return c.json(
+            {
+              error: "quota_agents_exceeded",
+              max: maxAgents,
+              used: existing.length,
+              message: `Quota agents atteint (${existing.length}/${maxAgents}).`
+            },
+            429
+          )
+        }
+      }
+    }
 
     const agentToken = newToken()
     const isProxy = body.device_type === "proxy"
@@ -504,15 +542,63 @@ export function createApp() {
         reason: "log_categories_filtered_all"
       })
     }
-    // Quota multi-tenant (events/jour)
+    // Quotas multi-tenant (events/min + events/jour) + rate limit org
     {
       const orgQ = await store.getOrg(agent.orgId)
       const { mergeMonitoringSettings } = await import("./types")
       const monQ = mergeMonitoringSettings(orgQ?.monitoring)
+      const {
+        checkAndIncrEventQuota,
+        checkAndIncrEventMinuteQuota,
+        rateLimitCheck
+      } = await import("./rate-limit")
+      // Rate limit global events/org (env)
+      const evPerMinEnv = Number(
+        process.env.OPSGATE_RATE_EVENTS_PER_MIN || 0
+      )
+      if (evPerMinEnv > 0) {
+        const rl = await rateLimitCheck(
+          `events:${agent.orgId}`,
+          evPerMinEnv,
+          60_000
+        )
+        if (!rl.ok) {
+          return c.json(
+            {
+              error: "rate_limited",
+              retry_after_sec: rl.retryAfterSec,
+              message: "Trop d’events pour cette org. Réessayez plus tard."
+            },
+            429
+          )
+        }
+      }
+      const maxMin = monQ.quotas?.maxEventsPerMinute ?? 0
+      if (maxMin > 0) {
+        const qMin = await checkAndIncrEventMinuteQuota(
+          agent.orgId,
+          toStore.length,
+          maxMin
+        )
+        if (!qMin.ok) {
+          return c.json(
+            {
+              error: "quota_exceeded_minute",
+              used: qMin.used,
+              max: qMin.max,
+              message: `Quota burst atteint (${qMin.used}/${qMin.max} events/min).`
+            },
+            429
+          )
+        }
+      }
       const max = monQ.quotas?.maxEventsPerDay ?? 0
       if (max > 0) {
-        const { checkAndIncrEventQuota } = await import("./rate-limit")
-        const q = checkAndIncrEventQuota(agent.orgId, toStore.length, max)
+        const q = await checkAndIncrEventQuota(
+          agent.orgId,
+          toStore.length,
+          max
+        )
         if (!q.ok) {
           return c.json(
             {
@@ -718,7 +804,7 @@ export function createApp() {
       c.req.header("x-real-ip") ||
       "local"
     const { rateLimitCheck } = await import("./rate-limit")
-    const rl = rateLimitCheck(
+    const rl = await rateLimitCheck(
       `login:${ip}`,
       Number(process.env.OPSGATE_RATE_LOGIN_PER_MIN || 30),
       60_000
@@ -1077,7 +1163,7 @@ export function createApp() {
       c.req.header("x-real-ip") ||
       "local"
     const { rateLimitCheck } = await import("./rate-limit")
-    const rl = rateLimitCheck(
+    const rl = await rateLimitCheck(
       `oidc:${ip}`,
       Number(process.env.OPSGATE_RATE_LOGIN_PER_MIN || 30),
       60_000

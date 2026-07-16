@@ -5,7 +5,8 @@ Mis à jour : 16 juillet 2026
 ## Où on en est (jalon)
 
 **V1.x / pré-V2 terrain** : proxy MITM multi-IA + soft-block, rapports PDF, docs DSI, maintenance agents, logs proxy toggle.  
-**Prochaine brique V2 recommandée** : **observabilité entreprise (Syslog/SIEM + Prometheus/Grafana)** — c’est le levier DSI le plus immédiat après le data-plane proxy.
+**Jalon actuel** : P0 observabilité + P1 proxy/SSO/MFA/multi-tenant (sauf RLS) livrés.  
+**Prochaine brique** : RLS Postgres **ou** P2 Firefox MV3 (selon besoin DSI vs distribution).
 
 Voir le journal détaillé : [`CHANGELOG-TECHNIQUE.md`](./CHANGELOG-TECHNIQUE.md).
 
@@ -17,7 +18,7 @@ Voir le journal détaillé : [`CHANGELOG-TECHNIQUE.md`](./CHANGELOG-TECHNIQUE.md
 | **P0 ✅** | **Métriques + Grafana** | **Livré** : `GET /metrics`, counters + gauges multi-org, dashboard `docs/grafana/opsgate-dashboard.json`. |
 | **P1 ✅** | **Proxy prod** | **Livré** : service/tâche, PAC/GPO, soft-mask on-wire, MSI + **Node portable**, HTTP/2 stream-aware. |
 | **P1 ✅** | **SSO + MFA** | **Livré** : MFA TOTP + OIDC Authorization Code+PKCE (`/auth/oidc/start|callback`, mapping email→admin, bouton console). Reste optionnel : JIT, JWKS, WebAuthn, SAML, `sso_enforce`. |
-| **P1 ✅ partiel** | **Multi-tenant prod** | **Livré** : rate limit login, quota events/jour. Reste : Redis multi-instance, RLS, quotas étendus. |
+| **P1 ✅ partiel** | **Multi-tenant prod** | **Livré** : rate-limit login/OIDC/events, quotas day+minute+agents, **Redis optionnel** multi-instance. Reste : RLS Postgres, isolation secrets/org. |
 | **P2** | **Multi-navigateur** | Chromium OK. **Firefox** MV3 puis Safari. |
 | **P2** | **Chrome Web Store** + force-install MDM | Distribution + ExtensionInstallForcelist |
 | **P2** | **LDAP / AD sync** | Champs prêts ; sync groupes → policy |
