@@ -13,8 +13,8 @@ Voir le journal détaillé : [`CHANGELOG-TECHNIQUE.md`](./CHANGELOG-TECHNIQUE.md
 
 | Prio | Item | Notes |
 |------|------|--------|
-| **P0** | **SIEM / Syslog** | Events temps réel : syslog UDP/TCP (RFC 5424), CEF/LEEF optionnel. Config org : host, port, facility, format. |
-| **P0** | **Métriques + Grafana** | `/metrics` Prometheus : online/stale/offline, events/min, blocks, seats. Dashboard JSON Grafana. |
+| **P0 ✅** | **SIEM / Syslog** | **Livré** : UDP/TCP, RFC 5424 + CEF, config org console Monitoring. Voir `siem.ts` + `docs/grafana/README.md`. |
+| **P0 ✅** | **Métriques + Grafana** | **Livré** : `GET /metrics`, counters + gauges multi-org, dashboard `docs/grafana/opsgate-dashboard.json`. |
 | **P1** | **Proxy prod** | Suite P3 : **MSI / service Windows**, soft-mask on wire, HTTP/2 stream-aware, PAC/GPO enterprise. Soft-block par requête **déjà** en V1.x. |
 | **P1** | **SSO + MFA** | SAML/OIDC + TOTP/WebAuthn console — PLATFORM-v2 |
 | **P1** | **Multi-tenant prod** | Isolation `org_id`, quotas, rate limits |

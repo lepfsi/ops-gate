@@ -1,0 +1,167 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "type": "stat",
+      "title": "API up",
+      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 0 },
+      "id": 1,
+      "targets": [
+        {
+          "expr": "opsgate_up",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "type": "value", "options": { "1": { "text": "UP", "color": "green" }, "0": { "text": "DOWN", "color": "red" } } }
+          ]
+        }
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Agents total",
+      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 0 },
+      "id": 2,
+      "targets": [
+        { "expr": "sum(opsgate_agents{status=\"total\"})", "refId": "A" }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Online",
+      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 0 },
+      "id": 3,
+      "targets": [
+        { "expr": "sum(opsgate_agents{status=\"online\"})", "refId": "A" }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Blocks (sample)",
+      "gridPos": { "h": 4, "w": 4, "x": 12, "y": 0 },
+      "id": 4,
+      "targets": [
+        { "expr": "sum(opsgate_events_by_decision{decision=\"block\"})", "refId": "A" }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Events accepted (process)",
+      "gridPos": { "h": 4, "w": 4, "x": 16, "y": 0 },
+      "id": 5,
+      "targets": [
+        { "expr": "opsgate_events_accepted_total", "refId": "A" }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "SIEM forwarded",
+      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 0 },
+      "id": 6,
+      "targets": [
+        { "expr": "opsgate_events_forwarded_siem_total", "refId": "A" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Events accepted rate",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "id": 7,
+      "targets": [
+        {
+          "expr": "rate(opsgate_events_accepted_total[5m])",
+          "legendFormat": "events/s",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Events by decision (rate)",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "id": 8,
+      "targets": [
+        {
+          "expr": "rate(opsgate_events_accepted_by_decision_total[5m])",
+          "legendFormat": "{{decision}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "bargauge",
+      "title": "Agents by status",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+      "id": 9,
+      "targets": [
+        {
+          "expr": "sum by (status) (opsgate_agents{status!=\"total\"})",
+          "legendFormat": "{{status}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "bargauge",
+      "title": "Stored events by decision",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
+      "id": 10,
+      "targets": [
+        {
+          "expr": "sum by (decision) (opsgate_events_by_decision)",
+          "legendFormat": "{{decision}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "table",
+      "title": "Seats / licensed",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 20 },
+      "id": 11,
+      "targets": [
+        {
+          "expr": "opsgate_seats",
+          "format": "table",
+          "instant": true,
+          "refId": "A"
+        },
+        {
+          "expr": "opsgate_seats_used",
+          "format": "table",
+          "instant": true,
+          "refId": "B"
+        },
+        {
+          "expr": "opsgate_agents_licensed",
+          "format": "table",
+          "instant": true,
+          "refId": "C"
+        },
+        {
+          "expr": "opsgate_agents_unlicensed",
+          "format": "table",
+          "instant": true,
+          "refId": "D"
+        }
+      ]
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": ["opsgate", "dailyops", "dlp"],
+  "templating": { "list": [] },
+  "time": { "from": "now-6h", "to": "now" },
+  "timezone": "browser",
+  "title": "OpsGate — Security Fleet",
+  "uid": "opsgate-security-fleet",
+  "version": 1
+}

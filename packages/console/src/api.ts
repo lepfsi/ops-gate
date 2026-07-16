@@ -211,6 +211,16 @@ export type LicenseDisplay = {
   licenseKeyFingerprint?: string | null
 }
 
+export type SiEmSettings = {
+  enabled: boolean
+  protocol: "udp" | "tcp"
+  host: string
+  port: number
+  facility: number
+  format: "rfc5424" | "cef"
+  appName?: string
+}
+
 export type MonitoringSettings = {
   onlineMs: number
   offlineLongMs: number
@@ -229,6 +239,9 @@ export type MonitoringSettings = {
   logCategories?: LogCategories
   notifications?: NotificationSettings
   licenseDisplay?: LicenseDisplay
+  /** SIEM / Syslog (V2 P0) */
+  siem?: SiEmSettings
+  proxy?: { enabled: boolean; mode: "observe" | "enforce" }
 }
 
 export type PackListItem = {

@@ -947,6 +947,13 @@ export class PgStore implements OpsGateStore {
     return rows[0] ? rowOrg(rows[0]) : undefined
   }
 
+  async listOrgs() {
+    const { rows } = await this.pool.query(
+      `SELECT * FROM organizations ORDER BY created_at ASC NULLS LAST`
+    )
+    return rows.map(rowOrg)
+  }
+
   async setOrgLicenseSeats(orgId: string, seats: number) {
     const n = Math.max(0, Math.floor(seats) || 0)
     await this.pool.query(
