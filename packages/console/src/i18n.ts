@@ -58,6 +58,15 @@ const fr: Dict = {
   "login.attemptsLeft": "Il vous reste {n} essai(s).",
   "login.locked":
     "Compte verrouillé après trop d’échecs. Un administrateur principal doit le déverrouiller.",
+  "login.sso": "Se connecter avec SSO (entreprise)",
+  "login.ssoForce": "SSO — forcer la déconnexion de l’autre session",
+  "login.orPassword": "— ou mot de passe —",
+  "login.ssoNoAdmin":
+    "Aucun compte admin OpsGate pour {email}. Créez l’admin avec le même email que l’IdP.",
+  "login.ssoDomain": "Domaine non autorisé pour le SSO ({email}).",
+  "login.ssoNotConfigured": "SSO OIDC non configuré sur l’API.",
+  "login.ssoRateLimited": "Trop de tentatives SSO. Réessayez plus tard.",
+  "login.ssoError": "Échec SSO ({code}){detail}",
 
   // ── Top bar ──
   "top.apply": "Appliquer",
@@ -440,6 +449,15 @@ const en: Dict = {
   "login.attemptsLeft": "You have {n} attempt(s) remaining.",
   "login.locked":
     "Account locked after too many failed attempts. A principal admin must unlock it.",
+  "login.sso": "Sign in with SSO (enterprise)",
+  "login.ssoForce": "SSO — force sign-out of the other session",
+  "login.orPassword": "— or password —",
+  "login.ssoNoAdmin":
+    "No OpsGate admin account for {email}. Create an admin with the same email as the IdP.",
+  "login.ssoDomain": "Domain not allowed for SSO ({email}).",
+  "login.ssoNotConfigured": "OIDC SSO is not configured on the API.",
+  "login.ssoRateLimited": "Too many SSO attempts. Try again later.",
+  "login.ssoError": "SSO failed ({code}){detail}",
 
   // ── Top bar ──
   "top.apply": "Apply",

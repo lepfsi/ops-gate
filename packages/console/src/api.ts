@@ -488,8 +488,25 @@ export const api = {
       enabled: boolean
       issuer: string | null
       client_id: string | null
+      redirect_uri?: string | null
+      scopes?: string
+      start_path?: string
+      callback_path?: string
+      flow?: string
       note?: string
     }>("/v1/auth/oidc/status", { auth: false }),
+
+  /** URL absolue pour démarrer le flow OIDC (navigateur). */
+  oidcStartUrl: (opts?: { force?: boolean; returnTo?: string }) => {
+    const base = getApiBase().replace(/\/$/, "")
+    const q = new URLSearchParams()
+    const returnTo =
+      opts?.returnTo ||
+      `${window.location.origin}${window.location.pathname || "/"}`
+    q.set("return_to", returnTo)
+    if (opts?.force) q.set("force", "1")
+    return `${base}/v1/auth/oidc/start?${q.toString()}`
+  },
 
   logout: (reason?: "manual" | "idle") =>
     request<{ ok: boolean }>("/v1/auth/logout", {

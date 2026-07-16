@@ -1022,20 +1022,239 @@ export function createApp() {
     return c.json({ ok: true, mfa_enabled: false })
   })
 
-  /** Fondations SSO OIDC (V2 P1) — statut + URL authorize si configuré */
+  /**
+   * SSO OIDC — Authorization Code + PKCE (V2 P1 complet).
+   * Env : OPSGATE_OIDC_ISSUER, CLIENT_ID, CLIENT_SECRET, REDIRECT_URI,
+   *       OPSGATE_CONSOLE_URL, OPSGATE_OIDC_ALLOWED_DOMAINS (opt).
+   */
   v1.get("/auth/oidc/status", async (c) => {
-    const issuer = process.env.OPSGATE_OIDC_ISSUER?.trim()
-    const clientId = process.env.OPSGATE_OIDC_CLIENT_ID?.trim()
-    const enabled = !!(issuer && clientId)
+    const { getOidcConfig } = await import("./oidc")
+    const cfg = getOidcConfig()
+    const enabled = !!cfg
     return c.json({
       enabled,
-      issuer: enabled ? issuer : null,
-      client_id: enabled ? clientId : null,
-      scopes: "openid profile email",
+      issuer: cfg?.issuer ?? null,
+      client_id: cfg?.clientId ?? null,
+      redirect_uri: cfg?.redirectUri ?? null,
+      scopes: cfg?.scopes ?? "openid profile email",
+      start_path: "/v1/auth/oidc/start",
+      callback_path: "/v1/auth/oidc/callback",
+      flow: "authorization_code_pkce",
       note: enabled
-        ? "OIDC configuré côté serveur. Flow authorize à brancher sur le provider."
-        : "Définir OPSGATE_OIDC_ISSUER + OPSGATE_OIDC_CLIENT_ID (+ SECRET) pour activer."
+        ? "OIDC prêt : GET /v1/auth/oidc/start → IdP → callback → session console."
+        : "Définir OPSGATE_OIDC_ISSUER + OPSGATE_OIDC_CLIENT_ID (+ SECRET, REDIRECT_URI)."
     })
+  })
+
+  /** Démarre le flow OIDC (redirect navigateur vers l’IdP). */
+  v1.get("/auth/oidc/start", async (c) => {
+    const {
+      getOidcConfig,
+      discoverOidc,
+      generateState,
+      generateCodeVerifier,
+      generateNonce,
+      storePending,
+      buildAuthorizeUrl,
+      defaultConsoleReturnTo,
+      sanitizeReturnTo,
+      consoleRedirectWithError
+    } = await import("./oidc")
+    const cfg = getOidcConfig()
+    const returnTo = sanitizeReturnTo(
+      c.req.query("return_to") || defaultConsoleReturnTo()
+    )
+    const force = c.req.query("force") === "1" || c.req.query("force") === "true"
+    if (!cfg) {
+      return c.redirect(
+        consoleRedirectWithError(returnTo, "oidc_not_configured"),
+        302
+      )
+    }
+    // Rate limit par IP (même bucket que login)
+    const ip =
+      c.req.header("x-forwarded-for")?.split(",")[0]?.trim() ||
+      c.req.header("x-real-ip") ||
+      "local"
+    const { rateLimitCheck } = await import("./rate-limit")
+    const rl = rateLimitCheck(
+      `oidc:${ip}`,
+      Number(process.env.OPSGATE_RATE_LOGIN_PER_MIN || 30),
+      60_000
+    )
+    if (!rl.ok) {
+      return c.redirect(
+        consoleRedirectWithError(returnTo, "rate_limited"),
+        302
+      )
+    }
+    try {
+      const discovery = await discoverOidc(cfg.issuer)
+      const pending = {
+        state: generateState(),
+        codeVerifier: generateCodeVerifier(),
+        nonce: generateNonce(),
+        returnTo,
+        force,
+        createdAt: Date.now()
+      }
+      storePending(pending)
+      const authorizeUrl = buildAuthorizeUrl(discovery, cfg, pending)
+      return c.redirect(authorizeUrl, 302)
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "oidc_start_failed"
+      return c.redirect(
+        consoleRedirectWithError(returnTo, "oidc_start_failed", msg),
+        302
+      )
+    }
+  })
+
+  /**
+   * Callback IdP : code → tokens → email claim → session admin.
+   * Redirige la console avec #opsgate_token=… (fragment).
+   */
+  v1.get("/auth/oidc/callback", async (c) => {
+    const {
+      getOidcConfig,
+      discoverOidc,
+      takePending,
+      exchangeCode,
+      decodeJwtPayload,
+      fetchUserInfo,
+      extractEmail,
+      mergeClaims,
+      isEmailDomainAllowed,
+      defaultConsoleReturnTo,
+      consoleRedirectWithToken,
+      consoleRedirectWithError
+    } = await import("./oidc")
+
+    const errQ = c.req.query("error")
+    const state = c.req.query("state") || ""
+    const code = c.req.query("code") || ""
+    const pending = state ? takePending(state) : null
+    const returnTo = pending?.returnTo || defaultConsoleReturnTo()
+
+    if (errQ) {
+      return c.redirect(
+        consoleRedirectWithError(
+          returnTo,
+          "idp_error",
+          c.req.query("error_description") || errQ
+        ),
+        302
+      )
+    }
+    if (!pending) {
+      return c.redirect(
+        consoleRedirectWithError(returnTo, "invalid_state"),
+        302
+      )
+    }
+    const cfg = getOidcConfig()
+    if (!cfg) {
+      return c.redirect(
+        consoleRedirectWithError(returnTo, "oidc_not_configured"),
+        302
+      )
+    }
+    if (!code) {
+      return c.redirect(
+        consoleRedirectWithError(returnTo, "missing_code"),
+        302
+      )
+    }
+
+    try {
+      const discovery = await discoverOidc(cfg.issuer)
+      const tokens = await exchangeCode({
+        discovery,
+        cfg,
+        code,
+        codeVerifier: pending.codeVerifier
+      })
+      let claims = tokens.id_token
+        ? decodeJwtPayload(tokens.id_token)
+        : {}
+      if (tokens.id_token && pending.nonce && claims) {
+        const payload = claims as { nonce?: string }
+        if (payload.nonce && payload.nonce !== pending.nonce) {
+          return c.redirect(
+            consoleRedirectWithError(returnTo, "nonce_mismatch"),
+            302
+          )
+        }
+      }
+      if (tokens.access_token) {
+        const ui = await fetchUserInfo(discovery, tokens.access_token)
+        claims = mergeClaims(claims, ui)
+      }
+      const email = extractEmail(claims)
+      if (!email) {
+        return c.redirect(
+          consoleRedirectWithError(returnTo, "email_claim_missing"),
+          302
+        )
+      }
+      if (!isEmailDomainAllowed(email)) {
+        return c.redirect(
+          consoleRedirectWithError(returnTo, "domain_not_allowed", email),
+          302
+        )
+      }
+
+      const result = await store.createAdminSessionOidc(email, {
+        force: pending.force
+      })
+      if (!result.ok) {
+        if (result.error === "session_already_active") {
+          return c.redirect(
+            consoleRedirectWithError(
+              returnTo,
+              "session_already_active",
+              email
+            ),
+            302
+          )
+        }
+        return c.redirect(
+          consoleRedirectWithError(returnTo, result.error, email),
+          302
+        )
+      }
+
+      await audit(
+        {
+          admin: result.admin,
+          orgId: result.session.orgId
+        },
+        "login",
+        result.forced
+          ? "Connexion console SSO OIDC (prise de contrôle)"
+          : "Connexion console SSO OIDC",
+        {
+          via: "oidc",
+          issuer: cfg.issuer,
+          sub: (claims as { sub?: string }).sub || undefined
+        }
+      )
+
+      return c.redirect(
+        consoleRedirectWithToken(returnTo, {
+          token: result.session.token,
+          expiresAt: result.session.expiresAt,
+          email: result.admin.email
+        }),
+        302
+      )
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "oidc_callback_failed"
+      return c.redirect(
+        consoleRedirectWithError(returnTo, "oidc_callback_failed", msg),
+        302
+      )
+    }
   })
 
   v1.post("/auth/logout", async (c) => {

@@ -244,6 +244,22 @@ export interface OpsGateStore {
       }
     | { ok: false; error: string }
   >
+  /**
+   * Login console via SSO OIDC (email claim IdP → admin existant).
+   * Pas de mot de passe ni MFA local (l’IdP a déjà authentifié).
+   */
+  createAdminSessionOidc(
+    email: string,
+    opts?: { force?: boolean }
+  ): Promise<
+    | {
+        ok: true
+        session: AdminSession
+        admin: OrgAdmin
+        forced?: boolean
+      }
+    | { ok: false; error: string }
+  >
   resolveAdminSession(
     token: string
   ): Promise<{ session: AdminSession; admin: OrgAdmin } | undefined>

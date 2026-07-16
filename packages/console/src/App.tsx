@@ -228,6 +228,23 @@ export default function App() {
 
   useEffect(() => {
     void (async () => {
+      // SSO OIDC callback : token en fragment #opsgate_token=…
+      try {
+        const raw = window.location.hash.replace(/^#/, "")
+        if (raw && raw.includes("opsgate_token=")) {
+          const params = new URLSearchParams(raw)
+          const tok = params.get("opsgate_token")
+          if (tok) {
+            setToken(tok)
+            // Nettoyer le hash (ne pas laisser le token dans l’historique)
+            const clean =
+              window.location.pathname + window.location.search
+            window.history.replaceState(null, "", clean)
+          }
+        }
+      } catch {
+        /* ignore */
+      }
       if (!getToken()) {
         setAuthChecking(false)
         return
@@ -3271,6 +3288,10 @@ function LoginScreen({
   const [busy, setBusy] = useState(false)
   /** Session concurrente détectée → proposer force login */
   const [canForce, setCanForce] = useState(false)
+  /** Session concurrente via SSO OIDC */
+  const [canForceOidc, setCanForceOidc] = useState(false)
+  const [oidcEnabled, setOidcEnabled] = useState(false)
+  const [oidcIssuer, setOidcIssuer] = useState<string | null>(null)
   /** null | email | otp */
   const [resetStep, setResetStep] = useState<null | "email" | "otp">(null)
   const [resetEmail, setResetEmail] = useState("")
@@ -3278,6 +3299,63 @@ function LoginScreen({
   const [otpNew, setOtpNew] = useState("")
   const [devOtp, setDevOtp] = useState<string | null>(null)
   const [advanced, setAdvanced] = useState(false)
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        setApiBase(apiBase)
+        const st = await api.oidcStatus()
+        setOidcEnabled(!!st.enabled)
+        setOidcIssuer(st.issuer)
+      } catch {
+        setOidcEnabled(false)
+      }
+    })()
+  }, [apiBase])
+
+  // Erreurs SSO renvoyées en fragment après callback IdP
+  useEffect(() => {
+    try {
+      const raw = window.location.hash.replace(/^#/, "")
+      if (!raw || !raw.includes("opsgate_oidc_error=")) return
+      const params = new URLSearchParams(raw)
+      const code = params.get("opsgate_oidc_error") || ""
+      const detail = params.get("opsgate_oidc_detail") || ""
+      const clean = window.location.pathname + window.location.search
+      window.history.replaceState(null, "", clean)
+      if (code === "session_already_active") {
+        setCanForceOidc(true)
+        if (detail.includes("@")) setEmail(detail)
+        setErr(t("login.sessionActive"))
+      } else if (code === "admin_not_found") {
+        setErr(t("login.ssoNoAdmin", { email: detail || "?" }))
+      } else if (code === "account_locked") {
+        setErr(t("login.locked"))
+      } else if (code === "domain_not_allowed") {
+        setErr(t("login.ssoDomain", { email: detail || "?" }))
+      } else if (code === "oidc_not_configured") {
+        setErr(t("login.ssoNotConfigured"))
+      } else if (code === "rate_limited") {
+        setErr(t("login.ssoRateLimited"))
+      } else {
+        setErr(
+          t("login.ssoError", {
+            code: code || "unknown",
+            detail: detail ? `: ${detail}` : ""
+          })
+        )
+      }
+    } catch {
+      /* ignore */
+    }
+  }, [t])
+
+  const startOidc = (force?: boolean) => {
+    setApiBase(apiBase)
+    setBusy(true)
+    setErr(null)
+    window.location.href = api.oidcStartUrl({ force: !!force })
+  }
 
   return (
     <div className="login-shell">
@@ -3311,6 +3389,40 @@ function LoginScreen({
                 onClick={onSaveApi}>
                 OK
               </button>
+            </div>
+          </>
+        )}
+        {oidcEnabled && (
+          <>
+            <button
+              className="btn"
+              type="button"
+              style={{ marginTop: 4, width: "100%" }}
+              disabled={busy}
+              onClick={() => startOidc(false)}
+              title={oidcIssuer || undefined}>
+              {t("login.sso")}
+            </button>
+            {canForceOidc && (
+              <button
+                className="btn secondary"
+                type="button"
+                style={{ marginTop: 8, width: "100%" }}
+                disabled={busy}
+                onClick={() => startOidc(true)}>
+                {t("login.ssoForce")}
+              </button>
+            )}
+            <div
+              className="login-or muted"
+              style={{
+                textAlign: "center",
+                margin: "14px 0 6px",
+                fontSize: 12,
+                fontWeight: 600,
+                letterSpacing: "0.04em"
+              }}>
+              {t("login.orPassword")}
             </div>
           </>
         )}

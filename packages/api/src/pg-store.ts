@@ -1571,9 +1571,40 @@ export class PgStore implements OpsGateStore {
         return { ok: false as const, error: "mfa_invalid" }
       }
     }
-    // Succès : reset compteur échecs
+    return this.issueAdminSession(admin, opts?.force)
+  }
+
+  async createAdminSessionOidc(
+    email: string,
+    opts?: { force?: boolean }
+  ) {
+    const emailNorm = email.trim().toLowerCase()
+    const { rows } = await this.pool.query(
+      `SELECT a.*
+       FROM org_admins a
+       INNER JOIN organizations o ON o.id = a.org_id
+       WHERE lower(a.email) = $1
+         AND a.active = TRUE
+       ORDER BY CASE WHEN o.is_personal THEN 1 ELSE 0 END ASC,
+                a.is_principal DESC,
+                a.created_at ASC
+       LIMIT 1`,
+      [emailNorm]
+    )
+    if (!rows[0]) return { ok: false as const, error: "admin_not_found" }
+    const admin = rowAdmin(rows[0])
+    if (admin.lockedAt) {
+      return { ok: false as const, error: "account_locked" }
+    }
+    if (!admin.isPrincipal && !admin.permissions.includes("console_access")) {
+      return { ok: false as const, error: "no_console_access" }
+    }
+    // SSO : MFA local non exigé
+    return this.issueAdminSession(admin, opts?.force)
+  }
+
+  private async issueAdminSession(admin: OrgAdmin, force?: boolean) {
     await this.clearAdminLoginFailures(admin.id)
-    // Purge : expirées OU idle serveur (last_activity / created)
     const idleSec = Math.floor(PgStore.SESSION_IDLE_MS / 1000)
     await this.pool.query(
       `DELETE FROM admin_sessions
@@ -1589,7 +1620,7 @@ export class PgStore implements OpsGateStore {
     )
     let forced = false
     if (active[0]) {
-      if (opts?.force) {
+      if (force) {
         await this.pool.query(`DELETE FROM admin_sessions WHERE admin_id = $1`, [
           admin.id
         ])
