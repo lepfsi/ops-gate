@@ -21,6 +21,7 @@ import {
   flushPendingEvents,
   getJournal
 } from "~lib/storage"
+import { ext } from "~lib/browser-api"
 import type { JournalEntry, OpsGateMessage } from "~types"
 
 export {}
@@ -29,13 +30,13 @@ export {}
 const SYNC_ALARM = "opsgate-sync-config"
 const SYNC_PERIOD_MIN = 2
 
-chrome.runtime.onInstalled.addListener(() => {
+ext.runtime.onInstalled.addListener(() => {
   console.log("[OpsGate] Extension installée / mise à jour")
   void ensureSyncAlarm()
   void maybeAutoSync()
 })
 
-chrome.runtime.onStartup.addListener(() => {
+ext.runtime.onStartup.addListener(() => {
   void ensureSyncAlarm()
   void maybeAutoSync()
 })
@@ -43,7 +44,7 @@ chrome.runtime.onStartup.addListener(() => {
 initRulesMemoryListener()
 void ensureSyncAlarm()
 
-chrome.alarms.onAlarm.addListener((alarm) => {
+ext.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === SYNC_ALARM) {
     void maybeAutoSync()
   }
@@ -51,7 +52,7 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 
 async function ensureSyncAlarm() {
   try {
-    await chrome.alarms.create(SYNC_ALARM, {
+    await ext.alarms.create(SYNC_ALARM, {
       periodInMinutes: SYNC_PERIOD_MIN
     })
   } catch {
@@ -77,7 +78,7 @@ async function maybeAutoSync() {
   }
 }
 
-chrome.runtime.onMessage.addListener(
+ext.runtime.onMessage.addListener(
   (message: OpsGateMessage, _sender, sendResponse) => {
     handleMessage(message)
       .then(sendResponse)
@@ -85,6 +86,7 @@ chrome.runtime.onMessage.addListener(
         console.error("[OpsGate] Message error:", err)
         sendResponse({ ok: false, error: String(err) })
       })
+    // true = réponse async (Chrome + Firefox MV3)
     return true
   }
 )
@@ -92,7 +94,7 @@ chrome.runtime.onMessage.addListener(
 async function handleMessage(message: OpsGateMessage): Promise<unknown> {
   switch (message.type) {
     case "PING":
-      return { ok: true, version: chrome.runtime.getManifest().version }
+      return { ok: true, version: ext.runtime.getManifest().version }
 
     case "DETECT": {
       const { detections } = await detectText(message.text ?? "")

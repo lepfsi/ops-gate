@@ -7,6 +7,7 @@ import {
   setCachedRulesPack,
   setSettings
 } from "~lib/agent-store"
+import { ext } from "~lib/browser-api"
 import { fetchApiPublicKey, verifyRulesPack } from "~lib/pack-verify"
 import type { CachedRulesPack, OpsGateSettings } from "~types"
 
@@ -79,12 +80,12 @@ function apiUrl(base: string, path: string): string {
 }
 
 async function getEventQueue(): Promise<Record<string, unknown>[]> {
-  const data = await chrome.storage.local.get(EVENT_QUEUE_KEY)
+  const data = await ext.storage.local.get(EVENT_QUEUE_KEY)
   return (data[EVENT_QUEUE_KEY] as Record<string, unknown>[]) || []
 }
 
 async function setEventQueue(events: Record<string, unknown>[]) {
-  await chrome.storage.local.set({
+  await ext.storage.local.set({
     [EVENT_QUEUE_KEY]: events.slice(-MAX_QUEUE)
   })
 }
@@ -156,7 +157,7 @@ export async function enrollAgent(
         personal_license_key: isPersonal
           ? personalLicenseKey?.trim()
           : undefined,
-        app_version: chrome.runtime.getManifest().version,
+        app_version: ext.runtime.getManifest().version,
         device_fingerprint: fingerprint
       })
     })

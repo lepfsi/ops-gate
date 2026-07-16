@@ -4,7 +4,7 @@
 
 **Version : 1.2.0 (V1 early-customer)** — voir [`docs/RELEASE-v1.md`](docs/RELEASE-v1.md) · pilote [`docs/RELEASE-v1.1.md`](docs/RELEASE-v1.1.md)
 
-OpsGate est une extension navigateur (Chrome / Edge, Manifest V3) de **Data Loss Prevention légère** pour ChatGPT, Claude et Gemini, avec control plane optionnel (API + Console) et **proxy local** multi-IA.
+OpsGate est une extension navigateur (**Chrome / Edge / Firefox**, Manifest V3) de **Data Loss Prevention légère** pour ChatGPT, Claude et Gemini, avec control plane optionnel (API + Console) et **proxy local** multi-IA.
 
 **Traces techniques (ne pas s’égarer)** : [`docs/CHANGELOG-TECHNIQUE.md`](docs/CHANGELOG-TECHNIQUE.md) · roadmap [`docs/V2-BACKLOG.md`](docs/V2-BACKLOG.md)
 
@@ -24,29 +24,39 @@ En mode local, tout le traitement est **local**. En mode org, seules des **méta
 
 ## Installer en dev / test
 
+### Chrome / Edge
+
 ```bash
 pnpm install
-pnpm build
+pnpm build:chrome
+# ou : pnpm build
 ```
 
-1. Ouvrir `chrome://extensions`
+1. Ouvrir `chrome://extensions` (ou `edge://extensions`)
 2. Mode développeur = ON
 3. **Charger l’extension non empaquetée**
-4. Choisir le dossier :
+4. Dossier : `build/chrome-mv3-prod`
 
+### Firefox (121+)
+
+```bash
+pnpm build:firefox
 ```
-build/chrome-mv3-prod
-```
+
+1. Ouvrir `about:debugging#/runtime/this-firefox`
+2. **Charger un module temporaire…**
+3. Fichier : `build/firefox-mv3-prod/manifest.json`
+
+Doc détaillée : [`docs/architecture/FIREFOX-MV3.md`](docs/architecture/FIREFOX-MV3.md)
 
 > Ne chargez **pas** la racine du repo.
 
 Hot reload :
 
 ```bash
-pnpm dev
+pnpm dev              # Chrome
+pnpm dev:firefox      # Firefox
 ```
-
-Puis charger `build/chrome-mv3-dev` (arrêter `pnpm dev` en cas d’erreur de package verrouillé).
 
 ## Tests de détection
 

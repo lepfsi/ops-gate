@@ -1,5 +1,6 @@
 import type { DetectionRule } from "@opsgate/engine"
 
+import { ext } from "~lib/browser-api"
 import type { CachedRulesPack, OpsGateSettings } from "~types"
 import { DEFAULT_SETTINGS } from "~types"
 
@@ -14,19 +15,19 @@ const INSTALL_ID_KEY = "opsGateInstallId"
  * quand le label change après rebuild.
  */
 export async function getOrCreateInstallId(): Promise<string> {
-  const data = await chrome.storage.local.get(INSTALL_ID_KEY)
+  const data = await ext.storage.local.get(INSTALL_ID_KEY)
   const existing = data[INSTALL_ID_KEY] as string | undefined
   if (existing && existing.length >= 8) return existing
   const id =
     typeof crypto !== "undefined" && "randomUUID" in crypto
       ? `ogf_${crypto.randomUUID()}`
       : `ogf_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 12)}`
-  await chrome.storage.local.set({ [INSTALL_ID_KEY]: id })
+  await ext.storage.local.set({ [INSTALL_ID_KEY]: id })
   return id
 }
 
 export async function getSettings(): Promise<OpsGateSettings> {
-  const data = await chrome.storage.local.get(SETTINGS_KEY)
+  const data = await ext.storage.local.get(SETTINGS_KEY)
   return { ...DEFAULT_SETTINGS, ...(data[SETTINGS_KEY] as Partial<OpsGateSettings>) }
 }
 
@@ -39,23 +40,23 @@ export async function setSettings(
   if (next.managedLockActive) {
     next.enabled = true
   }
-  await chrome.storage.local.set({ [SETTINGS_KEY]: next })
+  await ext.storage.local.set({ [SETTINGS_KEY]: next })
   return next
 }
 
 export async function getCachedRulesPack(): Promise<CachedRulesPack | null> {
-  const data = await chrome.storage.local.get(RULES_KEY)
+  const data = await ext.storage.local.get(RULES_KEY)
   return (data[RULES_KEY] as CachedRulesPack) ?? null
 }
 
 export async function setCachedRulesPack(
   pack: CachedRulesPack
 ): Promise<void> {
-  await chrome.storage.local.set({ [RULES_KEY]: pack })
+  await ext.storage.local.set({ [RULES_KEY]: pack })
 }
 
 export async function clearCloudState(): Promise<OpsGateSettings> {
-  await chrome.storage.local.remove(RULES_KEY)
+  await ext.storage.local.remove(RULES_KEY)
   return setSettings({
     mode: "local_only",
     orgId: undefined,
@@ -116,7 +117,7 @@ export async function refreshMemoryRules(): Promise<DetectionRule[] | null> {
 }
 
 export function initRulesMemoryListener() {
-  chrome.storage.onChanged.addListener((changes, area) => {
+  ext.storage.onChanged.addListener((changes, area) => {
     if (area !== "local") return
     if (changes[RULES_KEY] || changes[SETTINGS_KEY]) {
       void refreshMemoryRules()
