@@ -3030,6 +3030,245 @@ export function createApp() {
     return c.json({ ok: true, mode: "trial" })
   })
 
+  // ─── Vendor desk : émission de licences clients (DailyOps) ───────────
+  /**
+   * Auth vendor :
+   *  - header X-OpsGate-Vendor-Key = OPSGATE_VENDOR_LICENSE_SECRET | OPSGATE_LICENSE_SECRET
+   *  - OU principal console si OPSGATE_VENDOR_UI n'est pas off (défaut: on)
+   */
+  async function requireVendorAccess(c: {
+    req: { header: (n: string) => string | undefined }
+  }): Promise<
+    | {
+        ok: true
+        via: "key" | "principal"
+        gate?: { admin: OrgAdmin; orgId: string }
+      }
+    | { ok: false; status: 401 | 403; error: string }
+  > {
+    const vendorKey = (c.req.header("X-OpsGate-Vendor-Key") || "").trim()
+    const secret = (
+      process.env.OPSGATE_VENDOR_LICENSE_SECRET ||
+      process.env.OPSGATE_LICENSE_SECRET ||
+      ""
+    ).trim()
+    if (secret.length >= 8 && vendorKey && vendorKey === secret) {
+      return { ok: true, via: "key" }
+    }
+    const gate = await requireConsoleAuth(c, "manage_policies")
+    if (!gate.ok) {
+      return {
+        ok: false,
+        status: gate.status,
+        error: secret ? "vendor_key_or_principal_required" : gate.error
+      }
+    }
+    if (!gate.admin.isPrincipal) {
+      return { ok: false, status: 403 as const, error: "principal_only" }
+    }
+    const ui = (process.env.OPSGATE_VENDOR_UI || "1").toLowerCase().trim()
+    if (ui === "0" || ui === "false" || ui === "off" || ui === "no") {
+      return { ok: false, status: 403 as const, error: "vendor_ui_disabled" }
+    }
+    return {
+      ok: true,
+      via: "principal",
+      gate: { admin: gate.admin, orgId: gate.orgId }
+    }
+  }
+
+  /** Statut du bureau vendeur (onglet console) */
+  v1.get("/vendor/status", async (c) => {
+    const ui = (process.env.OPSGATE_VENDOR_UI || "1").toLowerCase().trim()
+    const uiOn = !(ui === "0" || ui === "false" || ui === "off" || ui === "no")
+    const secretConfigured = !!(
+      process.env.OPSGATE_VENDOR_LICENSE_SECRET ||
+      process.env.OPSGATE_LICENSE_SECRET
+    )
+    const gate = await requireConsoleAuth(c, "console_access")
+    const principal = gate.ok && !!gate.admin.isPrincipal
+    return c.json({
+      vendor_ui: uiOn,
+      available: uiOn && principal,
+      principal,
+      secret_configured: secretConfigured,
+      hint: uiOn
+        ? principal
+          ? "Émission de licences clients disponible (principal)."
+          : "Réservé à l’administrateur principal."
+        : "Désactivé (OPSGATE_VENDOR_UI=off)."
+    })
+  })
+
+  /** Liste des licences émises (vendeur) */
+  v1.get("/vendor/licenses", async (c) => {
+    const access = await requireVendorAccess(c)
+    if (!access.ok) return c.json({ error: access.error }, access.status)
+    const list = await store.listIssuedLicenses()
+    return c.json({
+      count: list.length,
+      licenses: list.map((l) => ({
+        id: l.id,
+        license_key: l.licenseKey,
+        org_code: l.orgCode,
+        company_name: l.companyName,
+        address: l.address,
+        contact_email: l.contactEmail,
+        seats: l.seats,
+        expires_at: l.expiresAt,
+        issued_at: l.issuedAt,
+        revoked_at: l.revokedAt || null,
+        status: l.revokedAt
+          ? "revoked"
+          : Date.parse(l.expiresAt) < Date.now()
+            ? "expired"
+            : "active"
+      }))
+    })
+  })
+
+  /**
+   * Émet une licence client OPS-XXXX-…
+   * Body: org_code, company_name, address?, contact_email, seats, expires_at?|years?,
+   *        provision_org? (crée tenant + admin si org absente)
+   */
+  v1.post("/vendor/licenses", async (c) => {
+    const access = await requireVendorAccess(c)
+    if (!access.ok) return c.json({ error: access.error }, access.status)
+    let body: {
+      org_code?: string
+      company_name?: string
+      address?: string
+      contact_email?: string
+      seats?: number
+      expires_at?: string
+      years?: number
+      provision_org?: boolean
+    }
+    try {
+      body = await c.req.json()
+    } catch {
+      return c.json({ error: "invalid_json" }, 400)
+    }
+    const orgCode = (body.org_code || "").trim().toUpperCase()
+    const companyName = (body.company_name || "").trim()
+    const contactEmail = (body.contact_email || "").trim().toLowerCase()
+    const address = (body.address || "").trim()
+    const seats = Math.max(0, Math.floor(Number(body.seats) || 0))
+    if (!orgCode || orgCode.length < 4) {
+      return c.json({ error: "org_code_required", hint: "ex. ACME-2026" }, 400)
+    }
+    if (!companyName) {
+      return c.json({ error: "company_name_required" }, 400)
+    }
+    if (!contactEmail || !contactEmail.includes("@")) {
+      return c.json({ error: "contact_email_required" }, 400)
+    }
+    if (seats < 1) {
+      return c.json({ error: "seats_min_1" }, 400)
+    }
+    let expiresAt = (body.expires_at || "").trim()
+    if (!expiresAt) {
+      const d = new Date()
+      d.setFullYear(d.getFullYear() + Math.max(1, Math.floor(body.years || 1)))
+      expiresAt = d.toISOString()
+    } else if (expiresAt.length <= 10) {
+      expiresAt = new Date(expiresAt + "T23:59:59.000Z").toISOString()
+    }
+    if (!Number.isFinite(Date.parse(expiresAt)) || Date.parse(expiresAt) < Date.now()) {
+      return c.json({ error: "invalid_expires_at" }, 400)
+    }
+
+    let provision: Awaited<ReturnType<typeof store.provisionTenant>> | null =
+      null
+    if (body.provision_org) {
+      provision = await store.provisionTenant({
+        orgCode,
+        companyName,
+        contactEmail,
+        seats
+      })
+    }
+
+    const issued = await store.issueShortLicense({
+      orgCode,
+      companyName,
+      address,
+      contactEmail,
+      seats,
+      expiresAt
+    })
+
+    if (access.via === "principal" && access.gate) {
+      await audit(
+        access.gate,
+        "org_settings_update",
+        `Vendor · licence émise ${issued.licenseKey} · ${companyName} · ${orgCode} · ${seats} sièges`,
+        { org_code: orgCode, seats }
+      )
+    }
+
+    return c.json({
+      ok: true,
+      license_key: issued.licenseKey,
+      paper_format: issued.licenseKey,
+      payload: {
+        org_code: issued.payload.orgCode,
+        company_name: issued.payload.companyName,
+        address: issued.payload.address,
+        contact_email: issued.payload.contactEmail,
+        seats: issued.payload.seats,
+        expires_at: issued.payload.expiresAt,
+        issued_at: issued.payload.issuedAt
+      },
+      tenant: provision
+        ? {
+            org_id: provision.orgId,
+            org_code: provision.orgCode,
+            principal_email: provision.principalEmail,
+            created: provision.created,
+            temp_password: provision.tempPassword || null,
+            note: provision.created
+              ? "Tenant créé. Communiquer email + mdp temporaire (changement obligatoire à la 1re connexion)."
+              : "Org déjà existante pour ce code — licence seulement."
+          }
+        : null,
+      client_steps: [
+        "Se connecter à la console de l’organisation (code org ci-dessus).",
+        "Paramètres → Gestion des licences → Ajouter une licence.",
+        `Coller la clé ${issued.licenseKey}`,
+        "Les sièges et coordonnées se remplissent automatiquement."
+      ]
+    })
+  })
+
+  /** Révoque une clé émise (ne désactive pas automatiquement l’org déjà activée) */
+  v1.post("/vendor/licenses/revoke", async (c) => {
+    const access = await requireVendorAccess(c)
+    if (!access.ok) return c.json({ error: access.error }, access.status)
+    let body: { license_key?: string }
+    try {
+      body = await c.req.json()
+    } catch {
+      return c.json({ error: "invalid_json" }, 400)
+    }
+    const key = (body.license_key || "").trim()
+    if (!key) return c.json({ error: "license_key_required" }, 400)
+    const ok = await store.revokeIssuedLicense(key)
+    if (!ok) return c.json({ error: "not_found_or_already_revoked" }, 404)
+    if (access.via === "principal" && access.gate) {
+      await audit(
+        access.gate,
+        "org_settings_update",
+        `Vendor · licence révoquée ${key}`
+      )
+    }
+    return c.json({
+      ok: true,
+      note: "Clé invalidée pour futures activations. Org déjà en full : révoquer aussi dans Paramètres → Licences."
+    })
+  })
+
   v1.post("/org/users", async (c) => {
     const _gate = await requireConsoleAuth(c, "console_access")
     if (!_gate.ok) return c.json({ error: _gate.error }, _gate.status)

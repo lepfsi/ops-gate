@@ -43,7 +43,8 @@
     "proxy:enroll": "pnpm --filter @opsgate/proxy enroll",
     "proxy:status": "pnpm --filter @opsgate/proxy status",
     "proxy:package": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-proxy-stage.ps1",
-    "proxy:msi": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-proxy-msi.ps1"
+    "proxy:msi": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-proxy-msi.ps1",
+    "license:issue": "node scripts/issue-license.mjs"
   },
   "dependencies": {
     "@opsgate/engine": "workspace:*",

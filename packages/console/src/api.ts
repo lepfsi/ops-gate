@@ -937,6 +937,77 @@ export const api = {
       body: "{}"
     }),
 
+  /** Bureau vendeur — émission licences clients */
+  vendorStatus: () =>
+    request<{
+      vendor_ui: boolean
+      available: boolean
+      principal: boolean
+      secret_configured: boolean
+      hint: string
+    }>("/v1/vendor/status"),
+
+  vendorListLicenses: () =>
+    request<{
+      count: number
+      licenses: Array<{
+        id: string
+        license_key: string
+        org_code: string
+        company_name: string
+        address: string
+        contact_email: string
+        seats: number
+        expires_at: string
+        issued_at: string
+        revoked_at: string | null
+        status: string
+      }>
+    }>("/v1/vendor/licenses"),
+
+  vendorIssueLicense: (body: {
+    org_code: string
+    company_name: string
+    address?: string
+    contact_email: string
+    seats: number
+    expires_at?: string
+    years?: number
+    provision_org?: boolean
+  }) =>
+    request<{
+      ok: boolean
+      license_key: string
+      paper_format: string
+      payload: {
+        org_code: string
+        company_name: string
+        address: string
+        contact_email: string
+        seats: number
+        expires_at: string
+        issued_at: string
+      }
+      tenant: {
+        org_id: string
+        org_code: string
+        principal_email: string
+        created: boolean
+        temp_password: string | null
+        note: string
+      } | null
+      client_steps: string[]
+    }>("/v1/vendor/licenses", {
+      method: "POST",
+      body: JSON.stringify(body)
+    }),
+
+  vendorRevokeIssued: (licenseKey: string) =>
+    request<{ ok: boolean; note: string }>("/v1/vendor/licenses/revoke", {
+      method: "POST",
+      body: JSON.stringify({ license_key: licenseKey })
+    }),
+
   eventsByDecision: (decision: string) =>
     request<{ org_id: string; decision: string; events: EventRow[] }>(
       `/v1/org/events/by-decision/${encodeURIComponent(decision)}`

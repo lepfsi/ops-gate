@@ -462,6 +462,114 @@ export class MemoryStore implements OpsGateStore {
     return true
   }
 
+  async listIssuedLicenses() {
+    return [...this.issuedLicenses].sort((a, b) =>
+      b.issuedAt.localeCompare(a.issuedAt)
+    )
+  }
+
+  async provisionTenant(input: {
+    orgCode: string
+    companyName: string
+    contactEmail: string
+    seats?: number
+  }) {
+    const code = input.orgCode.trim().toUpperCase()
+    const email = input.contactEmail.trim().toLowerCase()
+    const existing = await this.findOrgByCode(code)
+    if (existing) {
+      return {
+        orgId: existing.id,
+        orgCode: existing.orgCode,
+        principalEmail: existing.primaryEmail || email,
+        created: false
+      }
+    }
+    const {
+      PRINCIPAL_DEFAULT_PASSWORD,
+      hashManagementPassword,
+      newId
+    } = await import("./crypto")
+    const { buildGlobalRulesPack, materializePack } = await import(
+      "./rules-pack"
+    )
+    const { ALL_ADMIN_PERMISSIONS } = await import("./types")
+    const orgId = newId("org")
+    const now = new Date().toISOString()
+    const seats = Math.max(0, Math.floor(input.seats ?? 0))
+    const org: import("./types").Organization = {
+      id: orgId,
+      name: input.companyName.trim() || code,
+      slug: code.toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 48),
+      orgCode: code,
+      modeDefault: "org_managed",
+      eventPayloadPolicy: "metadata_only",
+      primaryEmail: email,
+      isPersonal: false,
+      licenseSeats: seats,
+      createdAt: now
+    }
+    const global = buildGlobalRulesPack("1.0.0")
+    const pack = materializePack({
+      orgId,
+      version: global.version,
+      rules: global.rules,
+      notes: "tenant-provision",
+      publishedBy: "vendor-desk",
+      active: true
+    })
+    const policy: import("./types").Policy = {
+      id: newId("pol"),
+      orgId,
+      version: 1,
+      defaultAction: "mask_recommend",
+      enabledHosts: [
+        "chatgpt.com",
+        "chat.openai.com",
+        "claude.ai",
+        "gemini.google.com",
+        "copilot.microsoft.com",
+        "perplexity.ai",
+        "grok.com"
+      ],
+      scanUploads: true,
+      eventReporting: true,
+      rulesPackVersion: pack.version,
+      managementPasswordHash: hashManagementPassword(PRINCIPAL_DEFAULT_PASSWORD),
+      protectUnenroll: true,
+      configEpoch: 1,
+      updatedAt: now
+    }
+    const principal: import("./types").OrgAdmin = {
+      id: newId("adm"),
+      orgId,
+      label: "Administrator",
+      email,
+      passwordHash: hashManagementPassword(PRINCIPAL_DEFAULT_PASSWORD),
+      isPrincipal: true,
+      permissions: [...ALL_ADMIN_PERMISSIONS],
+      active: true,
+      mustChangePassword: true,
+      createdAt: now,
+      updatedAt: now
+    }
+    this.orgs.set(orgId, org)
+    this.orgsByCode.set(code, orgId)
+    this.policies.set(orgId, policy)
+    this.packs.set(orgId, [pack])
+    this.admins.set(orgId, [principal])
+    this.profiles.set(orgId, [])
+    this.groups.set(orgId, [])
+    this.users.set(orgId, [])
+    return {
+      orgId,
+      orgCode: code,
+      principalEmail: email,
+      created: true,
+      tempPassword: PRINCIPAL_DEFAULT_PASSWORD
+    }
+  }
+
   async updateOrgMonitoring(
     orgId: string,
     monitoring: Partial<import("./types").OrgMonitoringSettings>

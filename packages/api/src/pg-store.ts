@@ -1196,6 +1196,147 @@ export class PgStore implements OpsGateStore {
     return (rowCount || 0) > 0
   }
 
+  async listIssuedLicenses() {
+    const { rows } = await this.pool.query(
+      `SELECT * FROM issued_licenses ORDER BY issued_at DESC LIMIT 500`
+    )
+    return rows.map((r) => ({
+      id: r.id as string,
+      licenseKey: r.license_key as string,
+      v: 1 as const,
+      orgCode: r.org_code as string,
+      companyName: r.company_name as string,
+      address: (r.address as string) || "",
+      contactEmail: (r.contact_email as string) || "",
+      seats: Number(r.seats) || 0,
+      expiresAt: new Date(r.expires_at).toISOString(),
+      issuedAt: new Date(r.issued_at).toISOString(),
+      revokedAt: r.revoked_at ? new Date(r.revoked_at).toISOString() : null
+    }))
+  }
+
+  async provisionTenant(input: {
+    orgCode: string
+    companyName: string
+    contactEmail: string
+    seats?: number
+  }) {
+    const code = input.orgCode.trim().toUpperCase()
+    const email = input.contactEmail.trim().toLowerCase()
+    const existing = await this.findOrgByCode(code)
+    if (existing) {
+      return {
+        orgId: existing.id,
+        orgCode: existing.orgCode,
+        principalEmail: existing.primaryEmail || email,
+        created: false
+      }
+    }
+    const {
+      PRINCIPAL_DEFAULT_PASSWORD,
+      hashManagementPassword,
+      newId
+    } = await import("./crypto")
+    const { buildGlobalRulesPack, materializePack } = await import(
+      "./rules-pack"
+    )
+    const { ALL_ADMIN_PERMISSIONS } = await import("./types")
+    const orgId = newId("org")
+    const now = new Date().toISOString()
+    const seats = Math.max(0, Math.floor(input.seats ?? 0))
+    const slug = code
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "")
+      .slice(0, 48) || "client"
+    const global = buildGlobalRulesPack("1.0.0")
+    const pack = materializePack({
+      orgId,
+      version: global.version,
+      rules: global.rules,
+      notes: "tenant-provision",
+      publishedBy: "vendor-desk",
+      active: true
+    })
+    const policyId = newId("pol")
+    const adminId = newId("adm")
+    const mgmtHash = hashManagementPassword(PRINCIPAL_DEFAULT_PASSWORD)
+    const hosts = [
+      "chatgpt.com",
+      "chat.openai.com",
+      "claude.ai",
+      "gemini.google.com",
+      "copilot.microsoft.com",
+      "perplexity.ai",
+      "grok.com"
+    ]
+    const client = await this.pool.connect()
+    try {
+      await client.query("BEGIN")
+      await client.query(
+        `INSERT INTO organizations (id, name, slug, org_code, mode_default, event_payload_policy, primary_email, is_personal, license_seats, created_at)
+         VALUES ($1,$2,$3,$4,'org_managed','metadata_only',$5,false,$6,$7)`,
+        [
+          orgId,
+          input.companyName.trim() || code,
+          slug,
+          code,
+          email,
+          seats,
+          now
+        ]
+      )
+      await client.query(
+        `INSERT INTO policies (id, org_id, version, default_action, enabled_hosts, scan_uploads, event_reporting, rules_pack_version, management_password_hash, protect_unenroll, config_epoch, updated_at)
+         VALUES ($1,$2,1,'mask_recommend',$3::jsonb,true,true,$4,$5,true,1,$6)`,
+        [policyId, orgId, JSON.stringify(hosts), pack.version, mgmtHash, now]
+      )
+      await client.query(
+        `INSERT INTO rule_packs (org_id, version, pack_id, schema_version, min_engine_version, checksum, signature, rules, notes, published_at, published_by, active)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10,$11,true)`,
+        [
+          orgId,
+          pack.version,
+          pack.packId,
+          pack.schemaVersion,
+          pack.minEngineVersion ?? null,
+          pack.checksum,
+          pack.signature,
+          JSON.stringify(pack.rules),
+          pack.notes ?? null,
+          pack.publishedAt,
+          pack.publishedBy
+        ]
+      )
+      await client.query(
+        `INSERT INTO org_admins (id, org_id, label, email, password_hash, is_principal, permissions, active, must_change_password, created_at, updated_at)
+         VALUES ($1,$2,$3,$4,$5,true,$6::jsonb,true,true,$7,$7)`,
+        [
+          adminId,
+          orgId,
+          "Administrator",
+          email,
+          mgmtHash,
+          JSON.stringify(ALL_ADMIN_PERMISSIONS),
+          now
+        ]
+      )
+      await client.query("COMMIT")
+    } catch (e) {
+      await client.query("ROLLBACK")
+      throw e
+    } finally {
+      client.release()
+    }
+    return {
+      orgId,
+      orgCode: code,
+      principalEmail: email,
+      created: true,
+      tempPassword: PRINCIPAL_DEFAULT_PASSWORD
+    }
+  }
+
   async updateOrgMonitoring(
     orgId: string,
     monitoring: Partial<import("./types").OrgMonitoringSettings>
