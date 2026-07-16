@@ -5,8 +5,8 @@ Mis à jour : 16 juillet 2026
 ## Où on en est (jalon)
 
 **V1.x / pré-V2 terrain** : proxy MITM multi-IA + soft-block, rapports PDF, docs DSI, maintenance agents, logs proxy toggle.  
-**Jalon actuel** : P0 + P1 (dont **OIDC polish**) + P2 (Firefox/AMO/CWS/LDAP).  
-**Prochaine brique** : Safari / publication stores réelles / WebAuthn.
+**Jalon actuel** : P0–P2 larges (Safari build, WebAuthn, SAML SP, LDAP cron, docs V2).  
+**Suite** : publication stores réelles, WebAuthn persisté Postgres, SAML C14N strict.
 
 Voir le journal détaillé : [`CHANGELOG-TECHNIQUE.md`](./CHANGELOG-TECHNIQUE.md).
 
@@ -19,7 +19,7 @@ Voir le journal détaillé : [`CHANGELOG-TECHNIQUE.md`](./CHANGELOG-TECHNIQUE.md
 | **P1 ✅** | **Proxy prod** | **Livré** : service/tâche, PAC/GPO, soft-mask on-wire, MSI + **Node portable**, HTTP/2 stream-aware. |
 | **P1 ✅** | **SSO + MFA** | **Livré** : MFA TOTP + OIDC PKCE + **JWKS**, **JIT**, **sso_enforce**. Optionnel : WebAuthn, SAML, claims→rôles. |
 | **P1 ✅** | **Multi-tenant prod** | **Livré** : rate-limit, quotas étendus, Redis optionnel, **RLS Postgres** (`OPSGATE_PG_RLS`, FORCE policies). Optionnel : secrets/org, rôle PG non-superuser. |
-| **P2 ✅ partiel** | **Multi-navigateur** | Chrome + Firefox MV3 + **AMO package** (`pnpm store:firefox`). Reste : Safari, compte AMO réel. |
+| **P2 ✅ partiel** | **Multi-navigateur** | Chrome + Firefox + **Safari MV3 build** (`pnpm build:safari`). Reste : App Store Apple, comptes store réels. |
 | **P2 ✅** | **Chrome Web Store** + force-install MDM | **Livré** : `pnpm store:chrome`, ZIP CWS, GPO/Intune/Edge reg, self-host update.xml. Reste : publication compte dev réelle. |
 | **P2 ✅** | **LDAP / AD sync** | **Livré** : ldapts, `/org/ldap/test|sync`, console Settings, memberOf → groups. Optionnel : cron, prune, mapping auto profil. |
 | **P3** | **Parser PPT/XLS** | PDF+DOCX déjà V1.x |

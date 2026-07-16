@@ -136,9 +136,13 @@ OPSGATE_OIDC_JIT_ORG_CODE=DEMO-OPSGATE
 
 `OPSGATE_RATE_LOGIN_PER_MIN` (défaut **30**/IP/minute).
 
+## WebAuthn & SAML
+
+Voir **`WEBAUTHN-SAML.md`** — passkeys + SAML SP (metadata / ACS).
+
 ## Suite possible
 
-- WebAuthn / passkeys  
-- SAML 2.0  
 - JIT rôle / groupe depuis claims (`groups`)  
 - Redis pour state OIDC multi-instance  
+- WebAuthn credentials en Postgres  
+- SAML C14N exclusive  

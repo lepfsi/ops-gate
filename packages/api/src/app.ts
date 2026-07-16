@@ -145,7 +145,10 @@ export function createApp() {
         "redis-rate-limit",
         "multi-tenant-quotas",
         "postgres-rls",
-        "ldap-ad-sync"
+        "ldap-ad-sync",
+        "ldap-cron",
+        "webauthn",
+        "saml-sp"
       ]
     })
   })
@@ -1499,6 +1502,370 @@ export function createApp() {
         302
       )
     }
+  })
+
+  // ── SAML 2.0 SP foundations ─────────────────────────────────
+  v1.get("/auth/saml/status", async (c) => {
+    const { getSamlConfig, samlStatusPayload } = await import("./saml")
+    return c.json(samlStatusPayload(getSamlConfig()))
+  })
+
+  v1.get("/auth/saml/metadata", async (c) => {
+    const { getSamlConfig, samlSpMetadataXml } = await import("./saml")
+    const cfg = getSamlConfig()
+    if (!cfg) return c.json({ error: "saml_not_configured" }, 404)
+    return c.body(samlSpMetadataXml(cfg), 200, {
+      "Content-Type": "application/samlmetadata+xml; charset=utf-8"
+    })
+  })
+
+  v1.get("/auth/saml/start", async (c) => {
+    const {
+      getSamlConfig,
+      buildSamlAuthnRequest
+    } = await import("./saml")
+    const {
+      defaultConsoleReturnTo,
+      sanitizeReturnTo,
+      consoleRedirectWithError
+    } = await import("./oidc")
+    const returnTo = sanitizeReturnTo(
+      c.req.query("return_to") || defaultConsoleReturnTo()
+    )
+    const cfg = getSamlConfig()
+    if (!cfg) {
+      return c.redirect(
+        consoleRedirectWithError(returnTo, "saml_not_configured"),
+        302
+      )
+    }
+    const { redirectUrl } = buildSamlAuthnRequest(cfg)
+    return c.redirect(redirectUrl, 302)
+  })
+
+  v1.post("/auth/saml/acs", async (c) => {
+    const { getSamlConfig, parseSamlResponse } = await import("./saml")
+    const {
+      defaultConsoleReturnTo,
+      consoleRedirectWithToken,
+      consoleRedirectWithError,
+      isEmailDomainAllowed,
+      getOidcFeatureFlags,
+      resolveJitOrgId
+    } = await import("./oidc")
+    const returnTo = defaultConsoleReturnTo()
+    const cfg = getSamlConfig()
+    if (!cfg) {
+      return c.redirect(
+        consoleRedirectWithError(returnTo, "saml_not_configured"),
+        302
+      )
+    }
+    let body: Record<string, string> = {}
+    try {
+      const ct = c.req.header("content-type") || ""
+      if (ct.includes("application/x-www-form-urlencoded")) {
+        const text = await c.req.text()
+        body = Object.fromEntries(new URLSearchParams(text))
+      } else {
+        body = (await c.req.parseBody()) as Record<string, string>
+      }
+    } catch {
+      return c.redirect(
+        consoleRedirectWithError(returnTo, "saml_bad_body"),
+        302
+      )
+    }
+    const raw = body.SAMLResponse || body.samlresponse || ""
+    if (!raw) {
+      return c.redirect(
+        consoleRedirectWithError(returnTo, "saml_missing_response"),
+        302
+      )
+    }
+    const parsed = parseSamlResponse(raw, cfg)
+    if (!parsed.ok) {
+      return c.redirect(
+        consoleRedirectWithError(returnTo, parsed.error),
+        302
+      )
+    }
+    const email = parsed.email
+    if (!isEmailDomainAllowed(email)) {
+      return c.redirect(
+        consoleRedirectWithError(returnTo, "domain_not_allowed", email),
+        302
+      )
+    }
+    let result = await store.createAdminSessionOidc(email, { force: false })
+    const flags = getOidcFeatureFlags()
+    if (!result.ok && result.error === "admin_not_found" && flags.jit) {
+      const orgId = await resolveJitOrgId(store)
+      if (orgId) {
+        const { randomBytes } = await import("node:crypto")
+        const admin = await store.upsertAdmin(orgId, {
+          label: email.split("@")[0] || email,
+          email,
+          password: randomBytes(24).toString("base64url"),
+          active: true,
+          isPrincipal: false,
+          permissions: ["console_access"]
+        })
+        if (admin) {
+          result = await store.createAdminSessionOidc(email, { force: false })
+        }
+      }
+    }
+    if (!result.ok) {
+      return c.redirect(
+        consoleRedirectWithError(returnTo, result.error, email),
+        302
+      )
+    }
+    await audit(
+      { admin: result.admin, orgId: result.session.orgId },
+      "login",
+      "Connexion console SSO SAML",
+      { via: "saml", name_id: parsed.nameId }
+    )
+    return c.redirect(
+      consoleRedirectWithToken(returnTo, {
+        token: result.session.token,
+        expiresAt: result.session.expiresAt,
+        email: result.admin.email
+      }),
+      302
+    )
+  })
+
+  // ── WebAuthn / Passkeys ─────────────────────────────────────
+  v1.get("/auth/webauthn/status", async (c) => {
+    const {
+      webauthnEnabled,
+      webauthnRpId,
+      webauthnOrigin
+    } = await import("./webauthn")
+    return c.json({
+      enabled: webauthnEnabled(),
+      rp_id: webauthnRpId(),
+      origin: webauthnOrigin()
+    })
+  })
+
+  /** Challenge enregistrement (admin connecté) */
+  v1.post("/org/admins/me/webauthn/register/options", async (c) => {
+    const gate = await requireConsoleAuth(c, "console_access")
+    if (!gate.ok) return c.json({ error: gate.error }, gate.status)
+    const {
+      webauthnEnabled,
+      createWebAuthnChallenge,
+      webauthnRpId,
+      listWebAuthnCredentials
+    } = await import("./webauthn")
+    if (!webauthnEnabled()) return c.json({ error: "webauthn_disabled" }, 400)
+    const ch = createWebAuthnChallenge({
+      purpose: "register",
+      adminId: gate.admin.id,
+      orgId: gate.orgId,
+      email: gate.admin.email
+    })
+    const existing = listWebAuthnCredentials(gate.admin.id)
+    return c.json({
+      ok: true,
+      challenge_id: ch.id,
+      publicKey: {
+        challenge: ch.challenge,
+        rp: { name: "OpsGate", id: webauthnRpId() },
+        user: {
+          id: Buffer.from(gate.admin.id).toString("base64url"),
+          name: gate.admin.email,
+          displayName: gate.admin.label || gate.admin.email
+        },
+        pubKeyCredParams: [
+          { type: "public-key", alg: -7 },
+          { type: "public-key", alg: -257 }
+        ],
+        timeout: 60000,
+        attestation: "none",
+        excludeCredentials: existing.map((e) => ({
+          type: "public-key",
+          id: e.credentialId
+        })),
+        authenticatorSelection: {
+          residentKey: "preferred",
+          userVerification: "preferred"
+        }
+      }
+    })
+  })
+
+  v1.post("/org/admins/me/webauthn/register", async (c) => {
+    const gate = await requireConsoleAuth(c, "console_access")
+    if (!gate.ok) return c.json({ error: gate.error }, gate.status)
+    let body: {
+      challenge_id?: string
+      credentialId?: string
+      publicKeyJwk?: Record<string, unknown>
+      transports?: string[]
+      label?: string
+    }
+    try {
+      body = await c.req.json()
+    } catch {
+      return c.json({ error: "invalid_json" }, 400)
+    }
+    const {
+      takeWebAuthnChallenge,
+      parseRegistrationPayload,
+      addWebAuthnCredential,
+      listWebAuthnCredentials
+    } = await import("./webauthn")
+    const ch = takeWebAuthnChallenge(body.challenge_id || "")
+    if (!ch || ch.purpose !== "register" || ch.adminId !== gate.admin.id) {
+      return c.json({ error: "invalid_challenge" }, 400)
+    }
+    const cred = parseRegistrationPayload(body)
+    if (!cred) return c.json({ error: "invalid_credential" }, 400)
+    addWebAuthnCredential(gate.admin.id, gate.orgId, cred)
+    await store.appendAdminAudit({
+      orgId: gate.orgId,
+      adminId: gate.admin.id,
+      adminEmail: gate.admin.email,
+      adminLabel: gate.admin.label,
+      action: "org_settings_update",
+      detail: "Passkey WebAuthn enregistrée"
+    })
+    return c.json({
+      ok: true,
+      credentials: listWebAuthnCredentials(gate.admin.id).map((x) => ({
+        credential_id: x.credentialId,
+        label: x.label,
+        created_at: x.createdAt
+      }))
+    })
+  })
+
+  v1.get("/org/admins/me/webauthn/credentials", async (c) => {
+    const gate = await requireConsoleAuth(c, "console_access")
+    if (!gate.ok) return c.json({ error: gate.error }, gate.status)
+    const { listWebAuthnCredentials } = await import("./webauthn")
+    return c.json({
+      credentials: listWebAuthnCredentials(gate.admin.id).map((x) => ({
+        credential_id: x.credentialId,
+        label: x.label,
+        created_at: x.createdAt
+      }))
+    })
+  })
+
+  v1.delete("/org/admins/me/webauthn/credentials/:id", async (c) => {
+    const gate = await requireConsoleAuth(c, "console_access")
+    if (!gate.ok) return c.json({ error: gate.error }, gate.status)
+    const { removeWebAuthnCredential } = await import("./webauthn")
+    const id = decodeURIComponent(c.req.param("id") || "")
+    const ok = removeWebAuthnCredential(gate.admin.id, id)
+    return c.json({ ok })
+  })
+
+  /** Challenge login (public) */
+  v1.post("/auth/webauthn/login/options", async (c) => {
+    const {
+      webauthnEnabled,
+      createWebAuthnChallenge,
+      webauthnRpId
+    } = await import("./webauthn")
+    if (!webauthnEnabled()) return c.json({ error: "webauthn_disabled" }, 400)
+    let body: { email?: string } = {}
+    try {
+      body = await c.req.json()
+    } catch {
+      body = {}
+    }
+    const ch = createWebAuthnChallenge({
+      purpose: "login",
+      email: body.email?.trim().toLowerCase()
+    })
+    // allowCredentials empty = discoverable credentials (resident keys)
+    let allow: Array<{ type: string; id: string }> = []
+    if (body.email) {
+      const admins = await store.findAdminsByEmail(body.email)
+      const { listWebAuthnCredentials } = await import("./webauthn")
+      for (const a of admins) {
+        for (const cr of listWebAuthnCredentials(a.id)) {
+          allow.push({ type: "public-key", id: cr.credentialId })
+        }
+      }
+    }
+    return c.json({
+      ok: true,
+      challenge_id: ch.id,
+      publicKey: {
+        challenge: ch.challenge,
+        timeout: 60000,
+        rpId: webauthnRpId(),
+        userVerification: "preferred",
+        allowCredentials: allow.length ? allow : undefined
+      }
+    })
+  })
+
+  v1.post("/auth/webauthn/login", async (c) => {
+    let body: {
+      challenge_id?: string
+      credentialId?: string
+      clientDataJSON?: string
+      authenticatorData?: string
+      signature?: string
+    }
+    try {
+      body = await c.req.json()
+    } catch {
+      return c.json({ error: "invalid_json" }, 400)
+    }
+    const {
+      takeWebAuthnChallenge,
+      findWebAuthnCredential,
+      verifyWebAuthnAssertion,
+      updateWebAuthnCounter
+    } = await import("./webauthn")
+    const ch = takeWebAuthnChallenge(body.challenge_id || "")
+    if (!ch || ch.purpose !== "login") {
+      return c.json({ error: "invalid_challenge" }, 400)
+    }
+    const found = findWebAuthnCredential(body.credentialId || "")
+    if (!found) return c.json({ error: "unknown_credential" }, 401)
+    const ver = verifyWebAuthnAssertion({
+      credential: found.credential,
+      clientDataJSON: body.clientDataJSON || "",
+      authenticatorData: body.authenticatorData || "",
+      signature: body.signature || "",
+      expectedChallenge: ch.challenge
+    })
+    if (!ver.ok) {
+      return c.json({ error: ver.error }, 401)
+    }
+    updateWebAuthnCounter(found.adminId, found.credential.credentialId, ver.newCounter)
+    const admins = await store.listAdmins(found.orgId)
+    const admin = admins.find((a) => a.id === found.adminId && a.active)
+    if (!admin) return c.json({ error: "admin_not_found" }, 401)
+    const result = await store.createAdminSessionOidc(admin.email, {
+      force: true
+    })
+    if (!result.ok) {
+      return c.json({ error: result.error }, 401)
+    }
+    await audit(
+      { admin: result.admin, orgId: result.session.orgId },
+      "login",
+      "Connexion console WebAuthn / passkey",
+      { via: "webauthn" }
+    )
+    return c.json({
+      ok: true,
+      token: result.session.token,
+      expires_at: result.session.expiresAt,
+      admin: publicAdminView(result.admin)
+    })
   })
 
   v1.post("/auth/logout", async (c) => {

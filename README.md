@@ -6,7 +6,10 @@
 
 OpsGate est une extension navigateur (**Chrome / Edge / Firefox**, Manifest V3) de **Data Loss Prevention légère** pour ChatGPT, Claude et Gemini, avec control plane optionnel (API + Console) et **proxy local** multi-IA.
 
-**Traces techniques (ne pas s’égarer)** : [`docs/CHANGELOG-TECHNIQUE.md`](docs/CHANGELOG-TECHNIQUE.md) · roadmap [`docs/V2-BACKLOG.md`](docs/V2-BACKLOG.md)
+**Traces techniques** : [`docs/CHANGELOG-TECHNIQUE.md`](docs/CHANGELOG-TECHNIQUE.md) · roadmap [`docs/V2-BACKLOG.md`](docs/V2-BACKLOG.md)
+
+**Décideurs (V2)** : [`DECIDEURS-V2-FR.pdf`](docs/DECIDEURS-V2-FR.pdf) · [`DECIDEURS-V2-EN.pdf`](docs/DECIDEURS-V2-EN.pdf)  
+**Guides** : [`GUIDE-UTILISATEUR-V2.pdf`](docs/GUIDE-UTILISATEUR-V2.pdf) · [EN](docs/GUIDE-UTILISATEUR-V2-EN.pdf) · **Tests** : [`GUIDE-TEST-V2.pdf`](docs/GUIDE-TEST-V2.pdf)
 
 En mode local, tout le traitement est **local**. En mode org, seules des **métadonnées** d’événements peuvent être centralisées (pas le prompt).
 
