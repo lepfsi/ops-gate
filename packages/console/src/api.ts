@@ -1193,11 +1193,9 @@ export const api = {
       host: string | null
       port: number | null
       from: string | null
-      default_from?: string
       auth: boolean
       org_enabled: boolean
       env_configured: boolean
-      platform_default?: boolean
       mode: string
       smtp: SmtpSettings
       verify?: { ok: boolean; error?: string; source?: string } | null
