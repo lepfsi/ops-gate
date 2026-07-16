@@ -4,6 +4,7 @@
  */
 import { log } from "./log.js"
 import type { AgentState } from "./agent-state.js"
+import { setRuntimeAllowlist } from "./allowlist.js"
 
 export type ProxyRemoteConfig = {
   enabled: boolean
@@ -76,6 +77,10 @@ export async function syncProxyConfig(state: AgentState): Promise<ProxyRemoteCon
         data.rules_pack?.version || data.policy?.rules_pack_version,
       enabled_hosts: data.policy?.enabled_hosts
     }
+    // Multi-IA : policy enabled_hosts s’ajoute à l’allowlist proxy
+    if (data.policy?.enabled_hosts?.length) {
+      setRuntimeAllowlist(data.policy.enabled_hosts)
+    }
     log("info", "config_synced", {
       mode: lastConfig.mode,
       enabled: lastConfig.enabled,
@@ -87,7 +92,7 @@ export async function syncProxyConfig(state: AgentState): Promise<ProxyRemoteCon
       mode: lastConfig.mode,
       note:
         lastConfig.mode === "enforce"
-          ? "medium/high detections abort client→server stream"
+          ? "high/medium métier (hors JWT session) → block ; auth headers ignorés"
           : "journal only (no block)"
     })
     return lastConfig

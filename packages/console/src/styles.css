@@ -579,6 +579,35 @@ textarea.input {
   border-radius: var(--radius-sm);
 }
 
+/* Scroll horizontal toujours accessible (agents multi-colonnes / resize) */
+.table-wrap--scroll-x {
+  overflow-x: auto;
+  overflow-y: visible;
+  max-width: 100%;
+  /* barre de défilement visible en bas */
+  scrollbar-gutter: stable;
+  padding-bottom: 8px;
+}
+
+.table-wrap--scroll-x::-webkit-scrollbar {
+  height: 12px;
+}
+.table-wrap--scroll-x::-webkit-scrollbar-thumb {
+  background: #94a3b8;
+  border-radius: 6px;
+}
+.table-wrap--scroll-x::-webkit-scrollbar-track {
+  background: #e2e8f0;
+  border-radius: 6px;
+}
+
+.table-agents {
+  /* largeur min > conteneur → force le scroll horizontal */
+  min-width: 1180px;
+  width: max-content;
+  max-width: none;
+}
+
 .table {
   width: 100%;
   min-width: 640px;
@@ -1382,9 +1411,47 @@ html[data-theme="dark"] .dash-context-panel {
   margin-bottom: var(--space);
 }
 
+/* Activité décisions + timeline 14j : deux colonnes équilibrées */
+.dash-grid--equal2 {
+  grid-template-columns: 1fr 1fr;
+  align-items: stretch;
+}
+
+@media (max-width: 960px) {
+  .dash-grid--equal2 {
+    grid-template-columns: 1fr;
+  }
+}
+
 .dash-widget {
   margin-bottom: 0;
   min-height: 220px;
+}
+
+.dash-widget--activity,
+.dash-widget--timeline {
+  min-height: 280px;
+  display: flex;
+  flex-direction: column;
+}
+
+.dash-widget--activity .dash-bars,
+.dash-widget--timeline .dash-timeline {
+  flex: 1;
+  min-height: 180px;
+}
+
+.dash-bars--compact {
+  gap: 6px;
+}
+
+.dash-bars--compact .dash-bar-row {
+  grid-template-columns: 88px 1fr 40px;
+  padding: 4px 6px;
+}
+
+.dash-bars--compact .dash-bar-label {
+  font-size: 0.72rem;
 }
 
 .dash-widget-head {
@@ -1857,8 +1924,18 @@ body.dash-fs-active {
   flex: none;
   min-height: 0;
   height: auto;
-  align-items: start;
+  align-items: stretch;
   align-content: start;
+  width: 100%;
+}
+
+/* Activité + Events 14j : pleine largeur, 2 colonnes égales en étendu */
+.shell-main--dash-expanded .dash-fill-body #dash-activity.dash-grid--equal2,
+.shell-main--dash-expanded .dash-fill-body .dash-grid--equal2 {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) !important;
+  width: 100%;
+  flex: 1 1 auto;
+  min-height: 240px;
 }
 
 /* Cadres : hauteur un peu plus généreuse (espace bas du fullscreen) */
@@ -1874,6 +1951,15 @@ body.dash-fs-active {
   overflow: hidden;
   display: block;
   flex: none;
+}
+
+.shell-main--dash-expanded .dash-fill-body .dash-widget--activity,
+.shell-main--dash-expanded .dash-fill-body .dash-widget--timeline {
+  min-height: 220px;
+  height: 100% !important;
+  overflow: visible;
+  display: flex !important;
+  flex-direction: column;
 }
 
 .shell-main--dash-expanded .dash-fill-body .dash-widget-head {
@@ -1916,20 +2002,27 @@ body.dash-fs-active {
   margin: 5px 0;
 }
 
-/* Timeline & barres : hauteur un peu augmentée */
+/* Timeline & barres : s’étirent dans le cadre en mode étendu */
 .shell-main--dash-expanded .dash-fill-body .dash-timeline {
-  flex: none;
-  height: 110px;
-  min-height: 110px;
-  max-height: 110px;
-  padding-top: 6px;
-  gap: 3px;
+  flex: 1 1 auto !important;
+  height: auto !important;
+  min-height: 160px !important;
+  max-height: none !important;
+  padding-top: 8px;
+  gap: 4px;
+  width: 100%;
 }
 
 .shell-main--dash-expanded .dash-fill-body .dash-bars {
-  flex: none;
+  flex: 1 1 auto !important;
   gap: 8px;
-  min-height: 100px;
+  min-height: 140px;
+  width: 100%;
+}
+
+.shell-main--dash-expanded .dash-fill-body .dash-tl-col {
+  flex: 1 1 0;
+  min-width: 0;
 }
 
 .shell-main--dash-expanded .dash-fill-body .dash-bar-row {
@@ -2095,10 +2188,17 @@ body.dash-fs-active {
   flex: 0 0 auto;
 }
 
-/* Colonnes redimensionnables (events / audit) */
+/* Colonnes redimensionnables (events / audit / agents) */
 .table-resizable {
   table-layout: fixed;
   width: 100%;
+}
+
+.table-resizable.table-agents {
+  /* fixed + width max-content pour resize colonnes + scroll X */
+  table-layout: fixed;
+  width: max-content;
+  min-width: 1180px;
 }
 
 .table-resizable th {
@@ -2108,7 +2208,12 @@ body.dash-fs-active {
   white-space: nowrap;
   resize: horizontal;
   min-width: 56px;
-  max-width: 480px;
+  max-width: 560px;
+}
+
+.table-resizable th.col-label {
+  width: 18%;
+  min-width: 120px;
 }
 
 .table-resizable td {

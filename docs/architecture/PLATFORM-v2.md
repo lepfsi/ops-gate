@@ -42,7 +42,11 @@
 3. **MFA** : TOTP et/ou WebAuthn pour login console ; second facteur optionnel unenroll.  
 4. **Multi-tenant prod** : isolation stricte `org_id`, quotas, rate limits, onboarding self-serve ou invite.  
 5. **Chrome Web Store** (et Microsoft Edge Add-ons) : distribution publique / unlisted enterprise.  
-6. **Ops** : observabilité, backups, rotations de clés, runbooks incident.  
+6. **Ops / observabilité** :  
+   - **Syslog / SIEM** (RFC 5424, CEF optionnel) vers Splunk, Elastic, QRadar, Sentinel  
+   - **Métriques Prometheus** + dashboard **Grafana** (agents, blocks, events, seats)  
+7. **Multi-navigateur** : Firefox MV3 (priorité) ; Safari en phase suivante. Chromium (Chrome/Edge/Brave/Opera) déjà couvert V1.  
+8. **Ops** : backups, rotations de clés, runbooks incident.  
 
 ### 1.2 Non-objectifs V2 (reportés V2.x / V3)
 
@@ -51,7 +55,7 @@
 | Proxy TUN / driver kernel | V2.1+ |
 | LDAP/AD sync natif complet | V2.1 (champs déjà prévus V1) |
 | Multi-région active-active | V3 / GA enterprise |
-| SIEM native (Splunk, Sentinel) | Webhooks V2 ; connecteurs V2.1 |
+| Connecteurs SIEM packagés (app Splunk…) | V2.1 (syslog/CEF générique en V2) |
 | Portal billing self-serve personnel | V2.1 (Stripe) |
 | Mobile / clients natifs hors navigateur | V3 |
 

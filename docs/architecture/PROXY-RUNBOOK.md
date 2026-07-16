@@ -56,9 +56,12 @@ Attendu :
 - `filter_mode: "enforce"` (filtre) ou `"observe"` (journal seul)
 - `enrolled` côté `pnpm proxy:status`
 
-### C. Navigateur **forcé** par le proxy
+### C. Navigateur via le proxy
 
-Ne pas utiliser le Chrome du bureau sans flags.
+**Pourquoi les flags Chrome en pilote ?**  
+Chrome n’utilise le proxy OpsGate que si le **système** (ou le profil) le configure. Sans ça, le trafic va **en direct** → aucun MITM, aucun log.
+
+#### Option 1 — Pilote isolé (flags, profil temporaire)
 
 ```powershell
 & "C:\Program Files\Google\Chrome\Application\chrome.exe" `
@@ -68,7 +71,40 @@ Ne pas utiliser le Chrome du bureau sans flags.
   "https://chatgpt.com"
 ```
 
-Sans `--proxy-server`, **aucun** trafic n’arrive au proxy → pas de log, pas d’event.
+#### Option 2 — Silencieux (PAC système Windows, pas de flags)
+
+Proxy déjà lancé, puis :
+
+```powershell
+.\scripts\set-system-proxy-pac.ps1
+# Désactiver :
+.\scripts\set-system-proxy-pac.ps1 -Off
+```
+
+Le PAC n’envoie **que les sites IA** vers `127.0.0.1:8888` (le reste = DIRECT).  
+Redémarrer Chrome/Edge une fois. Profil utilisateur normal, sans `--user-data-dir`.
+
+#### Option 3 — Entreprise (production)
+
+- **GPO / Intune / Chrome Enterprise** : `ProxyMode=pac_script`, `ProxyPacUrl=http://…/opsgate-proxy.pac`
+- Ou proxy sortant d’entreprise qui pointe vers le module OpsGate (roadmap)
+
+### C2. Enforce = block **par requête**, pas bannissement du site
+
+Si des données sensibles sont détectées en **enforce** :
+
+- seule **cette** requête (ex. envoi du prompt) reçoit un **403** ;
+- la session TLS et le site restent utilisables juste après (recharge / nouvel envoi propre) ;
+- ce n’est **pas** un blocage permanent du domaine.
+
+### C3. Démarrage silencieux du proxy (sans terminal)
+
+```powershell
+.\scripts\start-proxy-silent.ps1          # fond + logs
+.\scripts\start-proxy-silent.ps1 -Stop
+```
+
+**Production** : service Windows (NSSM / `sc.exe` / Task Scheduler au logon) plutôt que 3 fenêtres PowerShell — les terminaux ouverts sont le mode **dev**.
 
 ### D. Console (MMC)
 

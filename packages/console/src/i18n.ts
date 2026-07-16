@@ -130,6 +130,8 @@ const fr: Dict = {
   "dash.unlicShort": "s. lic.",
   "dash.online": "En ligne",
   "dash.stale": "Inactif",
+  "dash.staleHint":
+    "Agents dont le last_seen est entre le seuil « en ligne » et le seuil « hors ligne prolongé » (ex. 15 min → 2 h). Encore connus, mais plus synchrones.",
   "dash.offlineLongLabel": "Hors ligne prolongé",
   "dash.onlineLt": "En ligne (< {n} min)",
   "dash.agentsLbl": "agents",
@@ -162,10 +164,22 @@ const fr: Dict = {
   "logs.types": "Types de journaux à conserver",
   "logs.typesHint":
     "Décocher un type arrête son enregistrement à l’avenir.",
-  "logs.detection": "Events de détection (prompt / fichier)",
+  "logs.detection": "Events de détection extension (prompt / fichier)",
+  "logs.proxy": "Events proxy (observe / block MITM)",
+  "logs.proxyHint":
+    "Décocher si le proxy inonde le journal (page ouverte longtemps).",
   "logs.login": "Connexions console (login / logout / échecs)",
   "logs.audit": "Audit administration (policy, packs, admins…)",
   "logs.agents": "Cycle de vie agents (licence, assignation, révocation)",
+  "agents.maint": "Maintenance",
+  "agents.maint.off": "Actif",
+  "agents.maint.leave": "Congé / mission",
+  "agents.maint.outage": "Panne / hors service",
+  "agents.maint.remote": "Hors site / télétravail",
+  "agents.maint.hint":
+    "Exclut l’agent des alertes « hors ligne prolongé » (faux positifs congés / panne).",
+  "dash.maintenance": "Maintenance",
+  "dash.panelMaintenance": "Agents en maintenance",
 
   // ── License ──
   "lic.trial": "Licence d’essai",
@@ -204,6 +218,19 @@ const fr: Dict = {
   "rep.format": "Export events préféré",
   "rep.csv": "CSV (tableur)",
   "rep.json": "JSON",
+  "rep.securityTitle": "Rapport d’activité sécurité",
+  "rep.securityHint":
+    "Compile d’activité : KPIs, tendances, décisions, top menaces — PDF brandé OpsGate.",
+  "rep.range": "Période",
+  "rep.range.currentWeek": "Semaine en cours",
+  "rep.range.week": "Semaine ISO précédente",
+  "rep.range.custom": "Plage personnalisée",
+  "rep.range.all": "90 derniers jours",
+  "rep.pdf": "Télécharger PDF",
+  "rep.pdfBusy": "Génération PDF…",
+  "rep.pdfOk": "Rapport PDF téléchargé",
+  "rep.preview": "Aperçu KPIs",
+  "rep.refreshPreview": "Actualiser l’aperçu",
 
   // ── Events ──
   "events.title": "Événements",
@@ -454,7 +481,9 @@ const en: Dict = {
   "dash.unlicensed": "Unlicensed",
   "dash.unlicShort": "unlic.",
   "dash.online": "Online",
-  "dash.stale": "Stale",
+  "dash.stale": "Inactive",
+  "dash.staleHint":
+    "Agents whose last_seen is between the “online” and “long offline” thresholds (e.g. 15 min → 2 h). Still known, but no longer freshly synced.",
   "dash.offlineLongLabel": "Not connected long time",
   "dash.onlineLt": "Online (< {n} min)",
   "dash.agentsLbl": "agents",
@@ -487,10 +516,22 @@ const en: Dict = {
   "logs.types": "Log types to keep",
   "logs.typesHint":
     "Unchecking a type stops recording it going forward.",
-  "logs.detection": "Detection events (prompt / file)",
+  "logs.detection": "Extension detection events (prompt / file)",
+  "logs.proxy": "Proxy events (observe / MITM block)",
+  "logs.proxyHint":
+    "Uncheck if the proxy floods the journal (long-lived open page).",
   "logs.login": "Console logins (login / logout / failures)",
   "logs.audit": "Admin audit (policy, packs, admins…)",
   "logs.agents": "Agent lifecycle (license, assign, revoke)",
+  "agents.maint": "Maintenance",
+  "agents.maint.off": "Active",
+  "agents.maint.leave": "Leave / mission",
+  "agents.maint.outage": "Outage / broken PC",
+  "agents.maint.remote": "Off-site / remote work",
+  "agents.maint.hint":
+    "Excludes the agent from “not connected long time” alerts (leave / outage false positives).",
+  "dash.maintenance": "Maintenance",
+  "dash.panelMaintenance": "Agents in maintenance",
 
   // ── License ──
   "lic.trial": "Trial license",
@@ -529,6 +570,19 @@ const en: Dict = {
   "rep.format": "Preferred events export",
   "rep.csv": "CSV (spreadsheet)",
   "rep.json": "JSON",
+  "rep.securityTitle": "Security activity report",
+  "rep.securityHint":
+    "Activity compile: KPIs, trends, decisions, top threats — branded OpsGate PDF.",
+  "rep.range": "Period",
+  "rep.range.currentWeek": "Current week",
+  "rep.range.week": "Previous ISO week",
+  "rep.range.custom": "Custom range",
+  "rep.range.all": "Last 90 days",
+  "rep.pdf": "Download PDF",
+  "rep.pdfBusy": "Generating PDF…",
+  "rep.pdfOk": "PDF report downloaded",
+  "rep.preview": "KPI preview",
+  "rep.refreshPreview": "Refresh preview",
 
   // ── Events ──
   "events.title": "Events",

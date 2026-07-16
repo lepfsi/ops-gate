@@ -1,6 +1,7 @@
 import { Hono } from "hono"
 import { cors } from "hono/cors"
 import { secureHeaders } from "hono/secure-headers"
+import { fileURLToPath } from "node:url"
 
 import type { DetectionRule } from "@opsgate/engine"
 
@@ -21,7 +22,7 @@ import type {
   OrgAdmin,
   Policy
 } from "./types"
-import { ALL_ADMIN_PERMISSIONS } from "./types"
+import { ALL_ADMIN_PERMISSIONS, normalizeDeviceLabel } from "./types"
 
 /** Vendor recovery uniquement si last sync > 2h (sync agent ~15 min) */
 export const VENDOR_RECOVERY_OFFLINE_MS = 2 * 60 * 60 * 1000
@@ -143,12 +144,14 @@ export function createApp() {
 
     const agentToken = newToken()
     const isProxy = body.device_type === "proxy"
+    const rawLabel =
+      body.device_label ||
+      body.host_name ||
+      (isProxy ? "proxy-host" : undefined)
     const agent = await store.enrollAgent({
       orgId: org.id,
       token: agentToken,
-      deviceLabel:
-        body.device_label ||
-        (isProxy ? "OpsGate Proxy" : undefined),
+      deviceLabel: normalizeDeviceLabel(rawLabel, body.host_name),
       hostName: body.host_name,
       appVersion:
         body.app_version ||
@@ -423,14 +426,31 @@ export function createApp() {
       return c.json({ error: "batch_too_large", max: 50 }, 400)
     }
 
-    // Enrichir avec label appareil agent si manquant
+    // Enrichir + normaliser label (sans préfixe « OpsGate Proxy »)
+    const cleanAgentLabel = normalizeDeviceLabel(
+      agent.deviceLabel,
+      agent.hostName
+    )
     const enriched = events.map((ev) => ({
       ...ev,
-      device_label: ev.device_label || agent.deviceLabel
+      device_label:
+        normalizeDeviceLabel(ev.device_label, agent.hostName) ||
+        cleanAgentLabel
     }))
 
     const cats = await orgLogCategories(agent.orgId)
-    if (!cats.detectionEvents) {
+    // Séparer bruit proxy vs détection extension
+    const allProxy = enriched.every((e) => e.source === "proxy")
+    const allExt = enriched.every((e) => e.source !== "proxy")
+    if (allProxy && cats.proxyEvents === false) {
+      return c.json({
+        ok: true,
+        accepted: 0,
+        skipped: true,
+        reason: "log_category_proxy_disabled"
+      })
+    }
+    if (allExt && cats.detectionEvents === false) {
       return c.json({
         ok: true,
         accepted: 0,
@@ -438,7 +458,23 @@ export function createApp() {
         reason: "log_category_detection_disabled"
       })
     }
-    const result = await store.appendEvents(agent.orgId, agent.id, enriched)
+    // Batch mixte : filtrer
+    let toStore = enriched
+    if (cats.proxyEvents === false) {
+      toStore = toStore.filter((e) => e.source !== "proxy")
+    }
+    if (cats.detectionEvents === false) {
+      toStore = toStore.filter((e) => e.source === "proxy")
+    }
+    if (toStore.length === 0) {
+      return c.json({
+        ok: true,
+        accepted: 0,
+        skipped: true,
+        reason: "log_categories_filtered_all"
+      })
+    }
+    const result = await store.appendEvents(agent.orgId, agent.id, toStore)
     return c.json({ ok: true, ...result })
   })
 
@@ -480,7 +516,7 @@ export function createApp() {
       types: e.types || [],
       masked: e.masked ?? null,
       file_names: e.file_names ?? null,
-      device_label: e.device_label ?? null,
+      device_label: normalizeDeviceLabel(e.device_label) ?? null,
       exit_actor: e.exit_actor ?? null,
       exit_admin_id: e.exit_admin_id ?? null,
       exit_admin_label: e.exit_admin_label ?? null,
@@ -834,6 +870,128 @@ export function createApp() {
     return c.json(await store.summary(auth.orgId))
   })
 
+  /**
+   * Rapport sécurité (KPIs + charts) — JSON ou PDF.
+   * range=week|current_week|custom|all  + from/to (ISO date) + format=json|pdf
+   */
+  v1.get("/org/reports/security", async (c) => {
+    const auth = await requireConsoleAuth(c, "console_access")
+    if (!auth.ok) return c.json({ error: auth.error }, auth.status)
+    const org = await store.getOrg(auth.orgId)
+    if (!org) return c.json({ error: "no_org" }, 404)
+
+    const range = (c.req.query("range") || "current_week").toLowerCase()
+    const format = (c.req.query("format") || "json").toLowerCase()
+    const fromQ = c.req.query("from") || ""
+    const toQ = c.req.query("to") || ""
+
+    let period
+    try {
+      const { resolveReportPeriod, buildSecurityReport } = await import(
+        "./security-report"
+      )
+      period = resolveReportPeriod(range, fromQ, toQ)
+      const events = await store.listEvents(org.id, 5000)
+      const agents = await store.listAgents(org.id)
+      const licenseStats = await store.getLicenseStats(org.id)
+      const report = await buildSecurityReport({
+        orgId: org.id,
+        orgName: org.name || org.orgCode,
+        events,
+        agents,
+        monitoring: org.monitoring,
+        licenseOf: (a) => store.isAgentLicensed(org.id, a.id),
+        scheduleOf: async (a) => {
+          const eff = await store.getEffectivePolicyForAgent(org.id, a.id)
+          return eff?.effective.workSchedule
+        },
+        period,
+        seats: {
+          seats: licenseStats.seats,
+          seats_used: licenseStats.seats_used
+        }
+      })
+
+      if (format === "pdf") {
+        const { spawnSync } = await import("node:child_process")
+        const path = await import("node:path")
+        const fs = await import("node:fs")
+        const os = await import("node:os")
+        // packages/api/src -> monorepo root
+        const monoRoot = path.resolve(
+          path.dirname(fileURLToPath(import.meta.url)),
+          "../../.."
+        )
+        const script = path.join(monoRoot, "scripts", "build-security-report-pdf.py")
+        if (!fs.existsSync(script)) {
+          return c.json({ error: "pdf_script_missing", path: script }, 500)
+        }
+        const tmpJson = path.join(
+          os.tmpdir(),
+          `opsgate-report-${Date.now()}.json`
+        )
+        const tmpPdf = path.join(
+          os.tmpdir(),
+          `opsgate-report-${Date.now()}.pdf`
+        )
+        fs.writeFileSync(tmpJson, JSON.stringify(report), "utf8")
+        const py = process.env.PYTHON || process.env.PYTHON_PATH || "python"
+        const r = spawnSync(
+          py,
+          [script, tmpJson, "--out", tmpPdf],
+          { encoding: "utf8", timeout: 60_000, maxBuffer: 20 * 1024 * 1024 }
+        )
+        try {
+          fs.unlinkSync(tmpJson)
+        } catch {
+          /* ignore */
+        }
+        if (r.status !== 0 || !fs.existsSync(tmpPdf)) {
+          return c.json(
+            {
+              error: "pdf_generation_failed",
+              stderr: (r.stderr || "").slice(0, 800),
+              stdout: (r.stdout || "").slice(0, 400)
+            },
+            500
+          )
+        }
+        const pdfBuf = fs.readFileSync(tmpPdf)
+        try {
+          fs.unlinkSync(tmpPdf)
+        } catch {
+          /* ignore */
+        }
+        const stamp = (period.from_ts || "").slice(0, 10)
+        const fname = `opsgate-security-report-${stamp || "period"}.pdf`
+        await store.appendAdminAudit({
+          orgId: org.id,
+          adminId: auth.admin.id,
+          adminEmail: auth.admin.email,
+          adminLabel: auth.admin.label,
+          action: "report_export",
+          detail: `Rapport sécurité PDF · ${period.label}`
+        }).catch(() => undefined)
+        return new Response(pdfBuf, {
+          status: 200,
+          headers: {
+            "content-type": "application/pdf",
+            "content-disposition": `attachment; filename="${fname}"`,
+            "cache-control": "no-store"
+          }
+        })
+      }
+
+      return c.json({ ok: true, report })
+    } catch (e) {
+      const msg = String((e as Error).message || e)
+      if (msg.includes("invalid_date_range")) {
+        return c.json({ error: "invalid_date_range" }, 400)
+      }
+      return c.json({ error: "report_failed", message: msg }, 500)
+    }
+  })
+
   async function ensureWeeklyExportIfDue(orgId: string) {
     const org = await store.getOrg(orgId)
     if (!org) return
@@ -983,7 +1141,8 @@ export function createApp() {
         return {
           id: a.id,
           group_id: a.groupId || null,
-          device_label: a.deviceLabel,
+          device_label:
+            normalizeDeviceLabel(a.deviceLabel, a.hostName) || a.deviceLabel,
           host_name: a.hostName || null,
           app_version: a.appVersion,
           enrolled_at: a.enrolledAt,
@@ -996,7 +1155,9 @@ export function createApp() {
           license_status,
           unlicensed_since: a.unlicensedSince || null,
           device_fingerprint: a.deviceFingerprint || null,
-          device_type: a.deviceType === "proxy" ? "proxy" : "extension"
+          device_type: a.deviceType === "proxy" ? "proxy" : "extension",
+          maintenance_mode: a.maintenanceMode || null,
+          maintenance_note: a.maintenanceNote || null
         }
       })
     )
@@ -1022,7 +1183,7 @@ export function createApp() {
     })
   })
 
-  /** Assigner profil et/ou user à un agent */
+  /** Assigner profil et/ou user / maintenance à un agent */
   v1.patch("/org/agents/:agentId", async (c) => {
     const _gate = await requireConsoleAuth(c, "console_access")
     if (!_gate.ok) return c.json({ error: _gate.error }, _gate.status)
@@ -1031,6 +1192,8 @@ export function createApp() {
     let body: {
       policy_profile_id?: string | null
       user_id?: string | null
+      maintenance_mode?: "leave" | "outage" | "remote" | null
+      maintenance_note?: string | null
     }
     try {
       body = await c.req.json()
@@ -1056,14 +1219,33 @@ export function createApp() {
       )
       if (!agent) return c.json({ error: "agent_or_user_not_found" }, 404)
     }
+    if (body.maintenance_mode !== undefined) {
+      const mode = body.maintenance_mode
+      if (
+        mode !== null &&
+        mode !== "leave" &&
+        mode !== "outage" &&
+        mode !== "remote"
+      ) {
+        return c.json({ error: "invalid_maintenance_mode" }, 400)
+      }
+      agent = await store.setAgentMaintenance(
+        org.id,
+        c.req.param("agentId"),
+        mode,
+        body.maintenance_note
+      )
+      if (!agent) return c.json({ error: "agent_not_found" }, 404)
+    }
     await audit(
       _gate,
       "agent_assign",
-      `Assign agent ${c.req.param("agentId").slice(0, 12)}… · profil=${agent.policyProfileId || "—"} · user=${agent.userId || "—"}`,
+      `Assign agent ${c.req.param("agentId").slice(0, 12)}… · profil=${agent.policyProfileId || "—"} · user=${agent.userId || "—"} · maint=${agent.maintenanceMode || "off"}`,
       {
         agent_id: agent.id,
         policy_profile_id: agent.policyProfileId,
-        user_id: agent.userId
+        user_id: agent.userId,
+        maintenance_mode: agent.maintenanceMode || null
       }
     )
     return c.json({
@@ -1071,7 +1253,9 @@ export function createApp() {
       agent: {
         id: agent.id,
         policy_profile_id: agent.policyProfileId || null,
-        user_id: agent.userId || null
+        user_id: agent.userId || null,
+        maintenance_mode: agent.maintenanceMode || null,
+        maintenance_note: agent.maintenanceNote || null
       }
     })
   })
@@ -2323,15 +2507,24 @@ export function createApp() {
       priority: body.priority,
       onlyIfUnassigned: body.only_if_unassigned
     })
+    // Appliquer immédiatement aux agents déjà enrollés
+    let applied = 0
+    if (rule?.enabled) {
+      const agents = await store.listAgents(org.id)
+      for (const a of agents) {
+        const r = await store.applyMovingRules(org.id, a.id)
+        if (r.applied) applied++
+      }
+    }
     await store.appendAdminAudit({
       orgId: org.id,
       adminId: _gate.admin.id,
       adminEmail: _gate.admin.email,
       adminLabel: _gate.admin.label,
       action: "moving_rule_upsert",
-      detail: `Création règle « ${rule?.name} » (prio ${rule?.priority}, ${conditions.length} cond.)`
+      detail: `Création règle « ${rule?.name} » (prio ${rule?.priority}, ${conditions.length} cond.) · appliquée à ${applied} agent(s)`
     })
-    return c.json({ ok: true, rule })
+    return c.json({ ok: true, rule, agents_applied: applied })
   })
 
   v1.patch("/org/moving-rules/:ruleId", async (c) => {
@@ -2389,15 +2582,23 @@ export function createApp() {
           ? !!body.only_if_unassigned
           : existing.onlyIfUnassigned
     })
+    let applied = 0
+    if (rule?.enabled) {
+      const agents = await store.listAgents(org.id)
+      for (const a of agents) {
+        const r = await store.applyMovingRules(org.id, a.id)
+        if (r.applied) applied++
+      }
+    }
     await store.appendAdminAudit({
       orgId: org.id,
       adminId: _gate.admin.id,
       adminEmail: _gate.admin.email,
       adminLabel: _gate.admin.label,
       action: "moving_rule_upsert",
-      detail: `Modif règle « ${rule?.name} » (prio ${rule?.priority})`
+      detail: `Modif règle « ${rule?.name} » (prio ${rule?.priority}) · appliquée à ${applied} agent(s)`
     })
-    return c.json({ ok: true, rule })
+    return c.json({ ok: true, rule, agents_applied: applied })
   })
 
   v1.delete("/org/moving-rules/:ruleId", async (c) => {

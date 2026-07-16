@@ -96,7 +96,7 @@ export interface WorkSchedule {
 
 /** Catégories de journaux activables (false = plus enregistrées) */
 export interface OrgLogCategories {
-  /** Events de détection (prompt / fichier) */
+  /** Events de détection extension (prompt / fichier) */
   detectionEvents: boolean
   /** Connexions console (login / logout) */
   adminLogin: boolean
@@ -104,6 +104,11 @@ export interface OrgLogCategories {
   adminAudit: boolean
   /** Cycle de vie agent (enroll / unenroll / revoke) */
   agentLifecycle: boolean
+  /**
+   * Events issus du proxy local (source=proxy).
+   * false = plus d’écriture (réduit le bruit en MMC).
+   */
+  proxyEvents?: boolean
 }
 
 /** Notifications org (console + audit) */
@@ -194,11 +199,27 @@ export interface LogExportRecord {
   expiresAt: string
 }
 
+/**
+ * Nettoie le label appareil (retire l’ancien préfixe « OpsGate Proxy »).
+ * Affichage + stockage events : hostname seul pour les agents proxy.
+ */
+export function normalizeDeviceLabel(
+  label?: string | null,
+  hostName?: string | null
+): string | undefined {
+  let s = (label || "").trim()
+  s = s.replace(/^OpsGate\s+Proxy\s*[-:–—]?\s*/i, "").trim()
+  if (!s) s = (hostName || "").trim()
+  return s || undefined
+}
+
 export const DEFAULT_LOG_CATEGORIES: OrgLogCategories = {
   detectionEvents: true,
   adminLogin: true,
   adminAudit: true,
-  agentLifecycle: true
+  agentLifecycle: true,
+  /** Proxy : on par défaut ; désactiver si trop de bruit en pilote */
+  proxyEvents: true
 }
 
 export const DEFAULT_NOTIFICATION_SETTINGS: OrgNotificationSettings = {
@@ -594,6 +615,12 @@ export interface Agent {
   deviceFingerprint?: string
   /** extension (défaut) | proxy (data-plane local P2+) */
   deviceType?: "extension" | "proxy"
+  /**
+   * Mode maintenance (P3) — exclus des alertes « hors ligne prolongé ».
+   * leave = congés/mission · outage = panne · remote = hors site volontaire
+   */
+  maintenanceMode?: "leave" | "outage" | "remote" | null
+  maintenanceNote?: string | null
 }
 
 export interface PasswordResetChallenge {
@@ -706,6 +733,7 @@ export type AdminAuditAction =
   | "moving_rule_apply"
   | "org_settings_update"
   | "agent_merge"
+  | "report_export"
   | "recovery_info_view"
   | "recovery_codes_generated"
   | "recovery_code_consumed"
