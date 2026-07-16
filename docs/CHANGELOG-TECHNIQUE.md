@@ -280,13 +280,22 @@ Prod future : services Windows / silent scripts ; pas 3 terminaux ouverts.
 | Console | onglet Paramètres → LDAP / AD | App.tsx, i18n, api.ts |
 | Docs | `LDAP-AD-SYNC.md` | |
 
-## 18. Suite recommandée
+## 18. V2 P2 — Firefox AMO packaging (16 juillet 2026)
 
-1. Firefox AMO (signature)  
-2. Safari  
-3. OIDC : JIT, JWKS, `sso_enforce`  
-4. Publication CWS réelle  
-5. LDAP : sync planifiée, prune absents, map auto profil  
+| Sujet | Détail | Fichiers |
+|-------|--------|----------|
+| Package | Build firefox + ZIP + SHA256 + listing | `scripts/package-firefox-amo.ps1` |
+| npm | `pnpm store:firefox` | `package.json` |
+| Enterprise | policies.json force_installed | `packaging/firefox-amo/` |
+| Docs | AMO unlisted/listed + Intune | `FIREFOX-AMO.md` |
+| Gecko id | `opsgate@dailyops.local` (stable) | déjà en manifest |
+
+## 19. Suite recommandée
+
+1. Safari  
+2. OIDC : JIT, JWKS, `sso_enforce`  
+3. Publication CWS / AMO réelles (comptes dev)  
+4. LDAP : sync planifiée, prune, map auto profil  
 
 Détail : `docs/V2-BACKLOG.md` · `docs/architecture/PLATFORM-v2.md`.
 
