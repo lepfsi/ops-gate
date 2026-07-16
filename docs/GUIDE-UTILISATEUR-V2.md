@@ -105,7 +105,16 @@ Production Windows : `pnpm proxy:msi` (Node portable inclus).
 
 ---
 
-## 8. Bonnes pratiques admin
+## 8. Licences (côté client)
+
+- Essai 30 jours à la création de l’organisation.  
+- Licence full : coller la clé fournie par **DailyOps** (`OPS-XXXX-…`) dans **Paramètres → Gestion des licences → Ajouter**.  
+- Les champs société / sièges / expiration sont **remplis par la clé** (lecture seule).  
+- Vous **n’émettez pas** de licences depuis la console : l’émission est réservée au fournisseur (voir `LICENCES-CLIENTS.md` côté DailyOps).
+
+---
+
+## 9. Bonnes pratiques admin
 
 1. Postgres durable (`DATABASE_URL`) en pilote réel.  
 2. Force-install extension (MDM / AMO) + policy lock.  
@@ -116,10 +125,11 @@ Production Windows : `pnpm proxy:msi` (Node portable inclus).
 
 ---
 
-## 9. Support
+## 10. Support
 
 - Cahier technique : `CHANGELOG-TECHNIQUE.md`, `architecture/*`  
 - Privacy : `PRIVACY.md`  
 - Runbook proxy : `architecture/PROXY-RUNBOOK.md`  
+- Licences (vendeur vs client) : `LICENCES-CLIENTS.md`  
 
 © DailyOps.Tech — OpsGate

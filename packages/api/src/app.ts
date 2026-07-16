@@ -3030,79 +3030,54 @@ export function createApp() {
     return c.json({ ok: true, mode: "trial" })
   })
 
-  // ─── Vendor desk : émission de licences clients (DailyOps) ───────────
+  // ─── Vendor ONLY (DailyOps) : émission licences — PAS exposé à la console client ───
   /**
-   * Auth vendor :
-   *  - header X-OpsGate-Vendor-Key = OPSGATE_VENDOR_LICENSE_SECRET | OPSGATE_LICENSE_SECRET
-   *  - OU principal console si OPSGATE_VENDOR_UI n'est pas off (défaut: on)
+   * Auth exclusivement par secret constructeur (jamais la session admin client).
+   * Header : X-OpsGate-Vendor-Key = OPSGATE_VENDOR_LICENSE_SECRET | OPSGATE_LICENSE_SECRET
+   * Longueur min. 12. Sans secret configuré côté serveur → 503.
    */
-  async function requireVendorAccess(c: {
+  function requireVendorSecret(c: {
     req: { header: (n: string) => string | undefined }
-  }): Promise<
-    | {
-        ok: true
-        via: "key" | "principal"
-        gate?: { admin: OrgAdmin; orgId: string }
-      }
-    | { ok: false; status: 401 | 403; error: string }
-  > {
-    const vendorKey = (c.req.header("X-OpsGate-Vendor-Key") || "").trim()
+  }):
+    | { ok: true }
+    | { ok: false; status: 401 | 403 | 503; error: string } {
     const secret = (
       process.env.OPSGATE_VENDOR_LICENSE_SECRET ||
       process.env.OPSGATE_LICENSE_SECRET ||
       ""
     ).trim()
-    if (secret.length >= 8 && vendorKey && vendorKey === secret) {
-      return { ok: true, via: "key" }
-    }
-    const gate = await requireConsoleAuth(c, "manage_policies")
-    if (!gate.ok) {
+    if (secret.length < 12) {
       return {
         ok: false,
-        status: gate.status,
-        error: secret ? "vendor_key_or_principal_required" : gate.error
+        status: 503,
+        error: "vendor_secret_not_configured",
       }
     }
-    if (!gate.admin.isPrincipal) {
-      return { ok: false, status: 403 as const, error: "principal_only" }
+    const vendorKey = (c.req.header("X-OpsGate-Vendor-Key") || "").trim()
+    if (!vendorKey || vendorKey !== secret) {
+      return { ok: false, status: 401, error: "vendor_key_required" }
     }
-    const ui = (process.env.OPSGATE_VENDOR_UI || "1").toLowerCase().trim()
-    if (ui === "0" || ui === "false" || ui === "off" || ui === "no") {
-      return { ok: false, status: 403 as const, error: "vendor_ui_disabled" }
-    }
-    return {
-      ok: true,
-      via: "principal",
-      gate: { admin: gate.admin, orgId: gate.orgId }
-    }
+    return { ok: true }
   }
 
-  /** Statut du bureau vendeur (onglet console) */
+  /** Santé émission (scripts ops) — secret jamais renvoyé */
   v1.get("/vendor/status", async (c) => {
-    const ui = (process.env.OPSGATE_VENDOR_UI || "1").toLowerCase().trim()
-    const uiOn = !(ui === "0" || ui === "false" || ui === "off" || ui === "no")
-    const secretConfigured = !!(
+    const secret = (
       process.env.OPSGATE_VENDOR_LICENSE_SECRET ||
-      process.env.OPSGATE_LICENSE_SECRET
-    )
-    const gate = await requireConsoleAuth(c, "console_access")
-    const principal = gate.ok && !!gate.admin.isPrincipal
+      process.env.OPSGATE_LICENSE_SECRET ||
+      ""
+    ).trim()
     return c.json({
-      vendor_ui: uiOn,
-      available: uiOn && principal,
-      principal,
-      secret_configured: secretConfigured,
-      hint: uiOn
-        ? principal
-          ? "Émission de licences clients disponible (principal)."
-          : "Réservé à l’administrateur principal."
-        : "Désactivé (OPSGATE_VENDOR_UI=off)."
+      channel: "api_secret_or_cli",
+      console_ui: false,
+      secret_configured: secret.length >= 12,
+      hint: "Émission hors console client : pnpm license:issue ou POST /v1/vendor/licenses + X-OpsGate-Vendor-Key."
     })
   })
 
-  /** Liste des licences émises (vendeur) */
+  /** Liste des licences émises (vendeur DailyOps — secret only) */
   v1.get("/vendor/licenses", async (c) => {
-    const access = await requireVendorAccess(c)
+    const access = requireVendorSecret(c)
     if (!access.ok) return c.json({ error: access.error }, access.status)
     const list = await store.listIssuedLicenses()
     return c.json({
@@ -3128,12 +3103,12 @@ export function createApp() {
   })
 
   /**
-   * Émet une licence client OPS-XXXX-…
+   * Émet une licence client OPS-XXXX-… (DailyOps only).
    * Body: org_code, company_name, address?, contact_email, seats, expires_at?|years?,
    *        provision_org? (crée tenant + admin si org absente)
    */
   v1.post("/vendor/licenses", async (c) => {
-    const access = await requireVendorAccess(c)
+    const access = requireVendorSecret(c)
     if (!access.ok) return c.json({ error: access.error }, access.status)
     let body: {
       org_code?: string
@@ -3199,14 +3174,9 @@ export function createApp() {
       expiresAt
     })
 
-    if (access.via === "principal" && access.gate) {
-      await audit(
-        access.gate,
-        "org_settings_update",
-        `Vendor · licence émise ${issued.licenseKey} · ${companyName} · ${orgCode} · ${seats} sièges`,
-        { org_code: orgCode, seats }
-      )
-    }
+    console.log(
+      `[vendor] license issued key=${issued.licenseKey} org=${orgCode} seats=${seats} company=${companyName}`
+    )
 
     return c.json({
       ok: true,
@@ -3244,7 +3214,7 @@ export function createApp() {
 
   /** Révoque une clé émise (ne désactive pas automatiquement l’org déjà activée) */
   v1.post("/vendor/licenses/revoke", async (c) => {
-    const access = await requireVendorAccess(c)
+    const access = requireVendorSecret(c)
     if (!access.ok) return c.json({ error: access.error }, access.status)
     let body: { license_key?: string }
     try {
@@ -3256,13 +3226,7 @@ export function createApp() {
     if (!key) return c.json({ error: "license_key_required" }, 400)
     const ok = await store.revokeIssuedLicense(key)
     if (!ok) return c.json({ error: "not_found_or_already_revoked" }, 404)
-    if (access.via === "principal" && access.gate) {
-      await audit(
-        access.gate,
-        "org_settings_update",
-        `Vendor · licence révoquée ${key}`
-      )
-    }
+    console.log(`[vendor] license revoked key=${key}`)
     return c.json({
       ok: true,
       note: "Clé invalidée pour futures activations. Org déjà en full : révoquer aussi dans Paramètres → Licences."
