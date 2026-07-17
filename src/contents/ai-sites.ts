@@ -533,7 +533,7 @@ function handlePotentialSend(event: Event, sourceEl?: Element | null): void {
   // Toujours proposer le contact admin sur le bandeau (l’API gère non-enrôlé).
   showAlertBanner(
     detections,
-    (decision) => {
+    (decision, meta) => {
       pending = false
 
       if (action === "block" || decision === "cancel") {
@@ -543,10 +543,18 @@ function handlePotentialSend(event: Event, sourceEl?: Element | null): void {
       }
 
       if (decision === "secure_rewrite") {
-        const rw = secureRewriteText(text, detections, {
-          consistentMapping: true,
-          aggressiveness: 2
-        })
+        const fromPreview = meta?.rewrittenText?.trim()
+        const rw = fromPreview
+          ? {
+              rewrittenText: fromPreview,
+              stats: { totalReplacements: meta?.replacementsCount ?? 0 },
+              originalRiskScore: meta?.originalRiskScore ?? 0,
+              remainingRiskScore: meta?.remainingRiskScore ?? 0
+            }
+          : secureRewriteText(text, detections, {
+              consistentMapping: true,
+              aggressiveness: 2
+            })
         setPromptText(rw.rewrittenText)
         logDecision("secure_rewrite", detections, true, "prompt")
         toastFromDecision("secure_rewrite", msgs)
@@ -556,7 +564,8 @@ function handlePotentialSend(event: Event, sourceEl?: Element | null): void {
           "remplacements · risque",
           rw.originalRiskScore,
           "→",
-          rw.remainingRiskScore
+          rw.remainingRiskScore,
+          fromPreview ? "(preview)" : ""
         )
         bypassOnce = true
         setTimeout(() => retriggerSend(sourceEl), 120)
@@ -586,6 +595,7 @@ function handlePotentialSend(event: Event, sourceEl?: Element | null): void {
     },
     {
       source: "prompt",
+      sourceText: text,
       defaultAction: action,
       userMessages: settings.userMessages,
       orgName: settings.orgName,
@@ -801,9 +811,16 @@ async function processQuarantinedFiles(
     const fileAction = settings.defaultAction || "mask_recommend"
     const fileMsgs = mergeUserMessages(settings.userMessages)
 
+    // Texte agrégé pour preview Secure Rewrite (fichiers scannés)
+    const filePreviewText = scans
+      .filter((s) => s.text && s.detections.length > 0)
+      .map((s) => `--- ${s.fileName} ---\n${s.text}`)
+      .join("\n\n")
+      .slice(0, 120_000)
+
     showAlertBanner(
       bannerDetections,
-      (decision) => {
+      (decision, meta) => {
         filePending = false
         const sensitiveScans = scans.filter((s) => s.detections.length > 0)
         // Enrichir types pour le journal (extension + catégorie)
@@ -827,8 +844,9 @@ async function processQuarantinedFiles(
             (decision === "mask_send" || decision === "secure_rewrite") &&
             detections.length > 0
           ) {
-            // Secure Rewrite fichiers : même pipeline mask fichier (contenu texte
-            // déjà nettoyé via engine) — suffixe distinct pour le rewrite
+            // Secure Rewrite fichiers : pipeline mask/rewrite
+            // Si l’utilisateur a édité la preview multi-fichiers, on garde le mode rewrite auto
+            void meta
             const dt = buildMaskedFileList(
               frozen,
               scans as FileScanResult[],
@@ -910,6 +928,7 @@ async function processQuarantinedFiles(
       },
       {
         source: "file",
+        sourceText: filePreviewText || undefined,
         fileNames,
         note: notes.length ? notes.join(" ") : undefined,
         defaultAction: fileAction,
