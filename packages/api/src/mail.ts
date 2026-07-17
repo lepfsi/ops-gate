@@ -373,6 +373,151 @@ export async function sendGenericOtpEmail(opts: {
   })
 }
 
+/**
+ * E-mail d’émission de licence (DailyOps → contact client).
+ * Contient clé, code org, sièges, et premier login (email + mdp 0000 si tenant créé).
+ */
+export async function sendLicenseIssuedEmail(opts: {
+  to: string
+  licenseKey: string
+  orgCode: string
+  companyName: string
+  seats: number
+  expiresAt: string
+  kind?: "full" | "seat_topup"
+  /** Tenant provisionné : mdp initial (souvent 0000) */
+  initialPassword?: string | null
+  tenantCreated?: boolean
+  consoleUrlHint?: string
+  smtp?: OrgSmtpSettings | null
+}): Promise<SendMailResult> {
+  const exp = String(opts.expiresAt).slice(0, 10)
+  const kindLabel =
+    opts.kind === "seat_topup"
+      ? "Pack de sièges additionnels (top-up)"
+      : "Licence complète"
+  const consoleUrl =
+    opts.consoleUrlHint ||
+    process.env.OPSGATE_CONSOLE_URL?.trim() ||
+    "http://127.0.0.1:5173"
+  const loginEmail = opts.to.trim().toLowerCase()
+  const initialPwd =
+    opts.initialPassword ||
+    process.env.OPSGATE_SETUP_PASSWORD ||
+    "0000"
+  const showFirstLogin =
+    opts.tenantCreated === true ||
+    (opts.kind !== "seat_topup" && !!opts.initialPassword)
+
+  const subject =
+    opts.kind === "seat_topup"
+      ? `OpsGate — pack de sièges pour ${opts.companyName}`
+      : `OpsGate — votre licence ${opts.companyName}`
+
+  const loginBlock =
+    opts.kind === "seat_topup"
+      ? [
+          "Activation (admin déjà existant) :",
+          "1. Connectez-vous à la console avec votre compte admin.",
+          "2. Paramètres → Gestion des licences → Ajouter une licence.",
+          `3. Coller la clé : ${opts.licenseKey}`,
+          "4. Les sièges sont ajoutés à votre organisation."
+        ]
+      : showFirstLogin
+        ? [
+            "Première connexion (nouveau client) :",
+            `• E-mail : ${loginEmail}  (e-mail joint à la licence)`,
+            `• Mot de passe initial : ${initialPwd}`,
+            "• Changez ce mot de passe dès la première connexion.",
+            "",
+            "Puis activez la licence :",
+            "1. Paramètres → Gestion des licences → Ajouter une licence.",
+            `2. Coller la clé : ${opts.licenseKey}`,
+            `3. Code organisation (enrôlement agents) : ${opts.orgCode}`
+          ]
+        : [
+            "Activation :",
+            "1. Connectez-vous avec le compte admin de votre organisation.",
+            "2. Paramètres → Gestion des licences → Ajouter une licence.",
+            `3. Coller la clé : ${opts.licenseKey}`,
+            `4. Code organisation : ${opts.orgCode}`
+          ]
+
+  const text = [
+    "OpsGate — DailyOps.Tech",
+    "",
+    `Société : ${opts.companyName}`,
+    `Type : ${kindLabel}`,
+    `Clé licence : ${opts.licenseKey}`,
+    `Code organisation : ${opts.orgCode}`,
+    `Sièges : ${opts.seats}`,
+    `Expiration : ${exp}`,
+    "",
+    `Console : ${consoleUrl}`,
+    "",
+    ...loginBlock,
+    "",
+    "SÉCURITÉ : si vous n'êtes pas le destinataire prévu, ignorez cet e-mail et contactez DailyOps.Tech.",
+    "",
+    "— DailyOps.Tech / OpsGate"
+  ].join("\n")
+
+  const firstLoginHtml = showFirstLogin
+    ? `<div style="margin:16px 0;padding:14px;background:#E6FAF7;border-radius:8px;border:1px solid #2BD9C5">
+      <p style="margin:0 0 8px;font-weight:700;color:#0A1128">Première connexion (nouveau client)</p>
+      <p style="margin:0;font-size:14px;line-height:1.5">
+        E-mail : <code style="font-size:13px">${escHtml(loginEmail)}</code><br/>
+        <span style="color:#64748b;font-size:12px">(e-mail joint à la licence / contact)</span><br/>
+        Mot de passe initial : <code style="font-size:15px;font-weight:700;letter-spacing:1px">${escHtml(initialPwd)}</code><br/>
+        <span style="color:#64748b;font-size:13px">Changez ce mot de passe dès la première connexion.</span>
+      </p>
+    </div>`
+    : `<p style="margin:12px 0 0;font-size:14px">Connectez-vous avec le compte admin de votre organisation, puis activez la clé.</p>`
+
+  const bodyHtml =
+    opts.kind === "seat_topup"
+      ? `
+    <p style="margin:0 0 12px">Voici votre <strong>pack de sièges</strong> OpsGate pour <strong>${escHtml(opts.companyName)}</strong>.</p>
+    <table style="width:100%;font-size:14px;border-collapse:collapse;margin:12px 0">
+      <tr><td style="padding:6px 0;color:#64748b">Clé</td><td style="padding:6px 0;font-family:monospace;font-weight:700">${escHtml(opts.licenseKey)}</td></tr>
+      <tr><td style="padding:6px 0;color:#64748b">Code org</td><td style="padding:6px 0;font-family:monospace">${escHtml(opts.orgCode)}</td></tr>
+      <tr><td style="padding:6px 0;color:#64748b">Sièges à ajouter</td><td style="padding:6px 0"><strong>${opts.seats}</strong></td></tr>
+      <tr><td style="padding:6px 0;color:#64748b">Expiration</td><td style="padding:6px 0">${escHtml(exp)}</td></tr>
+    </table>
+    <p style="margin:12px 0 0">Activation : console → <strong>Paramètres → Licences → Ajouter</strong> → coller la clé.</p>
+    <p style="color:#64748b;font-size:13px;margin:16px 0 0;padding:12px;background:#f8fafc;border-radius:6px;border-left:3px solid #2BD9C5">
+      <strong>Sécurité :</strong> si vous n'êtes pas le destinataire prévu, ignorez cet e-mail.
+    </p>`
+      : `
+    <p style="margin:0 0 12px">Bienvenue sur <strong>OpsGate</strong>. Voici les informations de licence pour <strong>${escHtml(opts.companyName)}</strong>.</p>
+    <table style="width:100%;font-size:14px;border-collapse:collapse;margin:12px 0">
+      <tr><td style="padding:6px 0;color:#64748b">Clé licence</td><td style="padding:6px 0;font-family:monospace;font-weight:700;letter-spacing:0.5px">${escHtml(opts.licenseKey)}</td></tr>
+      <tr><td style="padding:6px 0;color:#64748b">Code organisation</td><td style="padding:6px 0;font-family:monospace">${escHtml(opts.orgCode)}</td></tr>
+      <tr><td style="padding:6px 0;color:#64748b">Sièges</td><td style="padding:6px 0"><strong>${opts.seats}</strong></td></tr>
+      <tr><td style="padding:6px 0;color:#64748b">Expiration</td><td style="padding:6px 0">${escHtml(exp)}</td></tr>
+      <tr><td style="padding:6px 0;color:#64748b">Console</td><td style="padding:6px 0"><a href="${escHtml(consoleUrl)}">${escHtml(consoleUrl)}</a></td></tr>
+    </table>
+    ${firstLoginHtml}
+    <p style="margin:12px 0 0;font-size:14px"><strong>Ensuite</strong> : Paramètres → Gestion des licences → Ajouter → coller la clé ci-dessus.</p>
+    <p style="color:#64748b;font-size:13px;margin:16px 0 0;padding:12px;background:#f8fafc;border-radius:6px;border-left:3px solid #2BD9C5">
+      <strong>Sécurité :</strong> si vous n'êtes pas le destinataire prévu de cette licence, ignorez cet e-mail et contactez DailyOps.Tech.
+    </p>`
+
+  return sendMail({
+    to: opts.to,
+    subject,
+    text,
+    html: brandedEmailHtml({
+      title:
+        opts.kind === "seat_topup"
+          ? "Pack de sièges OpsGate"
+          : "Votre licence OpsGate",
+      bodyHtml
+    }),
+    smtp: opts.smtp
+  })
+}
+
 /** Notification mdp réinitialisé par un admin (pas d’OTP) */
 export async function sendPasswordChangedNotice(opts: {
   to: string

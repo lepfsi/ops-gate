@@ -23,12 +23,22 @@ Un admin client ne peut pas fabriquer de clés pour d’autres organisations.
 
 ## Côté client final (produit vendu)
 
-1. Recevoir de DailyOps : **code organisation** + clé `OPS-XXXX-XXXX-XXXX-XXXX`  
-2. Se connecter à **sa** console (admin principal recommandé)  
-3. **Paramètres → Gestion des licences → Ajouter une licence**  
-4. Coller la clé → Activer  
-5. Vérifier : société, email, sièges, date d’expiration (champs en lecture seule)  
-6. Assigner les sièges aux agents / groupes  
+### Nouveau client (tenant créé avec la licence)
+
+1. Recevoir l’**e-mail brandé OpsGate** (ou le PDF) : clé + code org  
+2. **Première connexion console** :
+   - **E-mail** = l’adresse **contact jointe à la licence**  
+   - **Mot de passe initial** = `0000` (sauf surcharge `OPSGATE_SETUP_PASSWORD` côté serveur)  
+   - Changer le mot de passe tout de suite (écran forcé)  
+3. **Paramètres → Gestion des licences → Ajouter** → coller la clé `OPS-…`  
+4. Vérifier sièges / société / expiration  
+5. Assigner les sièges aux agents  
+
+### Client déjà en place (top-up ou org existante)
+
+1. Login avec le compte admin existant  
+2. Paramètres → Licences → Ajouter la nouvelle clé  
+3. Top-up : sièges **ajoutés** au total  
 
 Révoquer la licence full (retour essai 30 j) : même écran, **Supprimer la licence** (principal).
 

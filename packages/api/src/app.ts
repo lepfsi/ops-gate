@@ -3320,6 +3320,8 @@ export function createApp() {
       years?: number
       provision_org?: boolean
       kind?: "full" | "seat_topup"
+      /** Envoyer l’e-mail brandé au contact (défaut: true) */
+      send_email?: boolean
     }
     try {
       body = await c.req.json()
@@ -3398,6 +3400,49 @@ export function createApp() {
       `[vendor] license issued key=${maskLicenseKey(issued.licenseKey)} kind=${kind} org=${orgCode} seats=${seats} company=${companyName}`
     )
 
+    // E-mail brandé au contact (SMTP plateforme env — pas le SMTP client)
+    const sendEmail = body.send_email !== false
+    let mailResult: {
+      ok: boolean
+      delivery?: string
+      error?: string
+    } | null = null
+    if (sendEmail && contactEmail.includes("@")) {
+      try {
+        const { sendLicenseIssuedEmail } = await import("./mail")
+        const { PRINCIPAL_DEFAULT_PASSWORD } = await import("./crypto")
+        const mailed = await sendLicenseIssuedEmail({
+          to: contactEmail,
+          licenseKey: issued.licenseKey,
+          orgCode,
+          companyName,
+          seats,
+          expiresAt,
+          kind,
+          tenantCreated: !!provision?.created,
+          // Nouveau client (tenant créé) : login = e-mail licence + 0000
+          initialPassword: provision?.created
+            ? provision.tempPassword || PRINCIPAL_DEFAULT_PASSWORD
+            : null,
+          consoleUrlHint: process.env.OPSGATE_CONSOLE_URL?.trim()
+        })
+        mailResult = {
+          ok: mailed.ok,
+          delivery: mailed.delivery,
+          error: mailed.ok ? undefined : "error" in mailed ? mailed.error : undefined
+        }
+      } catch (e) {
+        mailResult = {
+          ok: false,
+          error: e instanceof Error ? e.message : String(e)
+        }
+      }
+    }
+
+    const initialPwd = (
+      await import("./crypto")
+    ).PRINCIPAL_DEFAULT_PASSWORD
+
     return c.json({
       ok: true,
       license_key: issued.licenseKey,
@@ -3421,16 +3466,26 @@ export function createApp() {
             created: provision.created,
             temp_password: provision.tempPassword || null,
             note: provision.created
-              ? "Tenant créé. Communiquer email + mdp temporaire (changement obligatoire à la 1re connexion)."
+              ? `Tenant créé. Login : ${provision.principalEmail} / ${provision.tempPassword || initialPwd} (changement obligatoire).`
               : "Org déjà existante pour ce code — licence seulement."
           }
         : null,
-      client_steps: [
-        "Se connecter à la console de l’organisation (code org ci-dessus).",
-        "Paramètres → Gestion des licences → Ajouter une licence.",
-        `Coller la clé ${issued.licenseKey}`,
-        "Les sièges et coordonnées se remplissent automatiquement."
-      ]
+      email: mailResult,
+      client_steps:
+        kind === "seat_topup"
+          ? [
+              "Se connecter avec le compte admin existant.",
+              "Paramètres → Gestion des licences → Ajouter une licence.",
+              `Coller la clé top-up ${issued.licenseKey}`,
+              "Les sièges sont ajoutés au total de l’organisation."
+            ]
+          : [
+              `Première connexion console : e-mail = ${contactEmail} (contact licence).`,
+              `Mot de passe initial : ${initialPwd} (à changer immédiatement).`,
+              "Paramètres → Gestion des licences → Ajouter une licence.",
+              `Coller la clé ${issued.licenseKey}`,
+              `Code organisation (agents) : ${orgCode}`
+            ]
     })
   })
 

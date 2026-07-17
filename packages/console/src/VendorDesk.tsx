@@ -311,7 +311,9 @@ export default function VendorDesk() {
                     tenant?: {
                       created?: boolean
                       temp_password?: string | null
+                      principal_email?: string
                     }
+                    email?: { ok?: boolean; delivery?: string; error?: string }
                   }>("/v1/vendor/licenses", vendorKey, {
                     method: "POST",
                     body: JSON.stringify({
@@ -322,15 +324,21 @@ export default function VendorDesk() {
                       seats,
                       years,
                       provision_org: kind === "full" && provision,
-                      kind
+                      kind,
+                      send_email: true
                     })
                   })
                   setLastKey(r.license_key)
-                  setInfo(
-                    r.tenant?.created && r.tenant.temp_password
-                      ? `OK · tenant créé · mdp temp : ${r.tenant.temp_password}`
+                  const loginHint =
+                    r.tenant?.created
+                      ? `OK · tenant · login ${r.tenant.principal_email || email} / ${r.tenant.temp_password || "0000"}`
                       : `Licence générée (${r.kind || kind})`
-                  )
+                  const mailHint = r.email?.ok
+                    ? `· e-mail brandé envoyé (${r.email.delivery || "smtp"})`
+                    : r.email?.delivery
+                      ? `· e-mail: ${r.email.delivery}`
+                      : "· e-mail non envoyé (configurer OPSGATE_SMTP_* sur l’API)"
+                  setInfo(`${loginHint} ${mailHint}`)
                   await loadList(vendorKey)
                 } catch (e) {
                   setErr(String(e))
