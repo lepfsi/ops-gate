@@ -2,6 +2,7 @@
 
 **Pour** : DSI, RSSI, RSSI adjoint, architectes sécurité, comités risques  
 **Version produit** : 1.2 / lot V2 (juillet 2026)  
+**Maturité** : **V2 functional / pre-GA** — synthèse [`STATUS-V2.md`](./STATUS-V2.md)  
 **Éditeur** : DailyOps.Tech  
 
 ---
@@ -132,14 +133,17 @@ Utilisateur ──► Site IA (navigateur)
 
 ## 9. Offre & suite produit
 
-| Déjà livré (V1.x + lot V2) | Suite |
-|---------------------------|--------|
-| Extension multi-navigateur, proxy, SSO, MFA multi-tenant, passkeys, LDAP, SIEM, MSI | OCR multilingue élargi, Safari App Store, billing Stripe GA |
-| Scan fichiers PDF/DOCX/PPTX/XLSX + OCR images | Portal personnel self-serve |
-| Audit WORM, backup, notifications multi-canaux, MSP portfolio | Soft-delete org GDPR full |
+| Déjà livré (V1.x + lot V2) | Suite (pre-GA → GA) |
+|---------------------------|---------------------|
+| Extension multi-navigateur, proxy, SSO, MFA multi-tenant, passkeys, LDAP, SIEM, MSI | Publication store réelle (CWS/AMO/Apple), pilote client |
+| Scan fichiers PDF/DOCX/PPTX/XLSX + OCR images | OCR multilingue élargi, Safari App Store public |
+| Audit WORM, backup, notifications multi-canaux, MSP portfolio | Billing Stripe portal GA, soft-delete org GDPR full |
+
+**Installation** : guide intégrateur [`DEPLOIEMENT-CLIENT.md`](./DEPLOIEMENT-CLIENT.md) (+ PDF FR/EN).  
+**Avancement détaillé** : [`STATUS-V2.md`](./STATUS-V2.md) · [`V2-BACKLOG.md`](./V2-BACKLOG.md).
 
 Contact : votre équipe DailyOps.Tech / commercial OpsGate.
 
 ---
 
-*Document confidentiel — usage interne client & partenaires · juillet 2026*
+*Document confidentiel — usage interne client & partenaires · 17 juillet 2026*

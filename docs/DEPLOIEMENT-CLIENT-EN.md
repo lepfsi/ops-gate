@@ -2,6 +2,7 @@
 
 **Audience**: integrators, system admins, pilot CIO/CISO teams  
 **Product version**: 1.2 / V2 batch  
+**Maturity**: **V2 functional / pre-GA** — [`STATUS-V2.md`](./STATUS-V2.md)  
 **Goal**: deploy OpsGate **at the customer site** (not only local lab)
 
 > This is the **deployment entry point**.  
@@ -9,6 +10,7 @@
 
 | Related doc | Content |
 |-------------|---------|
+| [`STATUS-V2.md`](./STATUS-V2.md) | Product progress (shipped vs remaining) |
 | [`FAQ-DEPLOIEMENT-V2.md`](./FAQ-DEPLOIEMENT-V2.md) | MSI / licenses / pilot phases (FR) |
 | [`GUIDE-STACK-LOCALE.md`](./GUIDE-STACK-LOCALE.md) | Single-machine Docker lab |
 | [`architecture/CHROME-WEB-STORE-MDM.md`](./architecture/CHROME-WEB-STORE-MDM.md) | Chrome/Edge force-install |

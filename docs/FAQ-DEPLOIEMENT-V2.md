@@ -1,8 +1,9 @@
 # OpsGate V2 — FAQ déploiement & composants
 
 **Public** : intégrateur, DSI, pilote test, support  
-**Date** : 16 juillet 2026  
-**Statut** : aligné code monorepo (proxy MSI, control plane, extension)
+**Date** : 17 juillet 2026  
+**Statut** : aligné monorepo · **V2 functional / pre-GA** — voir [`STATUS-V2.md`](./STATUS-V2.md)  
+**Déploiement détaillé** : [`DEPLOIEMENT-CLIENT.md`](./DEPLOIEMENT-CLIENT.md)
 
 ---
 

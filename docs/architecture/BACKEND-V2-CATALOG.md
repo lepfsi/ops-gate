@@ -1,23 +1,56 @@
-# Backend V2 — catalogue des capacités (17/07/2026)
+# Backend & produit V2 — catalogue des capacités
 
-## Livré / partiel
+**Mis à jour** : 17 juillet 2026  
+**Statut global** : voir [`../STATUS-V2.md`](../STATUS-V2.md)
+
+---
+
+## 1. Synthèse livré / partiel / suite
 
 | Domaine | Statut | Notes |
 |---------|--------|--------|
-| **Parser PDF + DOCX** | ✅ | `office-extract.ts` (pdfjs + mammoth) |
-| **Parser PPTX + XLSX** | ✅ | OOXML ZIP minimal (`zip-min.ts`) |
-| **OCR images** | ✅ | `scanImages` : Tesseract.js local (PNG/JPEG/WebP…) + SVG texte ; max 4 Mo / 1600 px |
-| **Bulk export agents** | ✅ | CSV/JSON console |
-| **Bulk import CSV agents** | ✅ | `POST /v1/org/agents/import-csv` |
-| **Moving rules AND** | ✅ | multi-conditions V1.x |
-| **Moving rules OR / permanent** | ✅ | `conditionLogic`, `permanent` |
-| **Portal / billing Stripe** | ◐ | Fondations `billing-stripe.ts` + checkout (env keys) |
-| **Backup config + DB** | ✅ | `/org/backup`, `scripts/backup-db.ps1` |
-| **Audit WORM** | ✅ | chaîne SHA-256 |
-| **MSP multi-org** | ✅ | portfolio + MFA switch |
-| **Export logs planifié mail** | ✅ | cron + run-now |
+| Parser PDF + DOCX | ✅ | `office-extract.ts` (pdfjs + mammoth) |
+| Parser PPTX + XLSX | ✅ | OOXML ZIP (`zip-min.ts`) |
+| OCR images | ✅ | Tesseract.js eng, SW background, `scanImages` |
+| Bulk export agents | ✅ | CSV/JSON console |
+| Bulk import CSV agents | ✅ | `POST /v1/org/agents/import-csv` |
+| Moving rules AND | ✅ | multi-conditions |
+| Moving rules OR / permanent | ✅ | `conditionLogic`, `permanent` |
+| Portal / billing Stripe | ◐ | `billing-stripe.ts` + checkout · portal UX V2.1 |
+| Backup config + DB | ✅ | `/org/backup`, `scripts/backup-db.ps1` |
+| Audit WORM | ✅ | SHA-256 chain + integrity API |
+| MSP multi-org | ✅ | portfolio + MFA switch |
+| Export logs planifié mail | ✅ | cron + run-now |
+| Session challenge / read-only | ✅ | 10 s consent |
+| Passkeys UI | ✅ | Settings + login |
+| Notif multi-canal | ✅ | email, Telegram, Slack, webhook |
+| Inbox user→admin | ✅ | extension + console Messages |
+| Deep-links console | ✅ | `hash-route.ts` |
+| SIEM + metrics | ✅ | syslog + Prometheus |
+| Proxy MSI | ✅ | |
+| SSO OIDC/SAML | ✅ | |
+| LDAP + cron | ✅ | |
+| Doc déploiement client | ✅ | `DEPLOIEMENT-CLIENT*.md/.pdf` |
 
-## Formats fichiers scannés (extension)
+---
+
+## 2. API — surfaces clés
+
+| Surface | Paths / modules |
+|---------|-----------------|
+| Auth | login, MFA, OIDC, SAML, WebAuthn, session challenge, switch-org |
+| Org | policy, profiles, groups, users, agents, bulk-assign, import-csv |
+| Moving | `/org/moving-rules` (+ apply-all) |
+| Events | list, export, archives, scheduled export |
+| Audit | `/org/audit`, `/org/audit/integrity` |
+| Backup | `/org/backup`, `/org/backup/import` |
+| Billing | `/billing/status`, `/billing/checkout` |
+| Vendor | licences, status (secret dual-key) |
+| Observability | `/health`, `/metrics`, SIEM forward |
+
+---
+
+## 3. Formats fichiers scannés (extension)
 
 | Format | Extraction |
 |--------|------------|
@@ -30,7 +63,9 @@
 | PNG/JPEG/WebP/… | OCR Tesseract.js (si `scanImages`) |
 | doc/xls/ppt legacy | non supporté → warn |
 
-## Import CSV agents
+---
+
+## 4. Import CSV agents
 
 Colonnes (header, séparateur `,` ou `;`) :
 
@@ -41,11 +76,12 @@ agent_id,device_label,host_name,group,profile,license
 
 - Match : `agent_id` **ou** `device_label` **ou** `host_name` (agent déjà enrollé)
 - `group` / `profile` : nom ou `group_id` / `profile_id`
-- `license` : yes/no/true/false/1/0
+- `license` : yes/no/true/false/1/0  
+- Dry-run : `{ "csv": "...", "dry_run": true }`
 
-Dry-run : `{ "csv": "...", "dry_run": true }`
+---
 
-## Moving rules
+## 5. Moving rules
 
 | Champ | Effet |
 |-------|--------|
@@ -53,7 +89,9 @@ Dry-run : `{ "csv": "...", "dry_run": true }`
 | `only_if_unassigned` | Skip si déjà groupé |
 | `permanent: true` | Force assign même si déjà groupé |
 
-## Stripe (V2.1)
+---
+
+## 6. Stripe (V2.1 fondations)
 
 ```
 OPSGATE_STRIPE_SECRET_KEY=sk_…
@@ -63,4 +101,19 @@ OPSGATE_CONSOLE_URL=https://…
 ```
 
 - `GET /v1/billing/status`
-- `POST /v1/billing/checkout` `{ quantity }` → URL Checkout
+- `POST /v1/billing/checkout` `{ quantity }` → URL Checkout  
+- **Manque pour GA** : webhook `checkout.session.completed` → update seats, UI portal personnel
+
+---
+
+## 7. Docs associées
+
+| Doc | Rôle |
+|-----|------|
+| [`../STATUS-V2.md`](../STATUS-V2.md) | Statut une page |
+| [`../V2-BACKLOG.md`](../V2-BACKLOG.md) | Backlog priorisé |
+| [`../DEPLOIEMENT-CLIENT.md`](../DEPLOIEMENT-CLIENT.md) | Install client |
+| [`../CHANGELOG-TECHNIQUE.md`](../CHANGELOG-TECHNIQUE.md) | Journal dev |
+| [`AUDIT-WORM.md`](./AUDIT-WORM.md) | Intégrité audit |
+| [`BACKUP.md`](./BACKUP.md) | Backups |
+| [`SECRET-ROTATION.md`](./SECRET-ROTATION.md) | Dual-key secrets |

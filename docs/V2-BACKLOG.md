@@ -1,70 +1,109 @@
-# Backlog V2 — ne pas oublier
+# Backlog V2 — état d’avancement
 
-Mis à jour : 17 juillet 2026
+**Mis à jour** : 17 juillet 2026  
+**Jalon** : **V2 functional / pre-GA** — la majeure partie des epics V2.0 est **dans le code** ; restent surtout publications stores réelles, C14N SAML stricte, portal billing GA, multilingue OCR.
 
-## Lots livrés (17/07) — suite backlog console
+Document de synthèse produit : [`STATUS-V2.md`](./STATUS-V2.md)  
+Traces techniques : [`CHANGELOG-TECHNIQUE.md`](./CHANGELOG-TECHNIQUE.md)  
+Design d’origine : [`architecture/PLATFORM-v2.md`](./architecture/PLATFORM-v2.md)
 
-| Item | Statut |
-|------|--------|
-| **Console MSP multi-org** | Portfolio `#/msp` : KPI cross-tenants, ouverture avec MFA |
-| **Audit WORM / rétention légale** | Chaîne SHA-256, vérif intégrité, rétention légale (min 90 j) |
-| **Rotation secrets** | Dual-key `*_PREVIOUS` vendor + doc `SECRET-ROTATION.md` |
-| **SAML/WebAuthn prod** | Signature SAML exigée en prod ; passkeys Postgres |
-| **Polish VendorDesk** | Stats, recherche licences |
+---
 
-## Où on en est (jalon)
+## Où on en est
 
-**V1.x / pré-V2 terrain** : proxy MITM multi-IA + soft-block, rapports PDF, docs DSI, maintenance agents, logs proxy toggle.  
-**Jalon actuel** : P0–P2 larges (Safari build, WebAuthn, SAML SP, LDAP cron, docs V2).  
-**Suite** : publication stores réelles, WebAuthn persisté Postgres, SAML C14N strict.
+| Couche | État |
+|--------|------|
+| **Extension** | Chrome/Edge/Firefox/Safari build · scan PDF/DOCX/PPTX/XLSX · OCR bitmap · inbox user→admin · enroll org |
+| **Proxy** | MITM multi-IA, soft-block, MSI + Node portable, PAC |
+| **API + Postgres** | Multi-tenant, RLS, MFA, SSO, SAML, WebAuthn PG, WORM audit, exports, backups |
+| **Console** | MSP, passkeys, session challenge, notif multi-canal, deep-links, import CSV agents |
+| **Docs** | Guides user/décideurs, **déploiement client**, FAQ, catalogue backend |
+| **Reste GA** | Comptes CWS/AMO/App Store réels · SAML C14N exclusive · Stripe portal GA · OCR fr pack |
 
-Voir le journal détaillé : [`CHANGELOG-TECHNIQUE.md`](./CHANGELOG-TECHNIQUE.md).
+---
 
-## Confirmé pour V2 (priorisé)
+## Epics V2.0 — tableau de bord
 
-| Prio | Item | Notes |
-|------|------|--------|
-| **P0 ✅** | **SIEM / Syslog** | **Livré** : UDP/TCP, RFC 5424 + CEF, config org console Monitoring. Voir `siem.ts` + `docs/grafana/README.md`. |
-| **P0 ✅** | **Métriques + Grafana** | **Livré** : `GET /metrics`, counters + gauges multi-org, dashboard `docs/grafana/opsgate-dashboard.json`. |
-| **P1 ✅** | **Proxy prod** | **Livré** : service/tâche, PAC/GPO, soft-mask on-wire, MSI + **Node portable**, HTTP/2 stream-aware. |
-| **P1 ✅** | **SSO + MFA** | **Livré** : MFA TOTP + OIDC PKCE + **JWKS**, **JIT**, **sso_enforce**. Optionnel : WebAuthn, SAML, claims→rôles. |
-| **P1 ✅** | **Multi-tenant prod** | **Livré** : rate-limit, quotas étendus, Redis optionnel, **RLS Postgres** (`OPSGATE_PG_RLS`, FORCE policies). Optionnel : secrets/org, rôle PG non-superuser. |
-| **P2 ✅ partiel** | **Multi-navigateur** | Chrome + Firefox + **Safari MV3 build** (`pnpm build:safari`). Reste : App Store Apple, comptes store réels. |
-| **P2 ✅** | **Chrome Web Store** + force-install MDM | **Livré** : `pnpm store:chrome`, ZIP CWS, GPO/Intune/Edge reg, self-host update.xml. Reste : publication compte dev réelle. |
-| **P2 ✅** | **LDAP / AD sync** | **Livré** : ldapts, `/org/ldap/test|sync`, console Settings, memberOf → groups. Optionnel : cron, prune, mapping auto profil. |
-| **P3** | **Parser PPT/XLS** | PDF+DOCX déjà V1.x |
-| **P3** | **OCR images** | `scanImages` réservé |
-| **P3** | **Portal personnel / billing** | Stripe V2.1 |
-| **P3** | **Bulk CSV import agents** | Export agents déjà livré |
-| **P3** | **Moving rules OR / permanent** | AND multi-cond déjà V1.x |
+| Epic | Statut | Commentaire |
+|------|--------|-------------|
+| **V2-A Proxy** | ✅ | Prod Windows MSI, enforce/observe, soft-mask |
+| **V2-B SSO** | ✅ | OIDC PKCE + JWKS + JIT + sso_enforce · SAML SP (sig en prod) |
+| **V2-C MFA** | ✅ | TOTP + QR · multi-tenant forcé · passkeys UI + PG · challenge session |
+| **V2-D Multi-tenant** | ✅ | RLS, quotas, rate-limit, MSP portfolio, MFA switch |
+| **V2-E Store / MDM** | ✅ packaging | Artefacts + policies ; **publication compte store = client/ops** |
+| **V2-F Compléments** | ✅ / ◐ | Audit WORM, CSV, webhooks notif, exports planifiés · billing Stripe = fondations |
 
-## Déjà livré (V1.x) — y compris lots récents
+---
 
-- Code org = tenant + licences org  
-- Moving rules multi-conditions AND + priorité + re-apply  
-- Bulk multi-select agents → groupe/profil · **export agents CSV/JSON**  
-- Groupes éditables + description  
-- Audit principal-only + détail policy  
-- Events filtres (décision / sévérité / source / recherche)  
-- Idle logout 5 min + session unique admin  
-- HostPicker multi-IA + pack règles élargi  
-- PDF/DOCX parse (mammoth + pdfjs)  
-- **Proxy P0–P3** : MITM multi-IA, enroll, soft-block par requête, PAC, silent start  
-- **Maintenance agents** (congé / panne / remote)  
-- **Logs proxy** on/off · FP credit-card / JWT  
-- **Rapport sécurité PDF** (semaine / plage / 90 j) — Settings → Rapports  
-- **Docs DSI + Guide PDF** brandés DailyOps (BrandMark login)  
-- Cahier concepteur · charte navy/teal  
+## Backlog priorisé (détail)
+
+### P0 — Observabilité & data plane
+
+| Item | Statut | Notes |
+|------|--------|--------|
+| SIEM / Syslog | ✅ | UDP/TCP, RFC5424 + CEF, console Monitoring |
+| Métriques + Grafana | ✅ | `GET /metrics`, dashboard `docs/grafana/` |
+| Proxy prod | ✅ | MSI, Node portable, PAC/GPO, soft-mask |
+
+### P1 — Identité & multi-tenant
+
+| Item | Statut | Notes |
+|------|--------|--------|
+| MFA TOTP | ✅ | Setup QR, enable/disable, login |
+| MFA multi-tenant forcé | ✅ | Code 6 chiffres à chaque bascule d’org |
+| Session concurrente | ✅ | Accept/refuse 10 s · lecture seule |
+| OIDC + JWKS + JIT + enforce | ✅ | |
+| SAML SP | ✅ | Metadata, ACS · signature IdP en prod |
+| WebAuthn / passkeys | ✅ | UI console + login · persistance Postgres |
+| Multi-tenant RLS / quotas / rate-limit | ✅ | Redis optionnel |
+| Console MSP multi-org | ✅ | Portfolio `#/msp` |
+
+### P2 — Distribution & annuaire
+
+| Item | Statut | Notes |
+|------|--------|--------|
+| Chrome Web Store package + MDM | ✅ | Reste : compte publisher réel |
+| Firefox AMO package + policies | ✅ | Reste : soumission AMO |
+| Safari MV3 build | ✅ | Reste : App Store Apple |
+| LDAP / AD + cron | ✅ | Test/sync console · prune/map profil = optionnel |
+
+### P3 — Fichiers, agents, billing, polish
+
+| Item | Statut | Notes |
+|------|--------|--------|
+| Parser PDF + DOCX | ✅ | V1.x |
+| Parser PPTX + XLSX | ✅ | OOXML ZIP |
+| OCR images | ✅ | Tesseract.js eng · SVG texte · max 4 Mo |
+| Bulk export agents | ✅ | CSV/JSON |
+| Bulk **import** CSV agents | ✅ | `POST /org/agents/import-csv` |
+| Moving rules AND | ✅ | V1.x multi-cond |
+| Moving rules **OR / permanent** | ✅ | |
+| Audit WORM + rétention légale | ✅ | |
+| Backup config + `pg_dump` script | ✅ | |
+| Notifications email + Telegram/Slack/webhook | ✅ | |
+| Export logs planifié + run-now | ✅ | |
+| Inbox user → admin | ✅ | |
+| Deep-links console | ✅ | |
+| Portal personnel / billing Stripe | ◐ | Checkout API fondations · UI portal V2.1 |
+| Vendor desk polish | ✅ | Stats, recherche |
+
+---
+
+## Suite recommandée (post-current)
+
+1. **Publication** CWS / AMO / Apple (comptes et process métier)  
+2. **SAML** C14N exclusive stricte + tests IdP clients  
+3. **Stripe** webhook → sièges auto + page portal  
+4. **OCR** pack `fra` optionnel / perf worker  
+5. **OIDC/SAML state** multi-instance (Redis)  
+6. Soft-delete org GDPR full  
+
+---
 
 ## Liens
 
-- **[`CHANGELOG-TECHNIQUE.md`](./CHANGELOG-TECHNIQUE.md)** — traces « comment c’est fait »  
-- [`CAHIER-CONCEPTEUR.md`](./CAHIER-CONCEPTEUR.md)  
-- [`ORG-CODE-AND-TENANT.md`](./ORG-CODE-AND-TENANT.md)  
-- [`ROADMAP-TESTERS.md`](./ROADMAP-TESTERS.md)  
-- [`architecture/PLATFORM-v2.md`](./architecture/PLATFORM-v2.md)  
-- [`RULE-PACKS.md`](./RULE-PACKS.md)  
-- [`DSI-FILTRAGE-DONNEES-SENSIBLES.md`](./DSI-FILTRAGE-DONNEES-SENSIBLES.md)  
-- Guides : `GUIDE-UTILISATEUR.md` · `architecture/PROXY-RUNBOOK.md`  
-
-
+- [`STATUS-V2.md`](./STATUS-V2.md) — synthèse une page  
+- [`DEPLOIEMENT-CLIENT.md`](./DEPLOIEMENT-CLIENT.md) — install chez le client  
+- [`CHANGELOG-TECHNIQUE.md`](./CHANGELOG-TECHNIQUE.md)  
+- [`architecture/BACKEND-V2-CATALOG.md`](./architecture/BACKEND-V2-CATALOG.md)  
+- Guides PDF : `GUIDE-UTILISATEUR-V2*.pdf`, `DECIDEURS-V2-*.pdf`, `DEPLOIEMENT-CLIENT*.pdf`  

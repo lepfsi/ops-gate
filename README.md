@@ -2,11 +2,11 @@
 
 **Utilisez l’IA librement. Protégez vos données automatiquement.**
 
-**Version : 1.2.0 (V1 early-customer)** — voir [`docs/RELEASE-v1.md`](docs/RELEASE-v1.md) · pilote [`docs/RELEASE-v1.1.md`](docs/RELEASE-v1.1.md)
+**Version : 1.2.x monorepo · maturité V2 functional / pre-GA** — synthèse [`docs/STATUS-V2.md`](docs/STATUS-V2.md) · cut V2 [`docs/RELEASE-v2.md`](docs/RELEASE-v2.md) · socle V1 [`docs/RELEASE-v1.md`](docs/RELEASE-v1.md)
 
-OpsGate est une extension navigateur (**Chrome / Edge / Firefox**, Manifest V3) de **Data Loss Prevention légère** pour ChatGPT, Claude et Gemini, avec control plane optionnel (API + Console) et **proxy local** multi-IA.
+OpsGate est une plateforme de **Data Loss Prevention légère** pour l’IA générative : extension navigateur (**Chrome / Edge / Firefox / Safari build**, Manifest V3), control plane (API + Console multi-tenant), **proxy local** multi-IA, SSO/MFA/passkeys, audit WORM.
 
-**Traces techniques** : [`docs/CHANGELOG-TECHNIQUE.md`](docs/CHANGELOG-TECHNIQUE.md) · roadmap [`docs/V2-BACKLOG.md`](docs/V2-BACKLOG.md)
+**Statut produit** : [`docs/STATUS-V2.md`](docs/STATUS-V2.md) · **traces** : [`docs/CHANGELOG-TECHNIQUE.md`](docs/CHANGELOG-TECHNIQUE.md) · **backlog** : [`docs/V2-BACKLOG.md`](docs/V2-BACKLOG.md)
 
 **Déploiement client** : [`DEPLOIEMENT-CLIENT.pdf`](docs/DEPLOIEMENT-CLIENT.pdf) · [EN](docs/DEPLOIEMENT-CLIENT-EN.pdf) · [md FR](docs/DEPLOIEMENT-CLIENT.md)  
 **Décideurs (V2)** : [`DECIDEURS-V2-FR.pdf`](docs/DECIDEURS-V2-FR.pdf) · [`DECIDEURS-V2-EN.pdf`](docs/DECIDEURS-V2-EN.pdf)  
@@ -14,17 +14,21 @@ OpsGate est une extension navigateur (**Chrome / Edge / Firefox**, Manifest V3) 
 
 En mode local, tout le traitement est **local**. En mode org, seules des **métadonnées** d’événements peuvent être centralisées (pas le prompt).
 
-## Fonctionnalités (V1 / 1.2)
+## Fonctionnalités (V1 + lot V2 embarqué)
 
 - Interception des **prompts** (Entrée / bouton Envoyer)
-- Interception des **uploads** (fichiers texte) avec quarantaine avant jointure
+- Interception des **uploads** : texte, **PDF/DOCX/PPTX/XLSX**, **OCR images** (Tesseract si policy)
 - Détection **générale** : secrets, API keys, OpenAI/Anthropic/HF, mots de passe, PII, IBAN, cartes, Azure/GCP/Stripe, JWT, .env…
 - Détection **infra** : Fortinet, Cisco, Juniper, **Huawei**, **MikroTik**, **Palo Alto**, pfSense/OPNsense, WireGuard/OpenVPN, Arista, credentials réseau
-- Sites IA : ChatGPT, Claude, Gemini, **Copilot**, **Perplexity**, **DeepSeek**, **AI Studio**
+- Sites IA : ChatGPT, Claude, Gemini, **Copilot**, **Perplexity**, **DeepSeek**, **AI Studio**, Grok, etc.
 - Bandeau non bloquant : masquer · envoyer quand même · détails · annuler
-- Control plane : API + Console + Postgres durable (admins, profils, licences)
+- **Proxy local** MITM multi-IA (MSI Windows, soft-block)
+- Control plane : API + Console multi-tenant (RLS), **SSO OIDC/SAML**, **MFA TOTP**, **passkeys**, MSP
+- Audit **WORM**, backup config/DB, notifs multi-canaux, export logs planifié, import CSV agents
 - Journal local + activation ON/OFF
 - Identité visuelle (icônes + wordmark dans `assets/`)
+
+Détail avancement : [`docs/STATUS-V2.md`](docs/STATUS-V2.md)
 
 ## Installer en dev / test
 
@@ -139,8 +143,9 @@ docker compose up -d
 ```
 
 **Guide complet Docker + API + extension** : [`docs/GUIDE-STACK-LOCALE.md`](docs/GUIDE-STACK-LOCALE.md)  
+**Déploiement chez le client** : [`docs/DEPLOIEMENT-CLIENT.md`](docs/DEPLOIEMENT-CLIENT.md)  
 Runbook court : [`docs/RUNBOOK-OPS.md`](docs/RUNBOOK-OPS.md)  
-**V2 (draft)** — proxy, SSO, MFA, multi-tenant, Chrome Store : [`docs/architecture/PLATFORM-v2.md`](docs/architecture/PLATFORM-v2.md) · [`docs/RELEASE-v2.md`](docs/RELEASE-v2.md)
+**V2 (functional / pre-GA)** : [`docs/STATUS-V2.md`](docs/STATUS-V2.md) · [`docs/RELEASE-v2.md`](docs/RELEASE-v2.md) · design [`docs/architecture/PLATFORM-v2.md`](docs/architecture/PLATFORM-v2.md)
 
 Org démo : code **`DEMO-OPSGATE`**
 
@@ -148,6 +153,6 @@ Org démo : code **`DEMO-OPSGATE`**
 
 Voir **OpsGate - Spécification MVP v1.0** (Drive) et `README2.md` (notes dev).
 
-## Hors scope V1
+## Hors scope / reste pre-GA
 
-Proxy local, SSO SAML/OIDC, portal personnel cloud, LDAP, Chrome Web Store public, MFA, block forcé par défaut — voir [`docs/RELEASE-v1.md`](docs/RELEASE-v1.md).
+Publication réelle CWS/AMO/App Store, portal billing Stripe complet, SAML C14N exclusive stricte, OCR multilingue fr embarqué, HA multi-région — voir [`docs/STATUS-V2.md`](docs/STATUS-V2.md) · [`docs/V2-BACKLOG.md`](docs/V2-BACKLOG.md).

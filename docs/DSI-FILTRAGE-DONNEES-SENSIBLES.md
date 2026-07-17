@@ -282,7 +282,7 @@ ChatGPT / OpenAI, Claude, Gemini / Bard / AI Studio, Copilot, Grok, Perplexity, 
 | **Ce document** | DSI / RSSI / décideurs |
 | `GUIDE-UTILISATEUR.md` (+ PDF / DOCX) | Admins & pilotes |
 | `architecture/PROXY-RUNBOOK.md` | Ops technique proxy |
-| `V2-BACKLOG.md` / `architecture/PLATFORM-v2.md` | Roadmap |
+| `STATUS-V2.md` / `V2-BACKLOG.md` / `architecture/PLATFORM-v2.md` | Statut V2 + roadmap |
 | Charte visuelle | Navy `#0A1128` · Teal `#2BD9C5` · Soft `#E6FAF7` · assets `packages/console/public/brand/` |
 
 ---

@@ -1,10 +1,13 @@
 # OpsGate Platform — Vision & Design **V2**
 
-**Date** : 12 juillet 2026  
-**Statut** : **DRAFT PRODUIT** (préparation pendant stabilisation V1 terrain)  
-**Version cible** : **2.0.0** (GA early enterprise)  
-**Base** : V1 early-customer (`1.2.x`) — [`../RELEASE-v1.md`](../RELEASE-v1.md)  
+**Date** : 12 juillet 2026 · **revu** : 17 juillet 2026  
+**Statut** : **RÉFÉRENCE DESIGN** — implémentation majoritairement livrée (**V2 functional / pre-GA**)  
+**Version code** : monorepo `1.2.x` (features V2 embarquées) · **GA marketing** : en attente pilote + stores  
+**Synthèse avancement** : [`../STATUS-V2.md`](../STATUS-V2.md) · backlog [`../V2-BACKLOG.md`](../V2-BACKLOG.md) · cut [`../RELEASE-v2.md`](../RELEASE-v2.md)  
+**Base** : V1 early-customer — [`../RELEASE-v1.md`](../RELEASE-v1.md)  
 **Héritage design** : [`PLATFORM-v1.1.md`](./PLATFORM-v1.1.md) §10 (proxy), control plane, privacy  
+
+> Ce document reste la **spécification de design** d’origine. Pour l’état **réel du code**, lire STATUS-V2 / V2-BACKLOG / CHANGELOG-TECHNIQUE §22 — ne pas traiter ce fichier comme « non implémenté ».
 
 ---
 
@@ -531,7 +534,9 @@ V2-F  Strict mode + webhooks + CSV + audit         (polish GA)
 | 11/07/2026 | Proxy design only (PLATFORM v1.1 §10) |
 | 12/07/2026 | V1 early-customer (Postgres full, hosts, validate-pg) |
 | 12/07/2026 | **Ce document** — draft V2 (proxy, MFA, SSO, multi-tenant, store) |
+| 16–17/07/2026 | Implémentation majeure epics A–F + OCR/PPTX + docs déploiement |
+| 17/07/2026 | Statut produit **functional / pre-GA** — voir STATUS-V2 |
 
 ---
 
-*Statut : draft pour validation produit pendant la phase de tests terrain V1. Pas d’implémentation V2 tant que le go produit n’est pas signé.*
+*Statut 17/07/2026 : design validé par l’implémentation terrain. Reste GA marketing = publication store, pilote client, polish billing/SAML (STATUS-V2).*
