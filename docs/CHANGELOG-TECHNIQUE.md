@@ -417,6 +417,17 @@ Env : `OPSGATE_GDPR_PURGE_DAYS` (30), `OPSGATE_GDPR_CRON_MINUTES` (60).
 
 ---
 
+## 28. Secure Rewrite — preview côte à côte (17 juillet 2026)
+
+| Sujet | Détail | Fichiers |
+|-------|--------|---------|
+| Preview UX | Original \| version sécurisée, scores risque, liste changements | `banner.ts` |
+| Édition | Textarea version sécurisée avant apply | `banner.ts` |
+| Meta | `rewrittenText` transmis au content script | `ai-sites.ts` |
+| Escape | Retour alerte depuis preview (pas cancel) | |
+
+---
+
 ## Convention pour les prochains changements
 
 Quand tu modifies le produit :

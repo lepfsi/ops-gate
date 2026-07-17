@@ -1,4 +1,4 @@
-import type { Detection } from "@opsgate/engine"
+import { secureRewrite, type Detection } from "@opsgate/engine"
 
 import { ext } from "./browser-api"
 import type {
@@ -11,8 +11,18 @@ import { DEFAULT_USER_MESSAGES, mergeUserMessages } from "../types"
 
 const BANNER_ID = "opsgate-alert-banner"
 
+export type BannerDecisionMeta = {
+  /** Texte Secure Rewrite (éventuellement édité par l’utilisateur) */
+  rewrittenText?: string
+  originalRiskScore?: number
+  remainingRiskScore?: number
+  replacementsCount?: number
+}
+
 /** Handler de décision du bandeau actif (pour forcer cancel si popup admin) */
-let activeBannerDecision: ((d: UserDecision) => void) | null = null
+let activeBannerDecision:
+  | ((d: UserDecision, meta?: BannerDecisionMeta) => void)
+  | null = null
 
 const SEVERITY_COLOR: Record<string, string> = {
   high: "#dc2626",
@@ -24,6 +34,8 @@ export interface BannerOptions {
   source?: DetectionSource
   fileNames?: string[]
   note?: string
+  /** Texte original intercepté — requis pour preview Secure Rewrite */
+  sourceText?: string
   /** Action policy effective */
   defaultAction?: DefaultAction
   /** Messages admin (partial OK) */
@@ -59,6 +71,15 @@ const SHADOW_CSS = `
     overflow: hidden;
     animation: og-in 0.2s ease-out;
   }
+  .wrap.rewrite-mode {
+    width: min(920px, calc(100vw - 20px));
+    max-height: min(92vh, 820px);
+    display: flex;
+    flex-direction: column;
+  }
+  .wrap.rewrite-mode .alert-main { display: none; }
+  .wrap:not(.rewrite-mode) .rewrite-panel { display: none; }
+  .wrap.contact-mode .rewrite-panel { display: none !important; }
   .wrap.mode-block {
     border-color: #fecaca;
   }
@@ -324,6 +345,121 @@ const SHADOW_CSS = `
     opacity: 0.55;
     cursor: not-allowed;
   }
+  /* Secure Rewrite preview côte à côte */
+  .rewrite-panel {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    flex: 1;
+    background: #f8fafc;
+  }
+  .rewrite-header {
+    padding: 12px 16px 8px;
+    border-bottom: 1px solid #e2e8f0;
+    background: linear-gradient(180deg, #ecfdf5 0%, #f8fafc 70%);
+  }
+  .rewrite-header .title {
+    margin: 0;
+    font-size: 15px;
+    font-weight: 750;
+    color: #0f172a;
+  }
+  .rewrite-header .sub {
+    margin: 4px 0 0;
+    font-size: 12px;
+    color: #475569;
+    line-height: 1.4;
+  }
+  .rewrite-scores {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 8px;
+  }
+  .score-chip {
+    font-size: 11px;
+    font-weight: 750;
+    padding: 3px 8px;
+    border-radius: 999px;
+    border: 1px solid #cbd5e1;
+    background: #fff;
+    color: #334155;
+  }
+  .score-chip.high { border-color: #fecaca; background: #fef2f2; color: #b91c1c; }
+  .score-chip.low { border-color: #a7f3d0; background: #ecfdf5; color: #047857; }
+  .rewrite-columns {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0;
+    min-height: 180px;
+    max-height: min(48vh, 360px);
+    border-bottom: 1px solid #e2e8f0;
+  }
+  @media (max-width: 640px) {
+    .rewrite-columns { grid-template-columns: 1fr; max-height: min(60vh, 420px); }
+  }
+  .rewrite-col {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    border-right: 1px solid #e2e8f0;
+  }
+  .rewrite-col:last-child { border-right: none; }
+  .rewrite-col-label {
+    padding: 6px 12px;
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: #64748b;
+    background: #f1f5f9;
+    border-bottom: 1px solid #e2e8f0;
+  }
+  .rewrite-col-label.secure { color: #0f766e; background: #ecfdf5; }
+  .rewrite-col pre,
+  .rewrite-col textarea {
+    flex: 1;
+    margin: 0;
+    padding: 10px 12px;
+    overflow: auto;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 12px;
+    line-height: 1.45;
+    white-space: pre-wrap;
+    word-break: break-word;
+    color: #0f172a;
+    background: #fff;
+    border: none;
+    resize: none;
+    box-sizing: border-box;
+    width: 100%;
+    min-height: 140px;
+  }
+  .rewrite-col textarea:focus {
+    outline: 2px solid #2bd9c5;
+    outline-offset: -2px;
+  }
+  .rewrite-changes {
+    padding: 8px 14px;
+    max-height: 88px;
+    overflow-y: auto;
+    font-size: 11px;
+    color: #475569;
+    background: #fff;
+    border-bottom: 1px solid #e2e8f0;
+  }
+  .rewrite-changes strong { color: #0f172a; }
+  .rewrite-changes ul {
+    margin: 4px 0 0;
+    padding-left: 18px;
+  }
+  .rewrite-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 12px 16px 14px;
+    background: #f8fafc;
+  }
 `
 
 /**
@@ -356,7 +492,7 @@ export function isBannerOpen(): boolean {
 
 export function showAlertBanner(
   detections: Detection[],
-  onDecision: (decision: UserDecision) => void,
+  onDecision: (decision: UserDecision, meta?: BannerDecisionMeta) => void,
   options: BannerOptions = {}
 ): void {
   // Remplace un bandeau existant sans double-cancel
@@ -447,7 +583,7 @@ export function showAlertBanner(
     ? `<button type="button" class="btn-contact" data-action="toggle_contact" title="Envoyer un message à l'administrateur">Contacter l'admin</button>`
     : ""
 
-  // Secure Rewrite = action principale (sauf block)
+  // Secure Rewrite = ouvre preview côte à côte (sauf block)
   const actionsHtml = isBlock
     ? `
       <button type="button" class="btn-primary" data-action="cancel">${escapeHtml(msgs.btnBlockAck)}</button>
@@ -456,14 +592,14 @@ export function showAlertBanner(
     `
     : isForce
       ? `
-      <button type="button" class="btn-accent" data-action="secure_rewrite" title="Anonymisation intelligente">${escapeHtml(rewriteLabel)}</button>
+      <button type="button" class="btn-accent" data-action="open_rewrite" title="Aperçu Secure Rewrite">${escapeHtml(rewriteLabel)}</button>
       <button type="button" class="btn-secondary" data-action="mask_send">${escapeHtml(maskLabel)}</button>
       ${contactBtnHtml}
       <button type="button" class="btn-secondary" data-action="toggle_details">Voir les détails</button>
       <button type="button" class="btn-ghost" data-action="cancel">${escapeHtml(cancelLabel)}</button>
     `
       : `
-      <button type="button" class="btn-accent" data-action="secure_rewrite" title="Anonymisation intelligente">${escapeHtml(rewriteLabel)}</button>
+      <button type="button" class="btn-accent" data-action="open_rewrite" title="Aperçu Secure Rewrite">${escapeHtml(rewriteLabel)}</button>
       <button type="button" class="btn-secondary" data-action="mask_send">${escapeHtml(maskLabel)}</button>
       <button type="button" class="btn-danger" data-action="send_anyway">${escapeHtml(allowLabel)}</button>
       ${contactBtnHtml}
@@ -551,6 +687,29 @@ export function showAlertBanner(
     </div>`
         : ""
     }
+    <div class="rewrite-panel" id="og-rewrite" aria-label="Secure Rewrite preview">
+      <div class="rewrite-header">
+        <p class="title">Secure Rewrite — aperçu</p>
+        <p class="sub">Comparez l’original et la version sécurisée. Vous pouvez modifier la version sécurisée avant d’envoyer.</p>
+        <div class="rewrite-scores" id="og-rewrite-scores"></div>
+      </div>
+      <div class="rewrite-columns">
+        <div class="rewrite-col">
+          <div class="rewrite-col-label">Original</div>
+          <pre id="og-rewrite-original"></pre>
+        </div>
+        <div class="rewrite-col">
+          <div class="rewrite-col-label secure">Version sécurisée</div>
+          <textarea id="og-rewrite-secure" spellcheck="false"></textarea>
+        </div>
+      </div>
+      <div class="rewrite-changes" id="og-rewrite-changes"></div>
+      <div class="rewrite-actions">
+        <button type="button" class="btn-accent" data-action="apply_rewrite">Utiliser la version sécurisée</button>
+        <button type="button" class="btn-secondary" data-action="focus_edit">Modifier</button>
+        <button type="button" class="btn-ghost" data-action="close_rewrite">Retour</button>
+      </div>
+    </div>
   `
 
   const style = document.createElement("style")
@@ -578,8 +737,10 @@ export function showAlertBanner(
 
   let detailsOpen = false
   let contactOpen = false
+  let rewriteOpen = false
   let contactSending = false
   let decided = false
+  let lastRewriteMeta: BannerDecisionMeta = {}
 
   const contactPanel = root.querySelector("#og-contact") as HTMLElement | null
   const contactStatus = root.querySelector(
@@ -593,6 +754,18 @@ export function showAlertBanner(
   ) as HTMLTextAreaElement | null
   const postContactNote = root.querySelector(
     "#og-post-contact"
+  ) as HTMLElement | null
+  const rewriteOriginal = root.querySelector(
+    "#og-rewrite-original"
+  ) as HTMLElement | null
+  const rewriteSecure = root.querySelector(
+    "#og-rewrite-secure"
+  ) as HTMLTextAreaElement | null
+  const rewriteScores = root.querySelector(
+    "#og-rewrite-scores"
+  ) as HTMLElement | null
+  const rewriteChanges = root.querySelector(
+    "#og-rewrite-changes"
   ) as HTMLElement | null
 
   const setContactStatus = (text: string, kind: "ok" | "err" | null) => {
@@ -644,7 +817,7 @@ export function showAlertBanner(
     }
   }
 
-  const decide = (decision: UserDecision) => {
+  const decide = (decision: UserDecision, meta?: BannerDecisionMeta) => {
     if (decided) return
     // En mode block, seul cancel est possible
     if (isBlock && decision !== "cancel") return
@@ -654,10 +827,86 @@ export function showAlertBanner(
     activeBannerDecision = null
     document.getElementById(BANNER_ID)?.remove()
     try {
-      onDecision(decision)
+      onDecision(decision, meta)
     } catch (err) {
       console.error("[OpsGate] Erreur décision bandeau:", err)
     }
+  }
+
+  const riskChipClass = (score: number) =>
+    score >= 60 ? "high" : score <= 20 ? "low" : ""
+
+  const openRewritePreview = () => {
+    const sourceText = (options.sourceText || "").trim()
+    if (!sourceText) {
+      // Fallback : appliquer sans preview (fichiers sans texte agrégé)
+      decide("secure_rewrite")
+      return
+    }
+    const result = secureRewrite(sourceText, detections, {
+      consistentMapping: true,
+      aggressiveness: 2
+    })
+    lastRewriteMeta = {
+      rewrittenText: result.rewrittenText,
+      originalRiskScore: result.originalRiskScore,
+      remainingRiskScore: result.remainingRiskScore,
+      replacementsCount: result.stats.totalReplacements
+    }
+    if (rewriteOriginal) rewriteOriginal.textContent = sourceText
+    if (rewriteSecure) {
+      rewriteSecure.value = result.rewrittenText
+      rewriteSecure.readOnly = false
+    }
+    if (rewriteScores) {
+      rewriteScores.innerHTML = `
+        <span class="score-chip ${riskChipClass(result.originalRiskScore)}">Risque original : ${result.originalRiskScore}/100</span>
+        <span class="score-chip ${riskChipClass(result.remainingRiskScore)}">Après rewrite : ${result.remainingRiskScore}/100</span>
+        <span class="score-chip">${result.stats.totalReplacements} remplacement${result.stats.totalReplacements > 1 ? "s" : ""}</span>
+      `
+    }
+    if (rewriteChanges) {
+      const lines = result.changes.slice(0, 12).map((c) => {
+        const o =
+          c.original.length > 48 ? c.original.slice(0, 48) + "…" : c.original
+        const n =
+          c.replacement.length > 48
+            ? c.replacement.slice(0, 48) + "…"
+            : c.replacement
+        return `<li><strong>${escapeHtml(c.category)}</strong> : <code>${escapeHtml(o)}</code> → <code>${escapeHtml(n)}</code></li>`
+      })
+      const more =
+        result.changes.length > 12
+          ? `<li>… et ${result.changes.length - 12} de plus</li>`
+          : ""
+      rewriteChanges.innerHTML = lines.length
+        ? `<strong>Modifications</strong><ul>${lines.join("")}${more}</ul>`
+        : `<strong>Modifications</strong><p class="sub" style="margin:4px 0 0">Aucun remplacement listé (heuristiques éventuelles déjà appliquées).</p>`
+    }
+    rewriteOpen = true
+    contactOpen = false
+    root.classList.remove("contact-mode")
+    root.classList.add("rewrite-mode")
+    rewriteSecure?.focus()
+  }
+
+  const closeRewritePreview = () => {
+    rewriteOpen = false
+    root.classList.remove("rewrite-mode")
+  }
+
+  const applyRewriteFromPreview = () => {
+    const edited = (rewriteSecure?.value ?? lastRewriteMeta.rewrittenText ?? "")
+      .trim()
+    if (!edited) {
+      // Rien à envoyer — revenir
+      closeRewritePreview()
+      return
+    }
+    decide("secure_rewrite", {
+      ...lastRewriteMeta,
+      rewrittenText: edited
+    })
   }
 
   const sendContact = async () => {
@@ -740,6 +989,11 @@ export function showAlertBanner(
         setContactOpen(false)
         return
       }
+      // Preview rewrite : retour à l’alerte (pas cancel)
+      if (rewriteOpen) {
+        closeRewritePreview()
+        return
+      }
       decide("cancel")
     }
   }
@@ -788,6 +1042,24 @@ export function showAlertBanner(
 
       if (act === "send_contact") {
         void sendContact()
+        return
+      }
+
+      if (act === "open_rewrite") {
+        openRewritePreview()
+        return
+      }
+      if (act === "close_rewrite") {
+        closeRewritePreview()
+        return
+      }
+      if (act === "focus_edit") {
+        rewriteSecure?.focus()
+        rewriteSecure?.select()
+        return
+      }
+      if (act === "apply_rewrite") {
+        applyRewriteFromPreview()
         return
       }
 

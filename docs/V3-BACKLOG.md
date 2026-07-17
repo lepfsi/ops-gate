@@ -85,7 +85,7 @@ Alternative acceptable si besoin commercial RSSI d’abord : **V3-C avant V3-A**
 | `secureRewrite()` dans `@opsgate/engine` | Règles IP, secrets, hostnames, PII… | [x] |
 | Mapping cohérent dans un même document | Même host → même pseudonyme | [x] |
 | Bouton bandeau **Secure Rewrite & envoyer** | Action principale (mask simple en secondaire) | [x] |
-| Modal côte à côte (preview) | Spec complète — **suite polish** | [ ] |
+| Modal côte à côte (preview) | Original \| sécurisé + scores + édition | [x] |
 | Décision event `secure_rewrite` | Journal + API `masked=true` | [x] |
 | Scores risque original / restant | Calculés + log console | [x] |
 | Fichiers texte | `buildMaskedFileList(..., secure_rewrite)` | [x] |
