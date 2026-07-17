@@ -11,7 +11,7 @@ import {
   showToast,
   toastFromDecision
 } from "~lib/banner"
-import { ext } from "~lib/browser-api"
+import { ext, sendMessageWithRetry } from "~lib/browser-api"
 import { mergeUserMessages } from "~types"
 import {
   detectTextSync,
@@ -200,27 +200,41 @@ async function maybeShowPendingAdminReply() {
 void maybeShowPendingAdminReply()
 setInterval(() => void maybeShowPendingAdminReply(), 20_000)
 
-function logDecision(
+/**
+ * Journal local + report cloud via service worker.
+ * Await + retries : le fire-and-forget MV3 perdait send_anyway / mask / rewrite
+ * (SW endormi ou tué avant le POST /v1/events/batch).
+ */
+async function logDecision(
   decision: UserDecision,
   detections: Detection[],
   masked: boolean,
   source: DetectionSource = "prompt",
   fileNames?: string[]
-) {
+): Promise<boolean> {
+  const entry = buildJournalPayload(
+    location.href,
+    decision,
+    detections,
+    masked,
+    source,
+    fileNames
+  )
   try {
-    ext.runtime.sendMessage({
-      type: "LOG_DETECTION",
-      entry: buildJournalPayload(
-        location.href,
-        decision,
-        detections,
-        masked,
-        source,
-        fileNames
-      )
-    })
-  } catch {
-    // ignore
+    const r = await sendMessageWithRetry<{ ok?: boolean; error?: string }>(
+      { type: "LOG_DETECTION", entry },
+      3,
+      140
+    )
+    if (r?.ok) {
+      console.log("[OpsGate] decision logged", decision)
+      return true
+    }
+    console.warn("[OpsGate] LOG_DETECTION not ok", decision, r)
+    return false
+  } catch (e) {
+    console.error("[OpsGate] LOG_DETECTION failed", decision, e)
+    return false
   }
 }
 
@@ -538,64 +552,78 @@ function handlePotentialSend(event: Event, sourceEl?: Element | null): void {
     detections,
     (decision, meta) => {
       pending = false
+      // Async : journaliser AVANT retriggerSend (sinon event perdu en course)
+      void (async () => {
+        try {
+          if (action === "block" || decision === "cancel") {
+            await logDecision("cancel", detections, false, "prompt")
+            toastFromDecision(action === "block" ? "blocked" : "cancel", msgs)
+            return
+          }
 
-      if (action === "block" || decision === "cancel") {
-        logDecision("cancel", detections, false, "prompt")
-        toastFromDecision(action === "block" ? "blocked" : "cancel", msgs)
-        return
-      }
+          if (decision === "secure_rewrite") {
+            const fromPreview = meta?.rewrittenText?.trim()
+            const rw = fromPreview
+              ? {
+                  rewrittenText: fromPreview,
+                  stats: { totalReplacements: meta?.replacementsCount ?? 0 },
+                  originalRiskScore: meta?.originalRiskScore ?? 0,
+                  remainingRiskScore: meta?.remainingRiskScore ?? 0
+                }
+              : secureRewriteText(text, detections, {
+                  consistentMapping: true,
+                  aggressiveness: 2
+                })
+            setPromptText(rw.rewrittenText)
+            await logDecision("secure_rewrite", detections, true, "prompt")
+            toastFromDecision("secure_rewrite", msgs)
+            console.log(
+              "[OpsGate] Secure Rewrite",
+              rw.stats.totalReplacements,
+              "remplacements · risque",
+              rw.originalRiskScore,
+              "→",
+              rw.remainingRiskScore,
+              fromPreview ? "(preview)" : ""
+            )
+            bypassOnce = true
+            setTimeout(() => retriggerSend(sourceEl), 120)
+            return
+          }
 
-      if (decision === "secure_rewrite") {
-        const fromPreview = meta?.rewrittenText?.trim()
-        const rw = fromPreview
-          ? {
-              rewrittenText: fromPreview,
-              stats: { totalReplacements: meta?.replacementsCount ?? 0 },
-              originalRiskScore: meta?.originalRiskScore ?? 0,
-              remainingRiskScore: meta?.remainingRiskScore ?? 0
-            }
-          : secureRewriteText(text, detections, {
-              consistentMapping: true,
-              aggressiveness: 2
-            })
-        setPromptText(rw.rewrittenText)
-        logDecision("secure_rewrite", detections, true, "prompt")
-        toastFromDecision("secure_rewrite", msgs)
-        console.log(
-          "[OpsGate] Secure Rewrite",
-          rw.stats.totalReplacements,
-          "remplacements · risque",
-          rw.originalRiskScore,
-          "→",
-          rw.remainingRiskScore,
-          fromPreview ? "(preview)" : ""
-        )
-        // score prompt initial déjà loggé à l’intercept
-        bypassOnce = true
-        setTimeout(() => retriggerSend(sourceEl), 120)
-        return
-      }
+          if (decision === "mask_send") {
+            const masked = maskText(text, detections, rules)
+            setPromptText(masked)
+            await logDecision("mask_send", detections, true, "prompt")
+            toastFromDecision("mask_send", msgs)
+            bypassOnce = true
+            setTimeout(() => retriggerSend(sourceEl), 120)
+            return
+          }
 
-      if (decision === "mask_send") {
-        const masked = maskText(text, detections, rules)
-        setPromptText(masked)
-        logDecision("mask_send", detections, true, "prompt")
-        toastFromDecision("mask_send", msgs)
-        bypassOnce = true
-        setTimeout(() => retriggerSend(sourceEl), 120)
-        return
-      }
+          // send_anyway — interdit en mask_force (banner le filtre déjà)
+          if (action === "mask_force") {
+            toastFromDecision("blocked", msgs)
+            return
+          }
 
-      // send_anyway — interdit en mask_force (banner le filtre déjà)
-      if (action === "mask_force") {
-        toastFromDecision("blocked", msgs)
-        return
-      }
-
-      logDecision("send_anyway", detections, false, "prompt")
-      toastFromDecision("send_anyway", msgs)
-      bypassOnce = true
-      setTimeout(() => retriggerSend(sourceEl), 60)
+          await logDecision("send_anyway", detections, false, "prompt")
+          toastFromDecision("send_anyway", msgs)
+          bypassOnce = true
+          setTimeout(() => retriggerSend(sourceEl), 60)
+        } catch (err) {
+          console.error("[OpsGate] Décision prompt:", err)
+          // Ne pas bloquer l’utilisateur si le journal échoue
+          if (
+            decision === "send_anyway" ||
+            decision === "mask_send" ||
+            decision === "secure_rewrite"
+          ) {
+            bypassOnce = true
+            setTimeout(() => retriggerSend(sourceEl), 80)
+          }
+        }
+      })()
     },
     {
       source: "prompt",
@@ -826,109 +854,116 @@ async function processQuarantinedFiles(
       bannerDetections,
       (decision, meta) => {
         filePending = false
-        const sensitiveScans = scans.filter((s) => s.detections.length > 0)
-        // Enrichir types pour le journal (extension + catégorie)
-        const typeTags = [
-          ...detections.map((d) => d.type),
-          ...scans.map((s) => `file:${s.category}:${s.fileName}`)
-        ]
+        void (async () => {
+          const sensitiveScans = scans.filter((s) => s.detections.length > 0)
+          // Enrichir types pour le journal (extension + catégorie)
+          const typeTags = [
+            ...detections.map((d) => d.type),
+            ...scans.map((s) => `file:${s.category}:${s.fileName}`)
+          ]
 
-        try {
-          if (fileAction === "block" || decision === "cancel") {
-            clearAllFileInputs(input)
-            logDecision("cancel", bannerDetections, false, "file", fileNames)
-            toastFromDecision(
-              fileAction === "block" ? "blocked" : "cancel",
-              fileMsgs
-            )
-            return
-          }
-
-          if (
-            (decision === "mask_send" || decision === "secure_rewrite") &&
-            detections.length > 0
-          ) {
-            // Secure Rewrite fichiers : pipeline mask/rewrite
-            // Si l’utilisateur a édité la preview multi-fichiers, on garde le mode rewrite auto
-            void meta
-            const dt = buildMaskedFileList(
-              frozen,
-              scans as FileScanResult[],
-              rules,
-              decision === "secure_rewrite" ? "secure_rewrite" : "mask"
-            )
-            const suffix =
-              decision === "secure_rewrite"
-                ? ".opsgate-secure"
-                : ".opsgate-masked"
-            const maskedFiles = filesFromDataTransfer(dt).map((f) => {
-              const dot = f.name.lastIndexOf(".")
-              const base = dot > 0 ? f.name.slice(0, dot) : f.name
-              const ext = dot > 0 ? f.name.slice(dot) : ""
-              return new File([f], `${base}${suffix}${ext}`, {
-                type: f.type || "text/plain",
-                lastModified: Date.now()
-              })
-            })
-            const ok = replaceAttachments(maskedFiles, input)
-            logDecision(decision, detections, true, "file", fileNames)
-            if (ok) {
-              toastFromDecision(decision, fileMsgs)
-            } else {
+          try {
+            if (fileAction === "block" || decision === "cancel") {
               clearAllFileInputs(input)
-              downloadMaskedFallback(maskedFiles)
+              await logDecision(
+                "cancel",
+                bannerDetections,
+                false,
+                "file",
+                fileNames
+              )
+              toastFromDecision(
+                fileAction === "block" ? "blocked" : "cancel",
+                fileMsgs
+              )
+              return
+            }
+
+            if (
+              (decision === "mask_send" || decision === "secure_rewrite") &&
+              detections.length > 0
+            ) {
+              // Secure Rewrite fichiers : pipeline mask/rewrite
+              void meta
+              const dt = buildMaskedFileList(
+                frozen,
+                scans as FileScanResult[],
+                rules,
+                decision === "secure_rewrite" ? "secure_rewrite" : "mask"
+              )
+              const suffix =
+                decision === "secure_rewrite"
+                  ? ".opsgate-secure"
+                  : ".opsgate-masked"
+              const maskedFiles = filesFromDataTransfer(dt).map((f) => {
+                const dot = f.name.lastIndexOf(".")
+                const base = dot > 0 ? f.name.slice(0, dot) : f.name
+                const extn = dot > 0 ? f.name.slice(dot) : ""
+                return new File([f], `${base}${suffix}${extn}`, {
+                  type: f.type || "text/plain",
+                  lastModified: Date.now()
+                })
+              })
+              const ok = replaceAttachments(maskedFiles, input)
+              await logDecision(decision, detections, true, "file", fileNames)
+              if (ok) {
+                toastFromDecision(decision, fileMsgs)
+              } else {
+                clearAllFileInputs(input)
+                downloadMaskedFallback(maskedFiles)
+                showToast(
+                  "Réinjection refusée par la page. Un fichier sécurisé a été téléchargé — joignez-le manuellement.",
+                  {
+                    tone: "warning",
+                    title: "Action manuelle requise",
+                    durationMs: 7000
+                  }
+                )
+              }
+              void sensitiveScans
+              return
+            }
+
+            if (fileAction === "mask_force") {
+              clearAllFileInputs(input)
+              toastFromDecision("blocked", fileMsgs)
+              return
+            }
+
+            // Joindre l'original (choix conscient) — y compris confirm media/office
+            const ok = replaceAttachments(frozen, input)
+            await logDecision(
+              "send_anyway",
+              detections.length ? detections : bannerDetections,
+              false,
+              "file",
+              fileNames
+            )
+            void typeTags
+            if (ok) {
+              toastFromDecision("send_anyway", fileMsgs)
+            } else {
               showToast(
-                "Réinjection refusée par la page. Un fichier sécurisé a été téléchargé — joignez-le manuellement.",
+                "Impossible de re-joindre automatiquement. Re-sélectionnez le fichier si vous voulez l’envoyer.",
                 {
                   tone: "warning",
-                  title: "Action manuelle requise",
-                  durationMs: 7000
+                  title: "Échec de la jointure",
+                  durationMs: 6500
                 }
               )
             }
-            void sensitiveScans
-            return
-          }
-
-          if (fileAction === "mask_force") {
-            clearAllFileInputs(input)
-            toastFromDecision("blocked", fileMsgs)
-            return
-          }
-
-          // Joindre l'original (choix conscient) — y compris confirm media/office
-          const ok = replaceAttachments(frozen, input)
-          logDecision(
-            "send_anyway",
-            detections.length ? detections : bannerDetections,
-            false,
-            "file",
-            fileNames
-          )
-          void typeTags
-          if (ok) {
-            toastFromDecision("send_anyway", fileMsgs)
-          } else {
+          } catch (err) {
+            console.error("[OpsGate] Décision fichier:", err)
             showToast(
-              "Impossible de re-joindre automatiquement. Re-sélectionnez le fichier si vous voulez l’envoyer.",
+              "Vérifiez les pièces jointes avant d’envoyer le message.",
               {
-                tone: "warning",
-                title: "Échec de la jointure",
-                durationMs: 6500
+                tone: "danger",
+                title: "Erreur OpsGate",
+                durationMs: 5000
               }
             )
           }
-        } catch (err) {
-          console.error("[OpsGate] Décision fichier:", err)
-          showToast(
-            "Vérifiez les pièces jointes avant d’envoyer le message.",
-            {
-              tone: "danger",
-              title: "Erreur OpsGate",
-              durationMs: 5000
-            }
-          )
-        }
+        })()
       },
       {
         source: "file",

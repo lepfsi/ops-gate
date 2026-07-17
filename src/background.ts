@@ -177,10 +177,15 @@ async function handleMessage(message: OpsGateMessage): Promise<unknown> {
     }
 
     case "LOG_DETECTION": {
-      // Journal local + report cloud (mask_send / send_anyway / cancel)
+      // Journal local + report cloud (mask_send / send_anyway / cancel / secure_rewrite)
+      // appendJournal attend le POST (ou enqueue) — ne pas fire-and-forget ici.
       const entry = await appendJournal(message.entry)
-      // Relancer la file au cas où le POST précédent a échoué
-      void flushPendingEvents()
+      // Relancer la file au cas où d’autres events étaient en attente
+      try {
+        await flushPendingEvents()
+      } catch {
+        /* ignore */
+      }
       return { ok: true, entry }
     }
 

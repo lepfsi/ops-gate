@@ -1261,6 +1261,7 @@ export interface RulesPackPayload {
 export type EventSource = "prompt" | "file" | "system" | "text" | "proxy"
 export type EventDecision =
   | "mask_send"
+  | "secure_rewrite"
   | "send_anyway"
   | "cancel"
   | "unenroll"
