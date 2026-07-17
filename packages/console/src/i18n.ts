@@ -17,8 +17,7 @@ const fr: Dict = {
   "nav.shadow": "Shadow AI",
   "nav.audit": "Audit admin",
   "risk.title": "Risk Score utilisateurs",
-  "risk.hint":
-    "Score comportemental 0–100 sur la période (events, send_anyway, Shadow AI non autorisé).",
+  "risk.hint": "",
   "risk.avgScore": "Score moyen",
   "risk.highUsers": "High risk ≥70",
   "risk.medUsers": "Medium 40–69",
@@ -41,8 +40,7 @@ const fr: Dict = {
   "risk.recalc": "Recalculer",
   "risk.recalculated": "Scores recalculés",
   "shadow.title": "Shadow AI Discovery",
-  "shadow.hint":
-    "Outils d’IA réellement vus dans les events. Marquez autorisé / non autorisé pour le scoring.",
+  "shadow.hint": "",
   "shadow.filterAll": "Tous statuts",
   "shadow.filterUnauth": "Non autorisés",
   "shadow.filterAuth": "Autorisés",
@@ -366,8 +364,7 @@ const fr: Dict = {
     "Basculer vers un autre tenant (même email admin). Un code MFA à 6 chiffres est demandé à chaque bascule.",
   "msp.switched": "Organisation active : {name}",
   "msp.portfolio": "Portfolio multi-clients (MSP)",
-  "msp.portfolioHint":
-    "Vue consolidée des organisations accessibles avec ce compte. Ouvrir un tenant demande le MFA (code 6 chiffres).",
+  "msp.portfolioHint": "",
   "msp.statOrgs": "Organisations",
   "msp.statAgents": "Agents online / total",
   "msp.statSeats": "Sièges utilisés / total",
@@ -766,8 +763,7 @@ const en: Dict = {
   "nav.shadow": "Shadow AI",
   "nav.audit": "Admin audit",
   "risk.title": "User risk scores",
-  "risk.hint":
-    "Behavioral score 0–100 over the period (events, send_anyway, unauthorized Shadow AI).",
+  "risk.hint": "",
   "risk.avgScore": "Average score",
   "risk.highUsers": "High risk ≥70",
   "risk.medUsers": "Medium 40–69",
@@ -790,8 +786,7 @@ const en: Dict = {
   "risk.recalc": "Recalculate",
   "risk.recalculated": "Scores recalculated",
   "shadow.title": "Shadow AI Discovery",
-  "shadow.hint":
-    "AI tools seen in events. Mark authorized / unauthorized for scoring.",
+  "shadow.hint": "",
   "shadow.filterAll": "All statuses",
   "shadow.filterUnauth": "Unauthorized",
   "shadow.filterAuth": "Authorized",
@@ -1110,8 +1105,7 @@ const en: Dict = {
     "Switch to another tenant (same admin email). A 6-digit MFA code is required on every switch.",
   "msp.switched": "Active organization: {name}",
   "msp.portfolio": "Multi-customer portfolio (MSP)",
-  "msp.portfolioHint":
-    "Consolidated view of organizations reachable with this account. Opening a tenant requires MFA (6-digit code).",
+  "msp.portfolioHint": "",
   "msp.statOrgs": "Organizations",
   "msp.statAgents": "Agents online / total",
   "msp.statSeats": "Seats used / total",

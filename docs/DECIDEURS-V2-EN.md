@@ -1,9 +1,9 @@
-# OpsGate — Decision-maker documentation V2
+# OpsGate - Decision-maker documentation V2
 
-**Audience**: CIO, CISO, security architects, risk committees  
-**Product version**: 1.2 / V2 batch (July 2026)  
-**Maturity**: **V2 functional / pre-GA** — see [`STATUS-V2.md`](./STATUS-V2.md)  
-**Vendor**: DailyOps.Tech  
+**Audience**: CIO, CISO, security architects, risk committees 
+**Product version**: 1.2 / V2 batch (July 2026) 
+**Maturity**: **V2 functional / pre-GA** - see [`STATUS-V2.md`](./STATUS-V2.md) 
+**Vendor**: DailyOps.Tech 
 
 ---
 
@@ -23,28 +23,28 @@ OpsGate is **not** a full network CASB and **not** a conversation surveillance t
 
 ```
 User ──► AI website (browser)
-              │
-     ┌────────┼────────┐
-     ▼        ▼        ▼
- Extension  Local proxy (optional)
- (page)     (HTTPS MITM)
-     │        │
-     └────┬───┘
-          ▼
-   Rules engine (@opsgate/engine)
-   secrets · PII · network configs · cloud keys
-          │
-          ▼
-   Banner / soft-block / soft-mask
-          │
-          ▼
-   Console + API (metadata events)
-   SIEM · metrics · security PDF reports
+ │
+ ┌────────┼────────┐
+ ▼ ▼ ▼
+ Extension Local proxy (optional)
+ (page) (HTTPS MITM)
+ │ │
+ └────┬───┘
+ ▼
+ Rules engine (@opsgate/engine)
+ secrets · PII · network configs · cloud keys
+ │
+ ▼
+ Banner / soft-block / soft-mask
+ │
+ ▼
+ Console + API (metadata events)
+ SIEM · metrics · security PDF reports
 ```
 
-1. **Detect** in the browser (and/or proxy) before send.  
-2. **Act**: mask secrets, block, or log per policy.  
-3. **Govern**: admins set rules, groups, profiles, licenses.  
+1. **Detect** in the browser (and/or proxy) before send. 
+2. **Act**: mask secrets, block, or log per policy. 
+3. **Govern**: admins set rules, groups, profiles, licenses. 
 4. **Prove**: events, audit, exports, SIEM, PDF reports.
 
 ---
@@ -58,7 +58,7 @@ User ──► AI website (browser)
 | Infrastructure | Fortinet, MikroTik, WireGuard, network snippets |
 | Files | Text uploads, PDF/DOCX/**PPTX/XLSX**, **image OCR** (local Tesseract) |
 
-**Privacy by design**: local mode never leaves the device. Org mode sends **metadata** (rule type, decision, hostname) — not full prompts by default. File parse and OCR stay **on the endpoint**.
+**Privacy by design**: local mode never leaves the device. Org mode sends **metadata** (rule type, decision, hostname) - not full prompts by default. File parse and OCR stay **on the endpoint**.
 
 ---
 
@@ -121,13 +121,13 @@ User ──► AI website (browser)
 
 ---
 
-## 8. Pilot success metrics (30–90 days)
+## 8. Pilot success metrics (30-90 days)
 
-- % of endpoints with force-installed extension  
-- Mask/block events per week  
-- Policy deploy latency (force-sync < 2 min)  
-- “Secret pasted into ChatGPT” incidents before/after  
-- AI site coverage (host allowlist)  
+- % of endpoints with force-installed extension 
+- Mask/block events per week 
+- Policy deploy latency (force-sync < 2 min) 
+- “Secret pasted into ChatGPT” incidents before/after 
+- AI site coverage (host allowlist) 
 
 ---
 
@@ -139,11 +139,11 @@ User ──► AI website (browser)
 | PDF/DOCX/PPTX/XLSX scan + image OCR | Offline FR OCR pack, public Safari App Store |
 | WORM audit, backup, multi-channel alerts, MSP, **Stripe portal**, **GDPR soft-delete** | Production Stripe keys, store listings, customer pilot |
 
-**Deployment**: integrator guide [`DEPLOIEMENT-CLIENT-EN.md`](./DEPLOIEMENT-CLIENT-EN.md) (+ PDF).  
+**Deployment**: integrator guide [`DEPLOIEMENT-CLIENT-EN.md`](./DEPLOIEMENT-CLIENT-EN.md) (+ PDF). 
 **Progress detail**: [`STATUS-V2.md`](./STATUS-V2.md) · [`V2-BACKLOG.md`](./V2-BACKLOG.md).
 
 Contact: DailyOps.Tech / OpsGate sales.
 
 ---
 
-*Confidential — for customers and partners · 17 July 2026*
+*Confidential - for customers and partners · 17 July 2026*

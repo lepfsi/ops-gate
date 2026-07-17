@@ -367,24 +367,22 @@ function OptionsPage() {
                 border: "1px solid #cbd5e1",
                 background: "#f8fafc"
               }}>
-              <strong style={{ fontSize: 14, color: "#0f172a" }}>
+              <strong style={{ fontSize: 13, color: "#0f172a" }}>
                 Organisation
               </strong>
-              <label style={{ ...labelStyle, marginTop: 10 }}>
-                Code organisation
-              </label>
+              <label style={{ ...labelStyle, marginTop: 10 }}>Code</label>
               <input
                 value={orgCode}
                 onChange={(e) => setOrgCode(e.target.value)}
                 style={inputStyle}
-                placeholder="DEMO-OPSGATE"
+                placeholder="CODE-ORG"
               />
               <button
                 type="button"
                 disabled={busy}
                 onClick={() => void runEnroll("org")}
                 style={{ ...btnPrimary, marginTop: 12, width: "100%" }}>
-                {busy ? "Enrôlement…" : "Enrôler"}
+                {busy ? "Connexion…" : "Connecter"}
               </button>
             </div>
 
@@ -393,20 +391,18 @@ function OptionsPage() {
                 marginTop: 12,
                 padding: 14,
                 borderRadius: 10,
-                border: "1px solid #99f6e4",
-                background: "#f0fdfa"
+                border: "1px solid #e2e8f0",
+                background: "#fff"
               }}>
-              <strong style={{ fontSize: 14, color: "#134e4a" }}>
-                Usage personnel
+              <strong style={{ fontSize: 13, color: "#334155" }}>
+                Personnel
               </strong>
-              <label style={{ ...labelStyle, marginTop: 10 }}>
-                Clé de licence
-              </label>
+              <label style={{ ...labelStyle, marginTop: 10 }}>Licence</label>
               <input
                 value={personalLicenseKey}
                 onChange={(e) => setPersonalLicenseKey(e.target.value)}
                 style={inputStyle}
-                placeholder="OPS-PERSONAL-DEMO-2026"
+                placeholder="Clé de licence"
                 autoComplete="off"
               />
               <button
@@ -416,9 +412,7 @@ function OptionsPage() {
                 style={{
                   ...btnGhost,
                   marginTop: 12,
-                  width: "100%",
-                  borderColor: "#5eead4",
-                  color: "#0f766e"
+                  width: "100%"
                 }}>
                 {busy ? "Activation…" : "Activer"}
               </button>

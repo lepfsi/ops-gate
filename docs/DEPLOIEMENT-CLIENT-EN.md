@@ -1,11 +1,11 @@
-# OpsGate — Customer installation & deployment
+# OpsGate - Customer installation & deployment
 
-**Audience**: integrators, system admins, pilot CIO/CISO teams  
-**Product version**: 1.2 / V2 batch  
-**Maturity**: **V2 functional / pre-GA** — [`STATUS-V2.md`](./STATUS-V2.md)  
+**Audience**: integrators, system admins, pilot CIO/CISO teams 
+**Product version**: 1.2 / V2 batch 
+**Maturity**: **V2 functional / pre-GA** - [`STATUS-V2.md`](./STATUS-V2.md) 
 **Goal**: deploy OpsGate **at the customer site** (not only local lab)
 
-> This is the **deployment entry point**.  
+> This is the **deployment entry point**. 
 > User guides cover **day-to-day console use**; this doc covers **what to install, where, and in which order**.
 
 | Related doc | Content |
@@ -21,25 +21,25 @@
 
 ---
 
-## 1. Overview — what runs where
+## 1. Overview - what runs where
 
 ```
-                    AT THE CUSTOMER
+ AT THE CUSTOMER
 ┌─────────────────────────────────────────────────────────────┐
-│  MANAGEMENT SERVER (or cloud / VM)                          │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐ │
-│  │ Postgres    │  │ OpsGate API │  │ Console (static)    │ │
-│  │ (durable)   │◄─│ :443 / TLS  │◄─│ HTTPS              │ │
-│  └─────────────┘  └──────▲──────┘  └─────────────────────┘ │
+│ MANAGEMENT SERVER (or cloud / VM) │
+│ ┌─────────────┐ ┌─────────────┐ ┌─────────────────────┐ │
+│ │ Postgres │ │ OpsGate API │ │ Console (static) │ │
+│ │ (durable) │◄─│ :443 / TLS │◄─│ HTTPS │ │
+│ └─────────────┘ └──────▲──────┘ └─────────────────────┘ │
 └──────────────────────────│──────────────────────────────────┘
-                           │ HTTPS (enroll, sync, events)
-         ┌─────────────────┴─────────────────┐
-         ▼                                   ▼
-┌─────────────────────┐           ┌─────────────────────┐
-│ END-USER PCs        │           │ OPTIONAL            │
-│ Browser extension   │           │ Local proxy MSI     │
-│ Chrome / Edge / FF  │           │ multi-AI MITM       │
-└─────────────────────┘           └─────────────────────┘
+ │ HTTPS (enroll, sync, events)
+ ┌─────────────────┴─────────────────┐
+ ▼ ▼
+┌─────────────────────┐ ┌─────────────────────┐
+│ END-USER PCs │ │ OPTIONAL │
+│ Browser extension │ │ Local proxy MSI │
+│ Chrome / Edge / FF │ │ multi-AI MITM │
+└─────────────────────┘ └─────────────────────┘
 ```
 
 | Component | Where | Required? |
@@ -70,40 +70,40 @@ This guide details **B**, then **C** hardening. For pure lab, see also [`GUIDE-S
 
 ### 3.1 Management server
 
-- OS: Linux (recommended) or Windows Server / Windows 11 with Docker  
-- **Node.js 20+** and **pnpm**  
-- **Docker** (Postgres) **or** managed Postgres  
+- OS: Linux (recommended) or Windows Server / Windows 11 with Docker 
+- **Node.js 20+** and **pnpm** 
+- **Docker** (Postgres) **or** managed Postgres 
 - Ports:
-  - **5432** Postgres (ideally **not** on the public Internet)
-  - **8787** API (dev) → production: **443** via reverse proxy  
-  - **5173** console dev → production: static files + HTTPS  
+ - **5432** Postgres (ideally **not** on the public Internet)
+ - **8787** API (dev) → production: **443** via reverse proxy 
+ - **5173** console dev → production: static files + HTTPS 
 - Outbound SMTP if emails (OTP, exports, alerts)
 
 ### 3.2 User PCs
 
-- Windows 10/11 (or macOS/Linux for extension-only)  
-- Chrome **or** Edge (Firefox supported)  
+- Windows 10/11 (or macOS/Linux for extension-only) 
+- Chrome **or** Edge (Firefox supported) 
 - Admin rights **only** for proxy MSI / GPO force-install
 
 ### 3.3 Deliverables from DailyOps / integrator
 
-- Organization code (e.g. `ACME-2026`) or DEMO seed for pilot  
-- Full license key if outside trial (`OPS-XXXX-…`)  
-- Public HTTPS API URL (e.g. `https://opsgate.customer.tld`)  
+- Organization code (e.g. `ACME-2026`) or DEMO seed for pilot 
+- Full license key if outside trial (`OPS-XXXX-…`) 
+- Public HTTPS API URL (e.g. `https://opsgate.customer.tld`) 
 - Optional: SSO, SMTP, SIEM secrets
 
 ---
 
-## 4. Phase 1 — Control plane (server)
+## 4. Phase 1 - Control plane (server)
 
-### Step 1.1 — Get the code / package
+### Step 1.1 - Get the code / package
 
 ```powershell
 cd ops-gate
 pnpm install
 ```
 
-### Step 1.2 — Durable Postgres
+### Step 1.2 - Durable Postgres
 
 ```powershell
 docker compose up -d
@@ -112,7 +112,7 @@ docker compose ps
 
 **Production**: use managed Postgres (RDS, Azure PG, etc.) with a strong `DATABASE_URL`.
 
-### Step 1.3 — API environment
+### Step 1.3 - API environment
 
 Create `.env` from `.env.example` (never commit secrets):
 
@@ -132,7 +132,7 @@ OPSGATE_API_PUBLIC_URL=https://api.customer.tld
 
 Without `DATABASE_URL` → **memory** store: **all data lost on restart**. Forbidden for customers.
 
-### Step 1.4 — Start the API
+### Step 1.4 - Start the API
 
 ```powershell
 pnpm --filter @opsgate/api start
@@ -144,9 +144,9 @@ curl https://api.customer.tld/health
 # expect store=postgres
 ```
 
-### Step 1.5 — Admin console
+### Step 1.5 - Admin console
 
-**Lab**: `pnpm console:dev` → `http://127.0.0.1:5173`  
+**Lab**: `pnpm console:dev` → `http://127.0.0.1:5173` 
 
 **Production**:
 
@@ -157,22 +157,22 @@ pnpm --filter @opsgate/console build
 
 Point the console API base URL to `https://api.customer.tld`.
 
-### Step 1.6 — TLS reverse proxy (prod)
+### Step 1.6 - TLS reverse proxy (prod)
 
-- `https://api.customer.tld` → `http://127.0.0.1:8787`  
-- `https://console.customer.tld` → console static files  
+- `https://api.customer.tld` → `http://127.0.0.1:8787` 
+- `https://console.customer.tld` → console static files 
 
 ---
 
-## 5. Phase 2 — First business setup
+## 5. Phase 2 - First business setup
 
-1. Open **console** → sign in.  
-2. **Change password** immediately.  
-3. Enable **TOTP MFA** (Settings → General) — required if multi-org.  
-4. Note the **organization code**.  
-5. (Optional) Activate full license key from DailyOps.  
-6. Set **policy** → **Force sync**.  
-7. Configure **SMTP** + send test.  
+1. Open **console** → sign in. 
+2. **Change password** immediately. 
+3. Enable **TOTP MFA** (Settings → General) - required if multi-org. 
+4. Note the **organization code**. 
+5. (Optional) Activate full license key from DailyOps. 
+6. Set **policy** → **Force sync**. 
+7. Configure **SMTP** + send test. 
 8. (Optional) Notifications, SIEM, scheduled export, config backup.
 
 Server-ready checklist:
@@ -185,9 +185,9 @@ Server-ready checklist:
 
 ---
 
-## 6. Phase 3 — Extension on endpoints
+## 6. Phase 3 - Extension on endpoints
 
-### 6.1 Pilot (sideload, 1–20 PCs)
+### 6.1 Pilot (sideload, 1-20 PCs)
 
 ```powershell
 pnpm build:chrome
@@ -212,30 +212,30 @@ See MDM templates under `dist/chrome-store/mdm/` after packaging.
 
 ### 6.3 Org enrollment (each PC / profile)
 
-1. OpsGate extension **Options**.  
-2. **API URL** = `https://api.customer.tld` (not `127.0.0.1` unless single-PC lab).  
-3. **Org code**.  
-4. Device label.  
-5. **Enroll**.  
+1. OpsGate extension **Options**. 
+2. **API URL** = `https://api.customer.tld` (not `127.0.0.1` unless single-PC lab). 
+3. **Org code**. 
+4. Device label. 
+5. **Enroll**. 
 
 Expected: managed mode, policy received, agent visible in Console → Agents.
 
 ### 6.4 Smoke test
 
-1. Open an AI site.  
-2. Paste a **test secret**.  
-3. OpsGate **banner** appears.  
+1. Open an AI site. 
+2. Paste a **test secret**. 
+3. OpsGate **banner** appears. 
 4. Console → **Events** shows a row.
 
 ---
 
-## 7. Phase 4 — Local proxy (optional)
+## 7. Phase 4 - Local proxy (optional)
 
 ```powershell
 msiexec /i dist\opsgate-proxy-1.2.0.msi /qn
 ```
 
-Trust CA, enroll proxy to same API/org code, configure PAC/GPO.  
+Trust CA, enroll proxy to same API/org code, configure PAC/GPO. 
 Details: `architecture/PROXY-PROD-WINDOWS.md`.
 
 **Note**: proxy ≠ orange banner. UI banner remains the **extension**.
@@ -317,11 +317,11 @@ pnpm api:validate-pg
 
 ## 13. Support
 
-- User guide: [`GUIDE-UTILISATEUR-V2-EN.md`](./GUIDE-UTILISATEUR-V2-EN.md)  
-- Decision makers: [`DECIDEURS-V2-EN.md`](./DECIDEURS-V2-EN.md)  
-- FAQ: [`FAQ-DEPLOIEMENT-V2.md`](./FAQ-DEPLOIEMENT-V2.md)  
+- User guide: [`GUIDE-UTILISATEUR-V2-EN.md`](./GUIDE-UTILISATEUR-V2-EN.md) 
+- Decision makers: [`DECIDEURS-V2-EN.md`](./DECIDEURS-V2-EN.md) 
+- FAQ: [`FAQ-DEPLOIEMENT-V2.md`](./FAQ-DEPLOIEMENT-V2.md) 
 
-Contact: **contact@dailyops.tech** — include org code, API version (`/health`), browser.
+Contact: **contact@dailyops.tech** - include org code, API version (`/health`), browser.
 
 ---
 

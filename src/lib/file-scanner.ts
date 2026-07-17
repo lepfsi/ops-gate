@@ -7,10 +7,10 @@ import {
 } from "@opsgate/engine"
 
 /**
- * Taille max lue par fichier texte (12 Mo).
+ * Taille max lue par fichier (25 Mo).
  * Au-delà : scan du début uniquement + flag truncated.
  */
-export const MAX_FILE_BYTES = 12_000_000
+export const MAX_FILE_BYTES = 25_000_000
 
 /** Extensions textuelles / config */
 const TEXT_EXTENSIONS = new Set([
@@ -147,11 +147,11 @@ export type FileScanStatus =
   | "media_warn"
 
 export interface FileScanOptions {
-  /** Scanner configs (.conf, .json, .xml…) — défaut true */
+  /** Scanner configs (.conf, .json, .xml…) - défaut true */
   scanConfigs?: boolean
-  /** Scanner SQL / tenter texte DB — défaut true */
+  /** Scanner SQL / tenter texte DB - défaut true */
   scanDatabases?: boolean
-  /** OCR images — stub : non implémenté (warn / skip) */
+  /** OCR images - stub : non implémenté (warn / skip) */
   scanImages?: boolean
   /** Toujours demander confirmation pour audio/vidéo */
   warnMedia?: boolean
@@ -187,7 +187,7 @@ export function categorizeFile(file: File): FileCategory {
     return "image"
   }
   if (OFFICE_EXTENSIONS.has(ext) || file.type.includes("pdf") || file.type.includes("officedocument")) {
-    // csv is both office and text — treat as text scannable
+    // csv is both office and text - treat as text scannable
     if (ext === "csv" || ext === "rtf") return "text"
     return "office"
   }
@@ -260,7 +260,7 @@ export async function scanFile(
       ...base,
       status: "media_warn",
       userHint:
-        "Fichier audio/vidéo : OpsGate ne scanne pas le contenu. Confirmez l’envoi — un log sera enregistré."
+        "Fichier audio/vidéo : OpsGate ne scanne pas le contenu. Confirmez l’envoi - un log sera enregistré."
     }
   }
 
@@ -270,7 +270,7 @@ export async function scanFile(
         ...base,
         status: "image_skipped",
         userHint:
-          "Image non scannée (OCR désactivé en policy). Confirmez l’envoi — un log sera enregistré."
+          "Image non scannée (OCR désactivé en policy). Confirmez l’envoi - un log sera enregistré."
       }
     }
     const ext = extensionOf(file.name)
@@ -295,7 +295,7 @@ export async function scanFile(
         /* fall through OCR / name */
       }
     }
-    // OCR bitmap (PNG/JPEG/WebP/…) — background d’abord (évite CSP page), puis local
+    // OCR bitmap (PNG/JPEG/WebP/…) - background d’abord (évite CSP page), puis local
     try {
       const { OCR_LIMITS, fileToBase64, ocrBitmapFile } = await import(
         "./ocr-bitmap"
@@ -309,7 +309,7 @@ export async function scanFile(
           ...base,
           status: "image_ocr_limited",
           detections: nameHits,
-          userHint: `Image trop grande pour OCR (> ${Math.round(OCR_LIMITS.maxInputBytes / 1_000_000)} Mo). Confirmez l’envoi — log enregistré.`
+          userHint: `Image trop grande pour OCR (> ${Math.round(OCR_LIMITS.maxInputBytes / 1_000_000)} Mo). Confirmez l’envoi - log enregistré.`
         }
       }
 
@@ -382,7 +382,7 @@ export async function scanFile(
         ...base,
         status: "image_ocr_failed",
         detections: nameHits,
-        userHint: `OCR indisponible (${errMsg}). Confirmez l’envoi — log enregistré.`
+        userHint: `OCR indisponible (${errMsg}). Confirmez l’envoi - log enregistré.`
       }
     } catch (e) {
       const nameHits = detectSensitiveData(
@@ -393,7 +393,7 @@ export async function scanFile(
         ...base,
         status: "image_ocr_failed",
         detections: nameHits,
-        userHint: `OCR en échec (${e instanceof Error ? e.message : "error"}). Confirmez l’envoi — log enregistré.`
+        userHint: `OCR en échec (${e instanceof Error ? e.message : "error"}). Confirmez l’envoi - log enregistré.`
       }
     }
   }
@@ -429,23 +429,23 @@ export async function scanFile(
           ...base,
           status: "office_warn",
           userHint: extracted
-            ? `Document ${ext.toUpperCase()} sans texte extractible (scanne / image). Confirmez l’envoi — log enregistré.`
-            : `Extraction ${ext.toUpperCase()} impossible. Confirmez l’envoi — log enregistré.`
+            ? `Document ${ext.toUpperCase()} sans texte extractible (scanne / image). Confirmez l’envoi - log enregistré.`
+            : `Extraction ${ext.toUpperCase()} impossible. Confirmez l’envoi - log enregistré.`
         }
       } catch {
         return {
           ...base,
           status: "office_warn",
-          userHint: `Extraction ${ext.toUpperCase()} en échec. Confirmez l’envoi — log enregistré.`
+          userHint: `Extraction ${ext.toUpperCase()} en échec. Confirmez l’envoi - log enregistré.`
         }
       }
     }
-    // Legacy Office binaires (doc, xls, ppt) — non supportés
+    // Legacy Office binaires (doc, xls, ppt) - non supportés
     return {
       ...base,
       status: "office_warn",
       userHint:
-        "Format Office legacy (doc/xls/ppt) non supporté — utilisez DOCX / XLSX / PPTX. Confirmez l’envoi — log avec type et nom enregistré."
+        "Format Office legacy (doc/xls/ppt) non supporté - utilisez DOCX / XLSX / PPTX. Confirmez l’envoi - log avec type et nom enregistré."
     }
   }
 
@@ -463,7 +463,7 @@ export async function scanFile(
         ...base,
         status: "warn_confirm",
         userHint:
-          "Fichier base de données binaire (.db/.sqlite) : contenu non extrait. Confirmez l’envoi — log enregistré."
+          "Fichier base de données binaire (.db/.sqlite) : contenu non extrait. Confirmez l’envoi - log enregistré."
       }
     }
   }
@@ -549,7 +549,7 @@ export function buildMaskedFileList(
           : maskSensitiveData(scan.text, scan.detections, rules)
       const body = scan.truncated
         ? masked +
-          "\n\n/* [OpsGate] Fichier tronqué au scan — vérifiez le reste manuellement */\n"
+          "\n\n/* [OpsGate] Fichier tronqué au scan - vérifiez le reste manuellement */\n"
         : masked
       dt.items.add(
         new File([body], file.name, {

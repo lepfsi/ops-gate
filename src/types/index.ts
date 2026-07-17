@@ -44,33 +44,26 @@ export interface PolicyUserMessages {
 }
 
 export const DEFAULT_USER_MESSAGES: PolicyUserMessages = {
-  adminNotice:
-    "Cette restriction est appliquée par la politique de sécurité de votre organisation (administrée via OpsGate). Ce n’est pas une erreur technique.",
-  alertTitle: "Données sensibles détectées — action requise",
-  alertBody:
-    "Votre administrateur a configuré OpsGate pour protéger les données de l’entreprise avant envoi vers l’IA. Choisissez une action autorisée ci-dessous.",
-  blockTitle: "Envoi non autorisé par votre administrateur",
+  adminNotice: "Politique de sécurité de votre organisation.",
+  alertTitle: "Données sensibles détectées",
+  alertBody: "Choisissez une action avant l'envoi.",
+  blockTitle: "Envoi non autorisé",
   blockBody:
-    "La politique de sécurité de votre organisation bloque cet envoi vers l’IA. Ce n’est pas un bug : l’accès est volontairement restreint. Contactez votre administrateur IT si vous avez besoin d’une exception.",
-  maskForceTitle: "Masquage obligatoire (politique admin)",
-  maskForceBody:
-    "Votre administrateur impose le masquage des données sensibles avant tout envoi. L’envoi « tel quel » n’est pas autorisé.",
-  btnMask: "Masquer simplement",
-  btnSecureRewrite: "Secure Rewrite & envoyer",
+    "La politique bloque cet envoi. Contactez votre administrateur si besoin.",
+  maskForceTitle: "Masquage obligatoire",
+  maskForceBody: "L'envoi sans masquage n'est pas autorisé.",
+  btnMask: "Masquer",
+  btnSecureRewrite: "Secure Rewrite",
   btnSendAnyway: "Envoyer quand même",
   btnCancel: "Annuler",
-  btnBlockAck: "Compris — ne pas envoyer",
-  toastCancel: "Envoi annulé — vos données n’ont pas été transmises à l’IA.",
-  toastMask: "Données masquées selon la politique — envoi en cours…",
-  toastSecureRewrite:
-    "Version sécurisée appliquée (Secure Rewrite) — envoi en cours…",
-  toastSendAnyway:
-    "Envoi sans masquage — action journalisée pour votre administrateur.",
-  toastBlocked:
-    "Envoi bloqué par la politique de votre organisation. Aucune donnée n’a été envoyée.",
-  alertTitleFile: "Fichier retenu — données sensibles",
-  alertBodyFile:
-    "Votre administrateur a configuré OpsGate pour analyser les fichiers avant envoi à l’IA. Choisissez une action autorisée."
+  btnBlockAck: "Compris",
+  toastCancel: "Envoi annulé.",
+  toastMask: "Données masquées. Envoi en cours…",
+  toastSecureRewrite: "Secure Rewrite appliqué. Envoi en cours…",
+  toastSendAnyway: "Envoi journalisé.",
+  toastBlocked: "Envoi bloqué. Aucune donnée transmise.",
+  alertTitleFile: "Fichier : données sensibles",
+  alertBodyFile: "Choisissez une action avant de joindre le fichier."
 }
 
 export function mergeUserMessages(

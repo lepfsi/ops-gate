@@ -4,9 +4,10 @@
  * Échec → null (le scanner bascule en warn).
  */
 
-const MAX_PDF_PAGES = 40
-const MAX_EXTRACT_CHARS = 500_000
-const MAX_OOXML_FILES = 120
+/** PDF multi-pages : jusqu’à 120 pages (docs longs clients) */
+const MAX_PDF_PAGES = 120
+const MAX_EXTRACT_CHARS = 1_200_000
+const MAX_OOXML_FILES = 250
 
 function readAsArrayBuffer(file: File, maxBytes: number): Promise<ArrayBuffer> {
   return new Promise((resolve, reject) => {
@@ -37,7 +38,7 @@ export async function extractDocxText(
 }
 
 /**
- * PDF via pdfjs-dist v4 — worker URL résolu via import.meta.url.
+ * PDF via pdfjs-dist v4 - worker URL résolu via import.meta.url.
  */
 export async function extractPdfText(
   file: File,

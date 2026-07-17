@@ -1,5 +1,5 @@
 /**
- * Bureau concepteur DailyOps — émission de licences.
+ * Bureau concepteur DailyOps - émission de licences.
  * Build: VITE_OPSGATE_VENDOR_DESK=true + URL ?desk=vendor
  * (ou dev: pnpm console:dev:vendor)
  */
@@ -89,7 +89,7 @@ export default function VendorDesk() {
   }, [])
 
   useEffect(() => {
-    document.title = "OpsGate · Bureau concepteur"
+    document.title = "OpsGate"
   }, [])
 
   const filtered = useMemo(() => {
@@ -164,34 +164,32 @@ export default function VendorDesk() {
   if (!unlocked) {
     return (
       <div className="login-page">
-        <div className="login-card card" style={{ maxWidth: 420 }}>
+        <div className="login-card card" style={{ maxWidth: 400 }}>
           <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
-            <BrandMark size={44} />
+            <BrandMark size={40} />
             <div>
-              <h1 style={{ margin: 0, fontSize: 20 }}>Bureau concepteur</h1>
+              <h1 style={{ margin: 0, fontSize: 18 }}>OpsGate</h1>
               <p className="muted" style={{ margin: 0, fontSize: 12 }}>
-                DailyOps · licences (hors produit client)
+                Accès restreint
               </p>
             </div>
           </div>
-          <p className="muted" style={{ fontSize: 13, marginTop: 16 }}>
-            <code>pnpm console:dev:vendor</code>
-            <br />
-            URL : <code>?desk=vendor</code>
-          </p>
-          <label className="field-label">URL API</label>
+          <label className="field-label" style={{ marginTop: 18 }}>
+            Serveur
+          </label>
           <input
             className="input mono"
             value={apiUrl}
             onChange={(e) => setApiUrl(e.target.value)}
+            autoComplete="off"
           />
-          <label className="field-label">Clé vendor</label>
+          <label className="field-label">Clé d'accès</label>
           <input
             className="input mono"
             type="password"
             value={vendorKey}
             onChange={(e) => setVendorKey(e.target.value)}
-            placeholder="OPSGATE_VENDOR_LICENSE_SECRET"
+            placeholder="••••••••••••"
             autoComplete="off"
           />
           {err && <p className="err">{err}</p>}
@@ -221,7 +219,7 @@ export default function VendorDesk() {
                 setBusy(false)
               }
             }}>
-            Déverrouiller
+            Continuer
           </button>
         </div>
       </div>
@@ -234,8 +232,8 @@ export default function VendorDesk() {
         <div className="brand">
           <BrandMark size={36} />
           <div className="brand-text">
-            <h1>OpsGate · Concepteur</h1>
-            <p>Licences clients · DailyOps</p>
+            <h1>OpsGate</h1>
+            <p>Administration</p>
           </div>
         </div>
         <div className="topbar-actions">
@@ -720,7 +718,7 @@ export default function VendorDesk() {
                             <div className="muted" style={{ fontSize: 11 }}>
                               Adresse
                             </div>
-                            {row.address || "—"}
+                            {row.address || "-"}
                           </div>
                           <div>
                             <div className="muted" style={{ fontSize: 11 }}>
@@ -728,7 +726,7 @@ export default function VendorDesk() {
                             </div>
                             {row.issued_at
                               ? String(row.issued_at).slice(0, 10)
-                              : "—"}
+                              : "-"}
                           </div>
                         </div>
                         <div

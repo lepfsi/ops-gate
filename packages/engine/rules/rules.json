@@ -74,10 +74,12 @@
     "name": "IBAN",
     "category": "general",
     "severity": "high",
-    "patterns": ["\\b[A-Z]{2}\\d{2}[A-Z0-9]{10,30}\\b"],
-    "keywords": ["IBAN"],
+    "patterns": [
+      "\\b[A-Z]{2}\\d{2}[A-Z0-9]{11,30}\\b",
+      "\\b[A-Z]{2}\\d{2}(?:[\\s.\\-]+[A-Z0-9]{2,4}){3,12}\\b"
+    ],
     "action_default": "mask",
-    "description": "Numéro IBAN bancaire"
+    "description": "Numéro IBAN bancaire (checksum)"
   },
   {
     "id": "credit-card",

@@ -43,7 +43,7 @@ export interface BannerOptions {
   source?: DetectionSource
   fileNames?: string[]
   note?: string
-  /** Texte original intercepté — requis pour preview Secure Rewrite */
+  /** Texte original intercepté - requis pour preview Secure Rewrite */
   sourceText?: string
   /** Action policy effective */
   defaultAction?: DefaultAction
@@ -52,7 +52,7 @@ export interface BannerOptions {
   orgName?: string
   /**
    * Affiche « Contacter l’admin » (agent enrôlé).
-   * Défaut: true — l’API renverra not_enrolled si hors org.
+   * Défaut: true - l’API renverra not_enrolled si hors org.
    */
   contactAdminEnabled?: boolean
   /** Seuil auto Simulation Mode (défaut 40). 0 = jamais auto. */
@@ -85,10 +85,14 @@ const SHADOW_CSS = `
     animation: og-in 0.2s ease-out;
   }
   .wrap.rewrite-mode {
-    width: min(920px, calc(100vw - 20px));
-    max-height: min(92vh, 820px);
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: min(960px, calc(100vw - 24px));
+    max-height: min(90vh, 880px);
     display: flex;
     flex-direction: column;
+    animation: none;
   }
   .wrap.rewrite-mode .alert-main { display: none; }
   .wrap:not(.rewrite-mode) .rewrite-panel { display: none; }
@@ -282,28 +286,8 @@ const SHADOW_CSS = `
     font-size: 13px;
     line-height: 1.45;
   }
-  .admin-notice {
-    margin: 10px 0 0;
-    padding: 8px 10px;
-    border-radius: 8px;
-    background: #ecfdf5;
-    border: 1px solid #99f6e4;
-    color: #0f766e;
-    font-size: 12px;
-    font-weight: 650;
-    line-height: 1.4;
-  }
-  .wrap.mode-block .admin-notice {
-    background: #fef2f2;
-    border-color: #fecaca;
-    color: #b91c1c;
-  }
-  .warn-line {
-    margin: 8px 0 0;
-    color: #b45309;
-    font-size: 12px;
-    font-weight: 650;
-  }
+  .admin-notice { display: none; }
+  .warn-line { display: none; }
   .pill {
     display: inline-block;
     margin-top: 6px;
@@ -321,8 +305,9 @@ const SHADOW_CSS = `
   .details {
     display: none;
     padding: 0 16px 10px;
-    max-height: 200px;
+    max-height: min(36vh, 280px);
     overflow-y: auto;
+    overscroll-behavior: contain;
     background: #fff;
   }
   .details.open { display: block; }
@@ -355,11 +340,27 @@ const SHADOW_CSS = `
   }
   .actions {
     display: flex;
-    flex-wrap: wrap;
+    flex-direction: column;
     gap: 8px;
     padding: 12px 16px 14px;
     background: #f8fafc;
     border-top: 1px solid #f1f5f9;
+  }
+  .actions-primary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .actions-secondary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
+  }
+  .actions-secondary button {
+    padding: 7px 10px;
+    font-size: 12px;
+    font-weight: 650;
   }
   button {
     appearance: none;
@@ -498,18 +499,25 @@ const SHADOW_CSS = `
     opacity: 0.55;
     cursor: not-allowed;
   }
-  /* Secure Rewrite preview côte à côte */
+  /* Secure Rewrite : modal scrollable, colonnes indépendantes */
   .rewrite-panel {
     display: flex;
     flex-direction: column;
     min-height: 0;
     flex: 1;
+    max-height: min(90vh, 880px);
     background: #f8fafc;
+    overflow: hidden;
   }
   .rewrite-header {
-    padding: 12px 16px 8px;
+    flex-shrink: 0;
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 12px 14px;
     border-bottom: 1px solid #e2e8f0;
-    background: linear-gradient(180deg, #ecfdf5 0%, #f8fafc 70%);
+    background: #fff;
   }
   .rewrite-header .title {
     margin: 0;
@@ -517,17 +525,13 @@ const SHADOW_CSS = `
     font-weight: 750;
     color: #0f172a;
   }
-  .rewrite-header .sub {
-    margin: 4px 0 0;
-    font-size: 12px;
-    color: #475569;
-    line-height: 1.4;
-  }
+  .rewrite-header .sub { display: none; }
+  .rewrite-header-main { min-width: 0; flex: 1; }
   .rewrite-scores {
     display: flex;
     flex-wrap: wrap;
-    gap: 8px;
-    margin-top: 8px;
+    gap: 6px;
+    margin-top: 6px;
   }
   .score-chip {
     font-size: 11px;
@@ -540,25 +544,53 @@ const SHADOW_CSS = `
   }
   .score-chip.high { border-color: #fecaca; background: #fef2f2; color: #b91c1c; }
   .score-chip.low { border-color: #a7f3d0; background: #ecfdf5; color: #047857; }
+  .btn-icon-close {
+    flex-shrink: 0;
+    border: 1px solid #e2e8f0 !important;
+    background: #fff !important;
+    color: #475569 !important;
+    width: 34px;
+    height: 34px;
+    padding: 0 !important;
+    border-radius: 8px !important;
+    font-size: 18px !important;
+    line-height: 1 !important;
+    font-weight: 600 !important;
+  }
+  .rewrite-body {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
   .rewrite-columns {
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 0;
-    min-height: 180px;
-    max-height: min(48vh, 360px);
+    flex: 1;
+    min-height: 220px;
+    max-height: none;
+    overflow: hidden;
     border-bottom: 1px solid #e2e8f0;
   }
-  @media (max-width: 640px) {
-    .rewrite-columns { grid-template-columns: 1fr; max-height: min(60vh, 420px); }
+  @media (max-width: 720px) {
+    .rewrite-columns {
+      grid-template-columns: 1fr;
+      overflow-y: auto;
+    }
   }
   .rewrite-col {
     display: flex;
     flex-direction: column;
     min-height: 0;
+    min-width: 0;
     border-right: 1px solid #e2e8f0;
+    overflow: hidden;
   }
   .rewrite-col:last-child { border-right: none; }
   .rewrite-col-label {
+    flex-shrink: 0;
     padding: 6px 12px;
     font-size: 11px;
     font-weight: 800;
@@ -575,9 +607,10 @@ const SHADOW_CSS = `
     margin: 0;
     padding: 10px 12px;
     overflow: auto;
+    overscroll-behavior: contain;
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     font-size: 12px;
-    line-height: 1.45;
+    line-height: 1.5;
     white-space: pre-wrap;
     word-break: break-word;
     color: #0f172a;
@@ -586,16 +619,20 @@ const SHADOW_CSS = `
     resize: none;
     box-sizing: border-box;
     width: 100%;
-    min-height: 140px;
+    min-height: 180px;
+    max-height: none;
+    height: 100%;
   }
   .rewrite-col textarea:focus {
     outline: 2px solid #2bd9c5;
     outline-offset: -2px;
   }
   .rewrite-changes {
+    flex-shrink: 0;
     padding: 8px 14px;
-    max-height: 88px;
+    max-height: min(22vh, 160px);
     overflow-y: auto;
+    overscroll-behavior: contain;
     font-size: 11px;
     color: #475569;
     background: #fff;
@@ -607,10 +644,11 @@ const SHADOW_CSS = `
     padding-left: 18px;
   }
   .rewrite-actions {
+    flex-shrink: 0;
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
-    padding: 12px 16px 14px;
+    padding: 12px 14px;
     background: #f8fafc;
   }
 `
@@ -693,7 +731,7 @@ export function showAlertBanner(
   } else {
     title = isFile ? msgs.alertTitleFile : msgs.alertTitle
     sub = isFile
-      ? `${msgs.alertBodyFile} « ${escapeHtml(fileLabel)} » — ${detections.length} élément${detections.length > 1 ? "s" : ""} (${summaryParts.join(", ")}).`
+      ? `${msgs.alertBodyFile} « ${escapeHtml(fileLabel)} » - ${detections.length} élément${detections.length > 1 ? "s" : ""} (${summaryParts.join(", ")}).`
       : `${msgs.alertBody} ${detections.length} élément${detections.length > 1 ? "s" : ""} (${summaryParts.join(", ")}).`
     pill = isFile ? "Fichier en attente · policy org" : "Alerte sécurité · policy org"
   }
@@ -726,8 +764,8 @@ export function showAlertBanner(
   root.setAttribute(
     "aria-label",
     isBlock
-      ? "OpsGate — envoi non autorisé"
-      : "OpsGate — données sensibles détectées"
+      ? "OpsGate - envoi non autorisé"
+      : "OpsGate - données sensibles détectées"
   )
 
   // Toujours afficher le bouton (défaut true). Seul contactAdminEnabled: false le masque.
@@ -748,41 +786,52 @@ export function showAlertBanner(
     simThreshold > 0 &&
     promptRisk.score >= simThreshold
 
-  // Secure Rewrite = ouvre preview ; Simulation Mode en amont si score élevé
+  // Actions : ligne principale (CTA) + ligne secondaire (outils)
   const actionsHtml = isBlock
     ? `
-      <button type="button" class="btn-primary" data-action="cancel">${escapeHtml(msgs.btnBlockAck)}</button>
-      ${contactBtnHtml}
-      <button type="button" class="btn-secondary" data-action="toggle_details">Voir les détails</button>
+      <div class="actions-primary">
+        <button type="button" class="btn-primary" data-action="cancel">${escapeHtml(msgs.btnBlockAck)}</button>
+      </div>
+      <div class="actions-secondary">
+        ${contactBtnHtml}
+        <button type="button" class="btn-secondary" data-action="toggle_details">Détails</button>
+      </div>
     `
     : isForce
       ? `
-      <button type="button" class="btn-accent" data-action="open_rewrite" title="Aperçu Secure Rewrite">${escapeHtml(rewriteLabel)}</button>
-      <button type="button" class="btn-secondary" data-action="open_sim" title="Simulation de fuite">Simuler le risque</button>
-      <button type="button" class="btn-secondary" data-action="mask_send">${escapeHtml(maskLabel)}</button>
-      ${contactBtnHtml}
-      <button type="button" class="btn-secondary" data-action="toggle_details">Voir les détails</button>
-      <button type="button" class="btn-ghost" data-action="cancel">${escapeHtml(cancelLabel)}</button>
+      <div class="actions-primary">
+        <button type="button" class="btn-accent" data-action="open_rewrite">${escapeHtml(rewriteLabel)}</button>
+        <button type="button" class="btn-secondary" data-action="mask_send">${escapeHtml(maskLabel)}</button>
+      </div>
+      <div class="actions-secondary">
+        <button type="button" class="btn-secondary" data-action="open_sim">Simuler</button>
+        ${contactBtnHtml}
+        <button type="button" class="btn-secondary" data-action="toggle_details">Détails</button>
+        <button type="button" class="btn-ghost" data-action="cancel">${escapeHtml(cancelLabel)}</button>
+      </div>
     `
       : `
-      <button type="button" class="btn-accent" data-action="open_rewrite" title="Aperçu Secure Rewrite">${escapeHtml(rewriteLabel)}</button>
-      <button type="button" class="btn-secondary" data-action="open_sim" title="Simulation de fuite">Simuler le risque</button>
-      <button type="button" class="btn-secondary" data-action="mask_send">${escapeHtml(maskLabel)}</button>
-      <button type="button" class="btn-danger" data-action="send_anyway">${escapeHtml(allowLabel)}</button>
-      ${contactBtnHtml}
-      <button type="button" class="btn-secondary" data-action="toggle_details">Voir les détails</button>
-      <button type="button" class="btn-ghost" data-action="cancel">${escapeHtml(cancelLabel)}</button>
+      <div class="actions-primary">
+        <button type="button" class="btn-accent" data-action="open_rewrite">${escapeHtml(rewriteLabel)}</button>
+        <button type="button" class="btn-secondary" data-action="mask_send">${escapeHtml(maskLabel)}</button>
+        <button type="button" class="btn-danger" data-action="send_anyway">${escapeHtml(allowLabel)}</button>
+      </div>
+      <div class="actions-secondary">
+        <button type="button" class="btn-secondary" data-action="open_sim">Simuler</button>
+        ${contactBtnHtml}
+        <button type="button" class="btn-secondary" data-action="toggle_details">Détails</button>
+        <button type="button" class="btn-ghost" data-action="cancel">${escapeHtml(cancelLabel)}</button>
+      </div>
     `
 
   const riskBlockHtml = !isBlock
     ? `
     <div class="risk-block" id="og-risk-block">
       <div class="risk-row">
-        <span>Risk Score : ${promptRisk.score}/100</span>
+        <span>Risque ${promptRisk.score}/100</span>
         <span class="risk-level ${promptRisk.level}">${promptRisk.level}</span>
       </div>
       <div class="risk-bar" aria-hidden="true">${riskScoreBar(promptRisk.score)}</div>
-      <p class="risk-rec">${escapeHtml(promptRisk.recommendationLabel)}</p>
     </div>`
     : ""
 
@@ -833,16 +882,10 @@ export function showAlertBanner(
         </div>
         <div>
           <p class="title">${escapeHtml(title)}</p>
-          <p class="sub">${sub}</p>
+          <p class="sub">${escapeHtml(isFile ? `${detections.length} élément(s) · ${fileLabel}` : `${detections.length} élément(s)`)}${orgBit ? ` · ${orgBit.replace(/^ Organisation : /, "").replace(/\.$/, "")}` : ""}</p>
           <span class="pill">${escapeHtml(pill)}</span>
-          <p class="admin-notice">${escapeHtml(msgs.adminNotice)}${orgBit}</p>
           <p class="post-contact-note" id="og-post-contact"></p>
           ${riskBlockHtml}
-          ${
-            !isBlock && high > 0
-              ? `<p class="warn-line">Éléments critiques détectés — Secure Rewrite recommandé.</p>`
-              : ""
-          }
           ${options.note ? `<p class="sub" style="margin-top:6px">${escapeHtml(options.note)}</p>` : ""}
         </div>
       </div>
@@ -869,45 +912,48 @@ export function showAlertBanner(
     }
     <div class="sim-panel" id="og-sim" aria-label="Simulation de risque">
       <div class="sim-header">
-        <p class="title">AI Simulation Mode</p>
-        <p class="sub">Voici ce qui pourrait fuiter si vous envoyez ce contenu tel quel.</p>
+        <p class="title">Simulation</p>
         <div id="og-sim-risk"></div>
         <span class="sim-impact" id="og-sim-impact"></span>
       </div>
       <div class="sim-list" id="og-sim-list"></div>
       <div class="sim-rec" id="og-sim-rec"></div>
       <div class="sim-actions">
-        <button type="button" class="btn-accent" data-action="open_rewrite">Lancer Secure Rewrite</button>
+        <button type="button" class="btn-accent" data-action="open_rewrite">Secure Rewrite</button>
         ${
           isForce
             ? ""
             : `<button type="button" class="btn-danger" data-action="send_anyway">${escapeHtml(allowLabel)}</button>`
         }
-        <button type="button" class="btn-ghost" data-action="close_sim">Retour à l’alerte</button>
+        <button type="button" class="btn-ghost" data-action="close_sim">Retour</button>
         <button type="button" class="btn-secondary" data-action="cancel">${escapeHtml(cancelLabel)}</button>
       </div>
     </div>
-    <div class="rewrite-panel" id="og-rewrite" aria-label="Secure Rewrite preview">
+    <div class="rewrite-panel" id="og-rewrite" aria-label="Secure Rewrite">
       <div class="rewrite-header">
-        <p class="title">Secure Rewrite — aperçu</p>
-        <p class="sub">Comparez l’original et la version sécurisée. Vous pouvez modifier la version sécurisée avant d’envoyer.</p>
-        <div class="rewrite-scores" id="og-rewrite-scores"></div>
-      </div>
-      <div class="rewrite-columns">
-        <div class="rewrite-col">
-          <div class="rewrite-col-label">Original</div>
-          <pre id="og-rewrite-original"></pre>
+        <div class="rewrite-header-main">
+          <p class="title">Secure Rewrite</p>
+          <div class="rewrite-scores" id="og-rewrite-scores"></div>
         </div>
-        <div class="rewrite-col">
-          <div class="rewrite-col-label secure">Version sécurisée</div>
-          <textarea id="og-rewrite-secure" spellcheck="false"></textarea>
-        </div>
+        <button type="button" class="btn-icon-close" data-action="close_rewrite" title="Fermer" aria-label="Fermer">×</button>
       </div>
-      <div class="rewrite-changes" id="og-rewrite-changes"></div>
+      <div class="rewrite-body">
+        <div class="rewrite-columns">
+          <div class="rewrite-col">
+            <div class="rewrite-col-label">Original</div>
+            <pre id="og-rewrite-original"></pre>
+          </div>
+          <div class="rewrite-col">
+            <div class="rewrite-col-label secure">Sécurisé</div>
+            <textarea id="og-rewrite-secure" spellcheck="false"></textarea>
+          </div>
+        </div>
+        <div class="rewrite-changes" id="og-rewrite-changes"></div>
+      </div>
       <div class="rewrite-actions">
-        <button type="button" class="btn-accent" data-action="apply_rewrite">Utiliser la version sécurisée</button>
-        <button type="button" class="btn-secondary" data-action="focus_edit">Modifier</button>
-        <button type="button" class="btn-ghost" data-action="close_rewrite">Retour</button>
+        <button type="button" class="btn-accent" data-action="apply_rewrite">Appliquer et envoyer</button>
+        <button type="button" class="btn-secondary" data-action="focus_edit">Éditer</button>
+        <button type="button" class="btn-ghost" data-action="close_rewrite">Fermer</button>
       </div>
     </div>
   `
@@ -1156,7 +1202,7 @@ export function showAlertBanner(
     const edited = (rewriteSecure?.value ?? lastRewriteMeta.rewrittenText ?? "")
       .trim()
     if (!edited) {
-      // Rien à envoyer — revenir
+      // Rien à envoyer - revenir
       closeRewritePreview()
       return
     }
@@ -1216,7 +1262,7 @@ export function showAlertBanner(
         const err = r?.error || "Échec d’envoi"
         const human =
           err === "not_enrolled"
-            ? "Agent non enrôlé — contactez l'admin via la popup OpsGate une fois enrôlé."
+            ? "Agent non enrôlé - contactez l'admin via la popup OpsGate une fois enrôlé."
             : err === "rate_limited" || err.includes("rate")
               ? "Trop de messages récemment. Réessayez plus tard."
               : err
@@ -1660,7 +1706,7 @@ export function showAdminReplyModal(
     true
   )
 
-  // Bloquer Escape sans fermer (force lecture) — seul OK ferme
+  // Bloquer Escape sans fermer (force lecture) - seul OK ferme
   card.addEventListener(
     "keydown",
     (e) => {

@@ -1,11 +1,11 @@
-# OpsGate — Installation & déploiement chez le client
+# OpsGate - Installation & déploiement chez le client
 
-**Public** : intégrateur, admin système, DSI / RSSI pilote  
-**Version produit** : 1.2 / lot V2  
-**Maturité** : **V2 functional / pre-GA** — [`STATUS-V2.md`](./STATUS-V2.md)  
+**Public** : intégrateur, admin système, DSI / RSSI pilote 
+**Version produit** : 1.2 / lot V2 
+**Maturité** : **V2 functional / pre-GA** - [`STATUS-V2.md`](./STATUS-V2.md) 
 **Objectif** : déployer OpsGate **chez le client** (pas seulement en lab dev)
 
-> Ce document est le **point d’entrée déploiement**.  
+> Ce document est le **point d’entrée déploiement**. 
 > Les guides utilisateur décrivent l’**usage** de la console ; ici on décrit **où installer quoi, dans quel ordre**.
 
 | Document lié | Contenu |
@@ -22,25 +22,25 @@
 
 ---
 
-## 1. Vue d’ensemble — qui installe quoi
+## 1. Vue d’ensemble - qui installe quoi
 
 ```
-                    CHEZ LE CLIENT
+ CHEZ LE CLIENT
 ┌─────────────────────────────────────────────────────────────┐
-│  SERVEUR DE MANAGEMENT (ou cloud / VM)                      │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐ │
-│  │ Postgres    │  │ API OpsGate │  │ Console (static)    │ │
-│  │ (durable)   │◄─│ :443 / TLS  │◄─│ HTTPS              │ │
-│  └─────────────┘  └──────▲──────┘  └─────────────────────┘ │
+│ SERVEUR DE MANAGEMENT (ou cloud / VM) │
+│ ┌─────────────┐ ┌─────────────┐ ┌─────────────────────┐ │
+│ │ Postgres │ │ API OpsGate │ │ Console (static) │ │
+│ │ (durable) │◄─│ :443 / TLS │◄─│ HTTPS │ │
+│ └─────────────┘ └──────▲──────┘ └─────────────────────┘ │
 └──────────────────────────│──────────────────────────────────┘
-                           │ HTTPS (enroll, sync, events)
-         ┌─────────────────┴─────────────────┐
-         ▼                                   ▼
-┌─────────────────────┐           ┌─────────────────────┐
-│ POSTES UTILISATEURS │           │ POSTES (option)     │
-│ Extension navigateur│           │ Proxy MSI local     │
-│ Chrome / Edge / FF  │           │ MITM multi-IA       │
-└─────────────────────┘           └─────────────────────┘
+ │ HTTPS (enroll, sync, events)
+ ┌─────────────────┴─────────────────┐
+ ▼ ▼
+┌─────────────────────┐ ┌─────────────────────┐
+│ POSTES UTILISATEURS │ │ POSTES (option) │
+│ Extension navigateur│ │ Proxy MSI local │
+│ Chrome / Edge / FF │ │ MITM multi-IA │
+└─────────────────────┘ └─────────────────────┘
 ```
 
 | Composant | Où | Obligatoire ? |
@@ -71,33 +71,33 @@ Ce guide détaille **B** puis les durcissements **C**. Pour le lab pur, voir aus
 
 ### 3.1 Serveur de management
 
-- OS : Linux (recommandé) ou Windows Server / Windows 11 avec Docker  
-- **Node.js 20+** et **pnpm**  
-- **Docker** (Postgres) **ou** Postgres managé déjà fourni  
+- OS : Linux (recommandé) ou Windows Server / Windows 11 avec Docker 
+- **Node.js 20+** et **pnpm** 
+- **Docker** (Postgres) **ou** Postgres managé déjà fourni 
 - Ports ouverts :
-  - **5432** Postgres (idéalement **non** exposé sur Internet — localhost / réseau privé)
-  - **8787** API (dev) → en prod : **443** via reverse-proxy (nginx, Caddy, IIS…)
-  - **5173** console dev → en prod : fichiers statiques + HTTPS
+ - **5432** Postgres (idéalement **non** exposé sur Internet - localhost / réseau privé)
+ - **8787** API (dev) → en prod : **443** via reverse-proxy (nginx, Caddy, IIS…)
+ - **5173** console dev → en prod : fichiers statiques + HTTPS
 - Accès sortant SMTP si e-mails (OTP, exports, alertes)
 
 ### 3.2 Postes utilisateurs
 
-- Windows 10/11 (ou macOS / Linux pour extension seule)  
-- Chrome **ou** Edge (Firefox supporté)  
+- Windows 10/11 (ou macOS / Linux pour extension seule) 
+- Chrome **ou** Edge (Firefox supporté) 
 - Droits admin **uniquement** pour MSI proxy / force-install GPO (pas pour l’usage quotidien de l’extension sideload de test)
 
 ### 3.3 Fournitures DailyOps / intégrateur
 
-- Code organisation (ex. `ACME-2026`) ou seed DEMO pour pilote  
-- Clé de licence full si hors essai (`OPS-XXXX-…`)  
-- URL API publique HTTPS (ex. `https://opsgate.client.tld`)  
+- Code organisation (ex. `ACME-2026`) ou seed DEMO pour pilote 
+- Clé de licence full si hors essai (`OPS-XXXX-…`) 
+- URL API publique HTTPS (ex. `https://opsgate.client.tld`) 
 - Optionnel : secrets SSO, SMTP, SIEM
 
 ---
 
-## 4. Phase 1 — Control plane (serveur)
+## 4. Phase 1 - Control plane (serveur)
 
-### Étape 1.1 — Récupérer le code / package
+### Étape 1.1 - Récupérer le code / package
 
 ```powershell
 # Depuis le monorepo fourni par DailyOps
@@ -105,7 +105,7 @@ cd ops-gate
 pnpm install
 ```
 
-### Étape 1.2 — Postgres durable
+### Étape 1.2 - Postgres durable
 
 ```powershell
 docker compose up -d
@@ -115,7 +115,7 @@ docker compose ps
 
 **Production** : utiliser un Postgres managé (RDS, Azure PG, etc.) et une `DATABASE_URL` dédiée (user fort, TLS).
 
-### Étape 1.3 — Variables d’environnement API
+### Étape 1.3 - Variables d’environnement API
 
 Créer un fichier `.env` (jamais commité) à partir de `.env.example` :
 
@@ -146,7 +146,7 @@ OPSGATE_API_PUBLIC_URL=https://api.client.tld
 
 Sans `DATABASE_URL` → store **mémoire** : **tout est perdu au redémarrage**. À bannir chez le client.
 
-### Étape 1.4 — Démarrer l’API
+### Étape 1.4 - Démarrer l’API
 
 ```powershell
 # Charger .env ou exporter DATABASE_URL
@@ -163,7 +163,7 @@ curl https://api.client.tld/health
 
 Attendu : **`store=postgres`**.
 
-### Étape 1.5 — Console admin
+### Étape 1.5 - Console admin
 
 **Lab** :
 
@@ -182,26 +182,26 @@ pnpm --filter @opsgate/console build
 
 Configurer l’URL API dans la console (champ API ou paramètre build) pour pointer vers `https://api.client.tld`.
 
-### Étape 1.6 — Reverse-proxy TLS (prod)
+### Étape 1.6 - Reverse-proxy TLS (prod)
 
 Exemple minimal (concept) :
 
-- `https://api.client.tld` → `http://127.0.0.1:8787`  
-- `https://console.client.tld` → fichiers statiques console  
+- `https://api.client.tld` → `http://127.0.0.1:8787` 
+- `https://console.client.tld` → fichiers statiques console 
 
 Certificats : Let’s Encrypt / PKI client.
 
 ---
 
-## 5. Phase 2 — Première configuration métier
+## 5. Phase 2 - Première configuration métier
 
-1. Ouvrir la **console** → se connecter (`OPSGATE_SETUP_EMAIL` / mdp).  
-2. **Changer le mot de passe** immédiatement.  
-3. Activer **MFA TOTP** (Paramètres → Général) — obligatoire si multi-org.  
-4. Noter le **code organisation** (ex. affiché en Paramètres / licence).  
-5. (Option) Activer licence full : coller la clé `OPS-…` fournie par DailyOps.  
-6. Définir **policy** (action, sites IA) → **Force sync**.  
-7. Configurer **SMTP** (Paramètres → E-mail) + test d’envoi.  
+1. Ouvrir la **console** → se connecter (`OPSGATE_SETUP_EMAIL` / mdp). 
+2. **Changer le mot de passe** immédiatement. 
+3. Activer **MFA TOTP** (Paramètres → Général) - obligatoire si multi-org. 
+4. Noter le **code organisation** (ex. affiché en Paramètres / licence). 
+5. (Option) Activer licence full : coller la clé `OPS-…` fournie par DailyOps. 
+6. Définir **policy** (action, sites IA) → **Force sync**. 
+7. Configurer **SMTP** (Paramètres → E-mail) + test d’envoi. 
 8. (Option) Notifications, SIEM, export planifié, backup config.
 
 Checklist « serveur prêt » :
@@ -214,9 +214,9 @@ Checklist « serveur prêt » :
 
 ---
 
-## 6. Phase 3 — Extension sur les postes
+## 6. Phase 3 - Extension sur les postes
 
-### 6.1 Pilote (sideload, 1–20 postes)
+### 6.1 Pilote (sideload, 1-20 postes)
 
 **Chrome / Edge**
 
@@ -228,10 +228,10 @@ pnpm build:chrome
 
 Sur le poste :
 
-1. `chrome://extensions` ou `edge://extensions`  
-2. Mode développeur = ON  
-3. **Charger l’extension non empaquetée** → dossier `chrome-mv3-prod`  
-   (ou ZIP fourni par l’intégrateur)
+1. `chrome://extensions` ou `edge://extensions` 
+2. Mode développeur = ON 
+3. **Charger l’extension non empaquetée** → dossier `chrome-mv3-prod` 
+ (ou ZIP fourni par l’intégrateur)
 
 **Firefox**
 
@@ -248,49 +248,49 @@ pnpm build:firefox
 | Firefox | AMO + `policies.json` |
 
 ```powershell
-pnpm store:all      # → dist/chrome-store/ + firefox-amo/ + safari-store/ + STORES-INDEX.md
-pnpm store:chrome   # CWS seul
-pnpm store:firefox  # AMO seul
+pnpm store:all # → dist/chrome-store/ + firefox-amo/ + safari-store/ + STORES-INDEX.md
+pnpm store:chrome # CWS seul
+pnpm store:firefox # AMO seul
 # Guide : docs/PUBLICATION-STORES.md
 ```
 
-Détail policies :  
-[`architecture/CHROME-WEB-STORE-MDM.md`](./architecture/CHROME-WEB-STORE-MDM.md) ·  
+Détail policies : 
+[`architecture/CHROME-WEB-STORE-MDM.md`](./architecture/CHROME-WEB-STORE-MDM.md) · 
 [`architecture/FIREFOX-AMO.md`](./architecture/FIREFOX-AMO.md)
 
 Fichiers utiles dans le package store :
 
-- `dist/chrome-store/mdm/chrome-force-install.reg`  
-- `dist/chrome-store/mdm/edge-force-install.reg`  
-- `dist/chrome-store/mdm/intune-settings-catalog.json`  
+- `dist/chrome-store/mdm/chrome-force-install.reg` 
+- `dist/chrome-store/mdm/edge-force-install.reg` 
+- `dist/chrome-store/mdm/intune-settings-catalog.json` 
 
 ### 6.3 Enrôlement org (chaque poste / profil)
 
-1. Ouvrir **Options** de l’extension OpsGate.  
-2. **URL API** = `https://api.client.tld` (pas `127.0.0.1` sauf lab mono-PC).  
-3. **Code organisation** = code fourni.  
-4. Label appareil (ex. `PC-FIN-12`).  
-5. **Enrôler**.  
+1. Ouvrir **Options** de l’extension OpsGate. 
+2. **URL API** = `https://api.client.tld` (pas `127.0.0.1` sauf lab mono-PC). 
+3. **Code organisation** = code fourni. 
+4. Label appareil (ex. `PC-FIN-12`). 
+5. **Enrôler**. 
 
 Attendu : mode **géré par l’org**, policy reçue, agent visible dans Console → Agents (≤ 2 min ou Force sync).
 
 ### 6.4 Test de fumée poste
 
-1. Aller sur un site IA (ex. ChatGPT).  
-2. Coller un **secret de test** (ex. clé factice `sk-test…`).  
-3. Le **bandeau OpsGate** apparaît (mask / block selon policy).  
+1. Aller sur un site IA (ex. ChatGPT). 
+2. Coller un **secret de test** (ex. clé factice `sk-test…`). 
+3. Le **bandeau OpsGate** apparaît (mask / block selon policy). 
 4. Console → **Événements** : une ligne apparaît.
 
 ---
 
-## 7. Phase 4 — Proxy local (optionnel)
+## 7. Phase 4 - Proxy local (optionnel)
 
 Complète l’extension (filet si le DOM ne capture pas tout le trafic).
 
 ### 7.1 Build / install MSI
 
 ```powershell
-pnpm proxy:package   # ou pipeline MSI
+pnpm proxy:package # ou pipeline MSI
 # Artefact : dist\opsgate-proxy-*.msi
 ```
 
@@ -300,15 +300,15 @@ Sur le poste (admin) :
 msiexec /i dist\opsgate-proxy-1.2.0.msi /qn
 ```
 
-- Binaires : `C:\Program Files\OpsGate\Proxy\`  
-- Data : `%ProgramData%\OpsGate\Proxy\`  
+- Binaires : `C:\Program Files\OpsGate\Proxy\` 
+- Data : `%ProgramData%\OpsGate\Proxy\` 
 
 ### 7.2 Enroll proxy + CA
 
 Le post-install peut automatiser CA + tâche planifiée. Sinon :
 
-1. Générer / déployer le CA proxy (trust Root utilisateur ou machine).  
-2. Enrôler le proxy vers la même API + code org.  
+1. Générer / déployer le CA proxy (trust Root utilisateur ou machine). 
+2. Enrôler le proxy vers la même API + code org. 
 3. Configurer **PAC / GPO** pour le trafic HTTPS multi-IA (voir `PROXY-PROD-WINDOWS.md`).
 
 **Important** : proxy ≠ bandeau orange. Le banner UI reste le rôle de l’**extension**.
@@ -408,12 +408,12 @@ pnpm api:validate-pg
 
 ## 14. Après le déploiement
 
-- Former les admins : [`GUIDE-UTILISATEUR-V2.md`](./GUIDE-UTILISATEUR-V2.md)  
-- Brief décideurs : [`DECIDEURS-V2-FR.md`](./DECIDEURS-V2-FR.md)  
-- FAQ technique : [`FAQ-DEPLOIEMENT-V2.md`](./FAQ-DEPLOIEMENT-V2.md)  
-- Catalogue capacités : [`architecture/BACKEND-V2-CATALOG.md`](./architecture/BACKEND-V2-CATALOG.md)  
+- Former les admins : [`GUIDE-UTILISATEUR-V2.md`](./GUIDE-UTILISATEUR-V2.md) 
+- Brief décideurs : [`DECIDEURS-V2-FR.md`](./DECIDEURS-V2-FR.md) 
+- FAQ technique : [`FAQ-DEPLOIEMENT-V2.md`](./FAQ-DEPLOIEMENT-V2.md) 
+- Catalogue capacités : [`architecture/BACKEND-V2-CATALOG.md`](./architecture/BACKEND-V2-CATALOG.md) 
 
-Support : **contact@dailyops.tech** — indiquer code org, version API (`/health`), et navigateur.
+Support : **contact@dailyops.tech** - indiquer code org, version API (`/health`), et navigateur.
 
 ---
 
