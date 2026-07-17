@@ -971,6 +971,14 @@ export interface Organization {
   /** Seuils offline + planning horaires */
   monitoring?: Partial<OrgMonitoringSettings>
   createdAt: string
+  /**
+   * Soft-delete RGPD : org inaccessible (enroll / ops) jusqu’à restore ou hard purge.
+   */
+  deletedAt?: string | null
+  /** Date prévue de purge hard (CASCADE) */
+  deletePurgeAt?: string | null
+  deleteReason?: string | null
+  deleteRequestedBy?: string | null
 }
 
 /** Permissions console / actions admin (hors principal qui a tout) */
@@ -1324,6 +1332,9 @@ export type AdminAuditAction =
   | "moving_rule_delete"
   | "moving_rule_apply"
   | "org_settings_update"
+  | "org_gdpr_soft_delete"
+  | "org_gdpr_restore"
+  | "org_gdpr_hard_purge"
   | "agent_merge"
   | "report_export"
   | "mfa_enable"

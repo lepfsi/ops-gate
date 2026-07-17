@@ -96,7 +96,7 @@ Design d’origine : [`architecture/PLATFORM-v2.md`](./architecture/PLATFORM-v2.
 3. ~~Stripe webhook + portal~~ → **livré** (reste : clés prod Dashboard)  
 4. **OCR** pack `fra` embarqué offline (aujourd’hui eng+fra si locale fr, download runtime)  
 5. **OIDC/SAML state** multi-instance (Redis)  
-6. Soft-delete org GDPR full  
+6. ~~Soft-delete org GDPR full~~ → **livré** (`gdpr-org.ts`, doc `architecture/GDPR-SOFT-DELETE.md`)  
 
 ---
 

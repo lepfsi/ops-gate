@@ -227,6 +227,16 @@ export function createApp() {
 
     const org = await store.findOrgByCode(orgCode)
     if (!org) return c.json({ error: "org_not_found" }, 404)
+    if (org.deletedAt) {
+      return c.json(
+        {
+          error: "org_soft_deleted",
+          message:
+            "Organisation en cours de suppression RGPD — nouvel enroll refusé."
+        },
+        403
+      )
+    }
 
     if (org.isPersonal && !body.personal_license_key?.trim()) {
       return c.json(
@@ -415,6 +425,15 @@ export function createApp() {
     const orgId = c.get("orgId")
     const agentId = c.get("agentId")
     const org = await store.getOrg(orgId)
+    if (org?.deletedAt) {
+      return c.json(
+        {
+          error: "org_soft_deleted",
+          message: "Organisation en suppression RGPD — agent désactivé."
+        },
+        403
+      )
+    }
     // Garantit un pack actif (évite enrolled_but_sync_failed:http_404)
     let pack = await store.getActivePack(orgId)
     if (!pack) {
@@ -1017,6 +1036,41 @@ export function createApp() {
     ) {
       return { ok: false, status: 403, error: "read_only_session" }
     }
+    // Soft-delete RGPD : seules les routes /org/gdpr/* (+ logout) restent accessibles
+    {
+      const org = await store.getOrg(resolved.session.orgId)
+      if (org?.deletedAt) {
+        const path = String(
+          c.req.path || (c as { req?: { path?: string } }).req?.path || ""
+        )
+        const method = String(
+          c.req.method ||
+            (c as { req?: { method?: string } }).req?.method ||
+            "GET"
+        ).toUpperCase()
+        const gdprOk =
+          path.includes("/org/gdpr") ||
+          path.includes("/auth/logout") ||
+          path.includes("/auth/me")
+        if (!gdprOk) {
+          return {
+            ok: false,
+            status: 403,
+            error: "org_soft_deleted"
+          }
+        }
+        // Mutations hors restore/export interdites
+        if (
+          method !== "GET" &&
+          method !== "HEAD" &&
+          method !== "OPTIONS" &&
+          !path.includes("/org/gdpr") &&
+          !path.includes("/auth/logout")
+        ) {
+          return { ok: false, status: 403, error: "org_soft_deleted" }
+        }
+      }
+    }
     return {
       ok: true,
       admin: resolved.admin,
@@ -1289,17 +1343,21 @@ export function createApp() {
       }
       return c.json({ error: result.error }, 401)
     }
+    const loginOrg = await store.getOrg(result.session.orgId)
+    const orgSoftDeleted = !!loginOrg?.deletedAt
     await audit(
       {
         admin: result.admin,
         orgId: result.session.orgId
       },
       "login",
-      result.session.readOnly
-        ? "Connexion console (lecture seule)"
-        : result.forced
-          ? "Connexion console (session précédente révoquée)"
-          : "Connexion console"
+      orgSoftDeleted
+        ? "Connexion console (org soft-deleted RGPD — restore uniquement)"
+        : result.session.readOnly
+          ? "Connexion console (lecture seule)"
+          : result.forced
+            ? "Connexion console (session précédente révoquée)"
+            : "Connexion console"
     )
     return c.json({
       ok: true,
@@ -1309,8 +1367,11 @@ export function createApp() {
       forced: !!result.forced,
       read_only: !!result.session.readOnly,
       mfa_enabled: !!result.admin.totpEnabled,
-      hint:
-        result.admin.mustChangePassword
+      org_soft_deleted: orgSoftDeleted,
+      org_purge_at: loginOrg?.deletePurgeAt || null,
+      hint: orgSoftDeleted
+        ? "Organisation en suppression RGPD : exportez vos données ou restaurez avant la date de purge."
+        : result.admin.mustChangePassword
           ? "Changez le mot de passe par défaut (0000) dès que possible."
           : result.session.readOnly
             ? "Session lecture seule : consultation uniquement (l’autre session reste active)."
@@ -2326,7 +2387,9 @@ export function createApp() {
             id: org.id,
             name: org.name,
             org_code: org.orgCode,
-            primary_email: org.primaryEmail
+            primary_email: org.primaryEmail,
+            deleted_at: org.deletedAt || null,
+            delete_purge_at: org.deletePurgeAt || null
           }
         : null,
       accessible_orgs: accessible.map((o) => ({
@@ -2341,7 +2404,9 @@ export function createApp() {
       mfa_required_multi_org:
         accessible.length > 1 && !auth.admin.totpEnabled,
       mfa_enabled: !!auth.admin.totpEnabled,
-      read_only: !!auth.readOnly
+      read_only: !!auth.readOnly,
+      org_soft_deleted: !!org?.deletedAt,
+      org_purge_at: org?.deletePurgeAt || null
     })
   })
 
@@ -5901,6 +5966,130 @@ export function createApp() {
       smtp_enabled: !!mon.smtp?.enabled,
       smtp_host: mon.smtp?.host || null,
       cron_env: process.env.OPSGATE_EXPORTS_CRON_MINUTES || "15"
+    })
+  })
+
+  // ── GDPR soft-delete org ─────────────────────────────────────
+  v1.get("/org/gdpr/status", async (c) => {
+    const gate = await requireConsoleAuth(c, "console_access")
+    if (!gate.ok) return c.json({ error: gate.error }, gate.status)
+    const org = await store.getOrg(gate.orgId)
+    if (!org) return c.json({ error: "no_org" }, 404)
+    const { gdprStatusOf, GDPR_CONFIRM_PHRASE, GDPR_RESTORE_PHRASE } =
+      await import("./gdpr-org")
+    return c.json({
+      ok: true,
+      ...gdprStatusOf(org),
+      confirm_phrase: GDPR_CONFIRM_PHRASE,
+      restore_phrase: GDPR_RESTORE_PHRASE
+    })
+  })
+
+  /** Export portabilité (DSAR) — JSON téléchargeable */
+  v1.get("/org/gdpr/export", async (c) => {
+    const gate = await requireConsoleAuth(c, "console_access")
+    if (!gate.ok) return c.json({ error: gate.error }, gate.status)
+    if (!gate.admin.isPrincipal) {
+      return c.json({ error: "principal_only" }, 403)
+    }
+    const { buildGdprExport } = await import("./gdpr-org")
+    const payload = await buildGdprExport(store, gate.orgId)
+    if (!payload) return c.json({ error: "no_org" }, 404)
+    await store.appendAdminAudit({
+      orgId: gate.orgId,
+      adminId: gate.admin.id,
+      adminEmail: gate.admin.email,
+      adminLabel: gate.admin.label,
+      action: "org_settings_update",
+      detail: "Export GDPR / portabilité"
+    })
+    return c.json({ ok: true, export: payload })
+  })
+
+  /**
+   * Soft-delete : confirm = "DELETE MY ORG"
+   * Bloque enroll + agents, sessions coupées, purge hard après N jours.
+   */
+  v1.post("/org/gdpr/soft-delete", async (c) => {
+    const gate = await requireConsoleAuth(c, "console_access")
+    if (!gate.ok) return c.json({ error: gate.error }, gate.status)
+    if (gate.readOnly) return c.json({ error: "read_only_session" }, 403)
+    if (!gate.admin.isPrincipal) {
+      return c.json({ error: "principal_only" }, 403)
+    }
+    let body: { confirm?: string; reason?: string; force?: boolean }
+    try {
+      body = await c.req.json()
+    } catch {
+      body = {}
+    }
+    const { softDeleteOrganization, GDPR_CONFIRM_PHRASE } = await import(
+      "./gdpr-org"
+    )
+    const r = await softDeleteOrganization(store, gate.orgId, {
+      requestedByEmail: gate.admin.email,
+      reason: body.reason,
+      confirm: body.confirm || "",
+      forceProtected: body.force === true && process.env.OPSGATE_ALLOW_DEMO_DELETE === "1"
+    })
+    if (!r.ok) {
+      const status =
+        r.error === "confirm_required"
+          ? 400
+          : r.error === "org_protected"
+            ? 403
+            : r.error === "already_deleted"
+              ? 409
+              : 400
+      return c.json(
+        {
+          error: r.error,
+          confirm_phrase: GDPR_CONFIRM_PHRASE
+        },
+        status
+      )
+    }
+    return c.json({
+      ok: true,
+      ...r.status,
+      agents_revoked: r.agents_revoked,
+      sessions_revoked: r.sessions_revoked,
+      message:
+        "Organisation marquée pour suppression. Restauration possible jusqu’à purge_at. Agents et sessions révoqués."
+    })
+  })
+
+  /** Restore avant purge hard — confirm = "RESTORE MY ORG" */
+  v1.post("/org/gdpr/restore", async (c) => {
+    const gate = await requireConsoleAuth(c, "console_access")
+    if (!gate.ok) return c.json({ error: gate.error }, gate.status)
+    if (!gate.admin.isPrincipal) {
+      return c.json({ error: "principal_only" }, 403)
+    }
+    let body: { confirm?: string }
+    try {
+      body = await c.req.json()
+    } catch {
+      body = {}
+    }
+    const { restoreOrganization, GDPR_RESTORE_PHRASE } = await import(
+      "./gdpr-org"
+    )
+    const r = await restoreOrganization(store, gate.orgId, {
+      requestedByEmail: gate.admin.email,
+      confirm: body.confirm || ""
+    })
+    if (!r.ok) {
+      return c.json(
+        { error: r.error, restore_phrase: GDPR_RESTORE_PHRASE },
+        r.error === "confirm_required" ? 400 : 409
+      )
+    }
+    return c.json({
+      ok: true,
+      ...r.status,
+      message:
+        "Organisation restaurée. Ré-enrôlez les agents (tokens révoqués lors du soft-delete)."
     })
   })
 

@@ -872,11 +872,15 @@ export const api = {
         name: string
         org_code: string
         primary_email: string
+        deleted_at?: string | null
+        delete_purge_at?: string | null
       } | null
       multi_org?: boolean
       mfa_required_multi_org?: boolean
       mfa_enabled?: boolean
       read_only?: boolean
+      org_soft_deleted?: boolean
+      org_purge_at?: string | null
       accessible_orgs?: Array<{
         org_id: string
         org_code: string
@@ -1291,6 +1295,49 @@ export const api = {
     request<{ ok: boolean; url: string }>("/v1/billing/portal", {
       method: "POST",
       body: "{}"
+    }),
+
+  gdprStatus: () =>
+    request<{
+      ok: boolean
+      deleted: boolean
+      deleted_at: string | null
+      purge_at: string | null
+      delete_reason: string | null
+      days_until_purge: number | null
+      can_restore: boolean
+      purge_days_default: number
+      protected: boolean
+      confirm_phrase: string
+      restore_phrase: string
+    }>("/v1/org/gdpr/status"),
+
+  gdprExport: () =>
+    request<{ ok: boolean; export: unknown }>("/v1/org/gdpr/export"),
+
+  gdprSoftDelete: (confirm: string, reason?: string) =>
+    request<{
+      ok: boolean
+      deleted: boolean
+      purge_at: string | null
+      agents_revoked: number
+      sessions_revoked: number
+      message?: string
+      error?: string
+    }>("/v1/org/gdpr/soft-delete", {
+      method: "POST",
+      body: JSON.stringify({ confirm, reason })
+    }),
+
+  gdprRestore: (confirm: string) =>
+    request<{
+      ok: boolean
+      deleted: boolean
+      message?: string
+      error?: string
+    }>("/v1/org/gdpr/restore", {
+      method: "POST",
+      body: JSON.stringify({ confirm })
     }),
 
   eventsByDecision: (decision: string) =>

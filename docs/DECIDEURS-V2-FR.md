@@ -137,7 +137,7 @@ Utilisateur ──► Site IA (navigateur)
 |---------------------------|---------------------|
 | Extension multi-navigateur, proxy, SSO, MFA multi-tenant, passkeys, LDAP, SIEM, MSI | Publication store réelle (CWS/AMO/Apple), pilote client |
 | Scan fichiers PDF/DOCX/PPTX/XLSX + OCR images | OCR fr offline embarqué, Safari App Store public |
-| Audit WORM, backup, notif multi-canaux, MSP, **portal Stripe** (checkout/sièges) | Clés Stripe prod + soft-delete org GDPR full |
+| Audit WORM, backup, notif multi-canaux, MSP, **portal Stripe**, **soft-delete GDPR** | Clés Stripe prod, publication stores, pilote client |
 
 **Installation** : guide intégrateur [`DEPLOIEMENT-CLIENT.md`](./DEPLOIEMENT-CLIENT.md) (+ PDF FR/EN).  
 **Avancement détaillé** : [`STATUS-V2.md`](./STATUS-V2.md) · [`V2-BACKLOG.md`](./V2-BACKLOG.md).

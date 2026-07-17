@@ -149,6 +149,25 @@ export interface OpsGateStore {
   /** Met à jour monitoring (seuils offline + schedule) */
   setOrgLicenseSeats(orgId: string, seats: number): Promise<Organization | undefined>
 
+  /** Soft-delete RGPD (marque deleted_at + purge_at) */
+  softDeleteOrg(
+    orgId: string,
+    meta: {
+      deletedAt: string
+      deletePurgeAt: string
+      deleteReason?: string | null
+      deleteRequestedBy?: string | null
+    }
+  ): Promise<Organization | undefined>
+  /** Annule soft-delete si encore dans la fenêtre de grâce */
+  restoreOrg(orgId: string): Promise<Organization | undefined>
+  /** Purge hard CASCADE — irréversible */
+  hardDeleteOrg(orgId: string): Promise<boolean>
+  /** Orgs dont purge_at ≤ now */
+  listOrgsDueForHardPurge(): Promise<Organization[]>
+  /** Révoque toutes les sessions console de l’org */
+  revokeAllOrgSessions(orgId: string): Promise<number>
+
   /** Pack de règles par défaut si aucun actif (évite agent 404) */
   ensureDefaultPack(orgId: string): Promise<import("./types").StoredRulePack | undefined>
 

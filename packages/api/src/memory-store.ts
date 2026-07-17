@@ -391,6 +391,86 @@ export class MemoryStore implements OpsGateStore {
     return org
   }
 
+  async softDeleteOrg(
+    orgId: string,
+    meta: {
+      deletedAt: string
+      deletePurgeAt: string
+      deleteReason?: string | null
+      deleteRequestedBy?: string | null
+    }
+  ) {
+    const org = this.orgs.get(orgId)
+    if (!org) return undefined
+    org.deletedAt = meta.deletedAt
+    org.deletePurgeAt = meta.deletePurgeAt
+    org.deleteReason = meta.deleteReason || null
+    org.deleteRequestedBy = meta.deleteRequestedBy || null
+    return org
+  }
+
+  async restoreOrg(orgId: string) {
+    const org = this.orgs.get(orgId)
+    if (!org) return undefined
+    org.deletedAt = null
+    org.deletePurgeAt = null
+    org.deleteReason = null
+    org.deleteRequestedBy = null
+    return org
+  }
+
+  async hardDeleteOrg(orgId: string) {
+    const org = this.orgs.get(orgId)
+    if (!org) return false
+    this.orgs.delete(orgId)
+    this.orgsByCode.delete(org.orgCode.toUpperCase())
+    this.policies.delete(orgId)
+    this.profiles.delete(orgId)
+    this.groups.delete(orgId)
+    this.users.delete(orgId)
+    this.admins.delete(orgId)
+    this.packs.delete(orgId)
+    // agents
+    for (const [id, a] of [...this.agents.entries()]) {
+      if (a.orgId === orgId) {
+        if (a.tokenHash) this.agentsByTokenHash.delete(a.tokenHash)
+        this.agents.delete(id)
+      }
+    }
+    this.events = this.events.filter((e) => e.orgId !== orgId)
+    this.adminAudit = this.adminAudit.filter((e) => e.orgId !== orgId)
+    this.movingRules.delete(orgId)
+    this.logExports.delete(orgId)
+    this.recoveryCodes.delete(orgId)
+    this.inboxMessages = this.inboxMessages.filter((m) => m.orgId !== orgId)
+    // sessions
+    for (const [tok, s] of [...this.sessions.entries()]) {
+      if (s.orgId === orgId) this.sessions.delete(tok)
+    }
+    return true
+  }
+
+  async listOrgsDueForHardPurge() {
+    const now = Date.now()
+    return [...this.orgs.values()].filter(
+      (o) =>
+        o.deletedAt &&
+        o.deletePurgeAt &&
+        Date.parse(o.deletePurgeAt) <= now
+    )
+  }
+
+  async revokeAllOrgSessions(orgId: string) {
+    let n = 0
+    for (const [tok, s] of [...this.sessions.entries()]) {
+      if (s.orgId === orgId) {
+        this.sessions.delete(tok)
+        n++
+      }
+    }
+    return n
+  }
+
   private issuedLicenses: import("./license-keys").IssuedLicenseRecord[] = []
 
   async ensureDefaultPack(

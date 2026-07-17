@@ -179,7 +179,13 @@ function rowOrg(r: pg.QueryResultRow): Organization {
     licenseSeats:
       typeof r.license_seats === "number" ? r.license_seats : Number(r.license_seats) || 0,
     monitoring,
-    createdAt: new Date(r.created_at).toISOString()
+    createdAt: new Date(r.created_at).toISOString(),
+    deletedAt: r.deleted_at ? new Date(r.deleted_at).toISOString() : null,
+    deletePurgeAt: r.delete_purge_at
+      ? new Date(r.delete_purge_at).toISOString()
+      : null,
+    deleteReason: r.delete_reason || null,
+    deleteRequestedBy: r.delete_requested_by || null
   }
 }
 
@@ -442,6 +448,10 @@ export class PgStore implements OpsGateStore {
       `ALTER TABLE organizations ADD COLUMN IF NOT EXISTS primary_email TEXT NOT NULL DEFAULT 'admin@demo.local'`,
       `ALTER TABLE organizations ADD COLUMN IF NOT EXISTS is_personal BOOLEAN NOT NULL DEFAULT FALSE`,
       `ALTER TABLE organizations ADD COLUMN IF NOT EXISTS license_seats INT NOT NULL DEFAULT 0`,
+      `ALTER TABLE organizations ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ`,
+      `ALTER TABLE organizations ADD COLUMN IF NOT EXISTS delete_purge_at TIMESTAMPTZ`,
+      `ALTER TABLE organizations ADD COLUMN IF NOT EXISTS delete_reason TEXT`,
+      `ALTER TABLE organizations ADD COLUMN IF NOT EXISTS delete_requested_by TEXT`,
       `ALTER TABLE policies ADD COLUMN IF NOT EXISTS management_password_hash TEXT NOT NULL DEFAULT ''`,
       `ALTER TABLE policies ADD COLUMN IF NOT EXISTS config_epoch INT NOT NULL DEFAULT 1`,
       `ALTER TABLE policies ADD COLUMN IF NOT EXISTS protect_unenroll BOOLEAN NOT NULL DEFAULT FALSE`,
@@ -1114,6 +1124,73 @@ export class PgStore implements OpsGateStore {
       [orgId, n]
     )
     return this.getOrg(orgId)
+  }
+
+  async softDeleteOrg(
+    orgId: string,
+    meta: {
+      deletedAt: string
+      deletePurgeAt: string
+      deleteReason?: string | null
+      deleteRequestedBy?: string | null
+    }
+  ) {
+    await this.pool.query(
+      `UPDATE organizations SET
+         deleted_at = $2::timestamptz,
+         delete_purge_at = $3::timestamptz,
+         delete_reason = $4,
+         delete_requested_by = $5
+       WHERE id = $1`,
+      [
+        orgId,
+        meta.deletedAt,
+        meta.deletePurgeAt,
+        meta.deleteReason || null,
+        meta.deleteRequestedBy || null
+      ]
+    )
+    return this.getOrg(orgId)
+  }
+
+  async restoreOrg(orgId: string) {
+    await this.pool.query(
+      `UPDATE organizations SET
+         deleted_at = NULL,
+         delete_purge_at = NULL,
+         delete_reason = NULL,
+         delete_requested_by = NULL
+       WHERE id = $1`,
+      [orgId]
+    )
+    return this.getOrg(orgId)
+  }
+
+  async hardDeleteOrg(orgId: string) {
+    const { rowCount } = await this.pool.query(
+      `DELETE FROM organizations WHERE id = $1`,
+      [orgId]
+    )
+    return (rowCount ?? 0) > 0
+  }
+
+  async listOrgsDueForHardPurge() {
+    const { rows } = await this.pool.query(
+      `SELECT * FROM organizations
+       WHERE deleted_at IS NOT NULL
+         AND delete_purge_at IS NOT NULL
+         AND delete_purge_at <= NOW()
+       ORDER BY delete_purge_at ASC`
+    )
+    return rows.map(rowOrg)
+  }
+
+  async revokeAllOrgSessions(orgId: string) {
+    const { rowCount } = await this.pool.query(
+      `DELETE FROM admin_sessions WHERE org_id = $1`,
+      [orgId]
+    )
+    return rowCount ?? 0
   }
 
   async ensureDefaultPack(

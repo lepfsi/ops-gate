@@ -276,6 +276,9 @@ export default function App() {
     requester_hint: string
   } | null>(null)
   const [sessionReadOnly, setSessionReadOnly] = useState(false)
+  const [orgSoftDeleted, setOrgSoftDeleted] = useState(false)
+  const [orgPurgeAt, setOrgPurgeAt] = useState<string | null>(null)
+  const [gdprShellConfirm, setGdprShellConfirm] = useState("")
 
   const refreshHealth = useCallback(async () => {
     try {
@@ -348,6 +351,8 @@ export default function App() {
         setMfaRequiredMultiOrg(!!me.mfa_required_multi_org)
         setMfaEnabled(!!me.mfa_enabled)
         setSessionReadOnly(!!me.read_only)
+        setOrgSoftDeleted(!!me.org_soft_deleted || !!me.org?.deleted_at)
+        setOrgPurgeAt(me.org_purge_at || me.org?.delete_purge_at || null)
       } catch {
         setToken(null)
         setSessionAdmin(null)
@@ -358,6 +363,8 @@ export default function App() {
         setMfaRequiredMultiOrg(false)
         setMfaEnabled(false)
         setSessionReadOnly(false)
+        setOrgSoftDeleted(false)
+        setOrgPurgeAt(null)
       } finally {
         setAuthChecking(false)
       }
@@ -905,6 +912,100 @@ export default function App() {
           setInfo(admin.must_change_password ? null : "Connecté")
         }}
       />
+    )
+  }
+
+  /** Mode org soft-deleted : écran restore uniquement */
+  if (orgSoftDeleted) {
+    return (
+      <div className="login-shell">
+        <div className="card" style={{ maxWidth: 480, margin: "40px auto" }}>
+          <BrandMark size={40} />
+          <h2 style={{ marginTop: 12 }}>{t("gdpr.shellTitle")}</h2>
+          <p className="muted" style={{ fontSize: 13 }}>
+            {t("gdpr.shellHint")}
+          </p>
+          {orgPurgeAt && (
+            <p style={{ fontSize: 13 }}>
+              {t("gdpr.purgeAt")}:{" "}
+              <strong className="mono">{String(orgPurgeAt).slice(0, 19)}</strong>
+            </p>
+          )}
+          {error && <p className="error">{error}</p>}
+          {info && <p className="ok">{info}</p>}
+          <label className="field-label">{t("gdpr.restoreConfirm")}</label>
+          <input
+            className="input mono"
+            value={gdprShellConfirm}
+            onChange={(e) => setGdprShellConfirm(e.target.value)}
+            placeholder="RESTORE MY ORG"
+          />
+          <div className="row" style={{ gap: 8, marginTop: 12, flexWrap: "wrap" }}>
+            <button
+              type="button"
+              className="btn"
+              disabled={busy || gdprShellConfirm.trim() !== "RESTORE MY ORG"}
+              onClick={async () => {
+                setBusy(true)
+                setError(null)
+                try {
+                  await api.gdprRestore(gdprShellConfirm.trim())
+                  setOrgSoftDeleted(false)
+                  setOrgPurgeAt(null)
+                  setGdprShellConfirm("")
+                  setInfo(t("gdpr.restored"))
+                  window.location.reload()
+                } catch (e) {
+                  setError(String(e))
+                } finally {
+                  setBusy(false)
+                }
+              }}>
+              {t("gdpr.restore")}
+            </button>
+            <button
+              type="button"
+              className="btn secondary"
+              disabled={busy}
+              onClick={async () => {
+                setBusy(true)
+                try {
+                  const r = await api.gdprExport()
+                  const blob = new Blob([JSON.stringify(r.export, null, 2)], {
+                    type: "application/json"
+                  })
+                  const a = document.createElement("a")
+                  a.href = URL.createObjectURL(blob)
+                  a.download = `opsgate-gdpr-export-${orgCode || "org"}.json`
+                  a.click()
+                  URL.revokeObjectURL(a.href)
+                  setInfo(t("gdpr.exported"))
+                } catch (e) {
+                  setError(String(e))
+                } finally {
+                  setBusy(false)
+                }
+              }}>
+              {t("gdpr.export")}
+            </button>
+            <button
+              type="button"
+              className="btn secondary"
+              onClick={async () => {
+                try {
+                  await api.logout()
+                } catch {
+                  /* ignore */
+                }
+                setToken(null)
+                setSessionAdmin(null)
+                setOrgSoftDeleted(false)
+              }}>
+              {t("nav.logout") || "Logout"}
+            </button>
+          </div>
+        </div>
+      </div>
     )
   }
 
@@ -3119,6 +3220,14 @@ function SystemSettingsView({
   const [billingSubStatus, setBillingSubStatus] = useState<string | null>(null)
   const [billingQty, setBillingQty] = useState(5)
   const [billingNote, setBillingNote] = useState("")
+  const [gdprDeleted, setGdprDeleted] = useState(false)
+  const [gdprPurgeAt, setGdprPurgeAt] = useState<string | null>(null)
+  const [gdprDaysLeft, setGdprDaysLeft] = useState<number | null>(null)
+  const [gdprProtected, setGdprProtected] = useState(false)
+  const [gdprConfirmPhrase, setGdprConfirmPhrase] = useState("DELETE MY ORG")
+  const [gdprRestorePhrase, setGdprRestorePhrase] = useState("RESTORE MY ORG")
+  const [gdprConfirmInput, setGdprConfirmInput] = useState("")
+  const [gdprReason, setGdprReason] = useState("")
   const [onlineMin, setOnlineMin] = useState(15)
   const [offlineMin, setOfflineMin] = useState(120)
   const [schedOn, setSchedOn] = useState(false)
@@ -3445,6 +3554,19 @@ function SystemSettingsView({
       } catch {
         setBillingEnabled(false)
       }
+      try {
+        const g = await api.gdprStatus()
+        setGdprDeleted(!!g.deleted)
+        setGdprPurgeAt(g.purge_at)
+        setGdprDaysLeft(
+          typeof g.days_until_purge === "number" ? g.days_until_purge : null
+        )
+        setGdprProtected(!!g.protected)
+        if (g.confirm_phrase) setGdprConfirmPhrase(g.confirm_phrase)
+        if (g.restore_phrase) setGdprRestorePhrase(g.restore_phrase)
+      } catch {
+        /* ignore */
+      }
     })()
   }, [setError, orgName, primaryEmail, t, setInfo])
 
@@ -3682,6 +3804,195 @@ function SystemSettingsView({
           </div>
 
           <DateTimePrefsPanel t={t} setInfo={setInfo} />
+
+          {/* RGPD soft-delete */}
+          <h3 style={{ marginTop: 28 }}>{t("gdpr.title")}</h3>
+          <div
+            className="form-stack"
+            style={{
+              maxWidth: 520,
+              padding: 12,
+              border: "1px solid var(--line)",
+              borderRadius: 4,
+              background: gdprDeleted ? "rgba(239,68,68,0.08)" : "var(--surface-2)"
+            }}>
+            <p className="muted" style={{ fontSize: 12, margin: 0 }}>
+              {t("gdpr.hint")}
+            </p>
+            {gdprDeleted ? (
+              <>
+                <p style={{ fontSize: 13, margin: "8px 0 0" }}>
+                  <strong style={{ color: "#ef4444" }}>{t("gdpr.deleted")}</strong>
+                  {gdprPurgeAt && (
+                    <>
+                      {" · "}
+                      {t("gdpr.purgeAt")}:{" "}
+                      <span className="mono">
+                        {String(gdprPurgeAt).slice(0, 10)}
+                      </span>
+                      {gdprDaysLeft != null && (
+                        <>
+                          {" "}
+                          ({gdprDaysLeft} {t("gdpr.days")})
+                        </>
+                      )}
+                    </>
+                  )}
+                </p>
+                <label className="field-label">{t("gdpr.restoreConfirm")}</label>
+                <input
+                  className="input mono"
+                  value={gdprConfirmInput}
+                  onChange={(e) => setGdprConfirmInput(e.target.value)}
+                  placeholder={gdprRestorePhrase}
+                />
+                <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+                  <button
+                    type="button"
+                    className="btn"
+                    disabled={busy || gdprConfirmInput.trim() !== gdprRestorePhrase}
+                    onClick={async () => {
+                      setBusy(true)
+                      setError(null)
+                      try {
+                        await api.gdprRestore(gdprConfirmInput.trim())
+                        setGdprDeleted(false)
+                        setGdprPurgeAt(null)
+                        setGdprDaysLeft(null)
+                        setGdprConfirmInput("")
+                        setInfo(t("gdpr.restored"))
+                      } catch (e) {
+                        setError(String(e))
+                      } finally {
+                        setBusy(false)
+                      }
+                    }}>
+                    {t("gdpr.restore")}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn secondary"
+                    disabled={busy}
+                    onClick={async () => {
+                      setBusy(true)
+                      try {
+                        const r = await api.gdprExport()
+                        const blob = new Blob(
+                          [JSON.stringify(r.export, null, 2)],
+                          { type: "application/json" }
+                        )
+                        const a = document.createElement("a")
+                        a.href = URL.createObjectURL(blob)
+                        a.download = `opsgate-gdpr-export-${orgCode || "org"}.json`
+                        a.click()
+                        URL.revokeObjectURL(a.href)
+                        setInfo(t("gdpr.exported"))
+                      } catch (e) {
+                        setError(String(e))
+                      } finally {
+                        setBusy(false)
+                      }
+                    }}>
+                    {t("gdpr.export")}
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                {gdprProtected && (
+                  <p className="muted" style={{ fontSize: 12, margin: "6px 0 0" }}>
+                    {t("gdpr.protected")}
+                  </p>
+                )}
+                <button
+                  type="button"
+                  className="btn secondary"
+                  disabled={busy}
+                  onClick={async () => {
+                    setBusy(true)
+                    try {
+                      const r = await api.gdprExport()
+                      const blob = new Blob(
+                        [JSON.stringify(r.export, null, 2)],
+                        { type: "application/json" }
+                      )
+                      const a = document.createElement("a")
+                      a.href = URL.createObjectURL(blob)
+                      a.download = `opsgate-gdpr-export-${orgCode || "org"}.json`
+                      a.click()
+                      URL.revokeObjectURL(a.href)
+                      setInfo(t("gdpr.exported"))
+                    } catch (e) {
+                      setError(String(e))
+                    } finally {
+                      setBusy(false)
+                    }
+                  }}>
+                  {t("gdpr.export")}
+                </button>
+                <label className="field-label" style={{ marginTop: 8 }}>
+                  {t("gdpr.reason")}
+                </label>
+                <input
+                  className="input"
+                  value={gdprReason}
+                  onChange={(e) => setGdprReason(e.target.value)}
+                  placeholder={t("gdpr.reasonPh")}
+                />
+                <label className="field-label">{t("gdpr.deleteConfirm")}</label>
+                <input
+                  className="input mono"
+                  value={gdprConfirmInput}
+                  onChange={(e) => setGdprConfirmInput(e.target.value)}
+                  placeholder={gdprConfirmPhrase}
+                />
+                <button
+                  type="button"
+                  className="btn danger"
+                  disabled={
+                    busy ||
+                    gdprProtected ||
+                    gdprConfirmInput.trim() !== gdprConfirmPhrase
+                  }
+                  onClick={async () => {
+                    if (
+                      !confirm(
+                        t("gdpr.deleteWarn") ||
+                          "Supprimer l’organisation ? Agents et sessions seront révoqués."
+                      )
+                    )
+                      return
+                    setBusy(true)
+                    setError(null)
+                    try {
+                      const r = await api.gdprSoftDelete(
+                        gdprConfirmInput.trim(),
+                        gdprReason.trim() || undefined
+                      )
+                      setGdprDeleted(true)
+                      setGdprPurgeAt(r.purge_at || null)
+                      setGdprConfirmInput("")
+                      setInfo(
+                        r.message ||
+                          t("gdpr.deletedOk") ||
+                          "Organisation marquée pour suppression"
+                      )
+                      // Session bientôt invalide — inviter à recharger
+                      setTimeout(() => {
+                        window.location.hash = "#/settings/general"
+                        window.location.reload()
+                      }, 1500)
+                    } catch (e) {
+                      setError(String(e))
+                    } finally {
+                      setBusy(false)
+                    }
+                  }}>
+                  {t("gdpr.softDelete")}
+                </button>
+              </>
+            )}
+          </div>
 
           <h3 style={{ marginTop: 24 }}>{t("mfa.title")}</h3>
           <p className="muted" style={{ fontSize: 12 }}>

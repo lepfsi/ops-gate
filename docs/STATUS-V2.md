@@ -38,6 +38,7 @@ Il reste surtout la **publication store** réelle, le **billing Stripe GA** et q
 | Package CWS/AMO/MDM | **Livré (artefacts)** | pas la soumission compte |
 | Safari App Store | **Build only** | packaging Apple à faire |
 | Billing Stripe portal | **Livré** | Checkout + Customer Portal UI + webhook sièges |
+| Soft-delete org GDPR | **Livré** | export DSAR, soft-delete, restore, hard purge cron |
 
 Légende : **Livré** = dans le monorepo et utilisable · **Fondations** = API/config sans parcours produit complet · **Build only** = artefact sans distribution officielle.
 
@@ -75,6 +76,7 @@ Légende : **Livré** = dans le monorepo et utilisable · **Fondations** = API/c
 - [x] Audit immuable + backup documenté  
 - [x] Doc déploiement client + guides PDF  
 - [x] Portal personnel Stripe (UI + checkout + portal + webhook sièges)  
+- [x] Soft-delete org GDPR (export + grace + hard purge)  
 - [ ] Au moins un canal store (CWS unlisted **publié**)  
 - [ ] Pilote client réel validé (checklist DEPLOIEMENT §11)  
 - [ ] Clés Stripe **prod** + webhook Dashboard branché (ou process licence vendor)  

@@ -14,7 +14,12 @@ CREATE TABLE IF NOT EXISTS organizations (
   license_seats INT NOT NULL DEFAULT 0,
   /** Seuils offline + schedule horaires (JSON OrgMonitoringSettings) */
   monitoring_json TEXT NOT NULL DEFAULT '{}',
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  /** Soft-delete RGPD */
+  deleted_at TIMESTAMPTZ,
+  delete_purge_at TIMESTAMPTZ,
+  delete_reason TEXT,
+  delete_requested_by TEXT
 );
 
 -- ── Policies (org default) ─────────────────────────────────────
