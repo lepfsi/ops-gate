@@ -94,6 +94,7 @@ Légende : **Livré** = dans le monorepo et utilisable · **Fondations** = API/c
 | DSI / RSSI | [`DECIDEURS-V2-FR.md`](./DECIDEURS-V2-FR.md) (+ PDF) |
 | Dev / maintainer | [`CHANGELOG-TECHNIQUE.md`](./CHANGELOG-TECHNIQUE.md), [`V2-BACKLOG.md`](./V2-BACKLOG.md) |
 | Capacités techniques | [`architecture/BACKEND-V2-CATALOG.md`](./architecture/BACKEND-V2-CATALOG.md) |
+| Idées / specs **V3** (Secure Rewrite, Risk Score…) | [`roadmap-v3/`](./roadmap-v3/) |
 
 ---
 

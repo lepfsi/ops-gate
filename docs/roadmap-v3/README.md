@@ -1,0 +1,57 @@
+# OpsGate — Idées & specs V3 (roadmap produit)
+
+**Dossier** : hors Grafana (observabilité) — ici = **vision produit / features différenciantes**.  
+**Origine** : commit `V3 Roadmap` (17/07/2026), initialement déposé par erreur dans `docs/grafana/`.  
+**Statut** : **documents de réflexion / specs draft** — pas encore le backlog d’implémentation V2 pre-GA.
+
+---
+
+## Contenu (7 fichiers)
+
+| Fichier | Type | Sujet |
+|---------|------|--------|
+| [`VISION-PRODUIT-ROADMAP-STRATEGIQUE-v1.md`](./VISION-PRODUIT-ROADMAP-STRATEGIQUE-v1.md) | Vision | Positionnement « AI Security Platform », piliers, roadmap 4 phases |
+| [`ROADMAP-PRODUIT-CLAIRE-v1.md`](./ROADMAP-PRODUIT-CLAIRE-v1.md) | Roadmap | Priorités P0–P2 actionnables, ce qu’on ne fait pas |
+| [`SHADOW-AI-RISK-SCORE.md`](./SHADOW-AI-RISK-SCORE.md) | Feature spec | Shadow AI Discovery + Risk Score **utilisateur** (API, tables, formule) |
+| [`SHADOW-AI-RISK-SCORE-WIREFRAMES.md`](./SHADOW-AI-RISK-SCORE-WIREFRAMES.md) | UI | Wireframes console (dashboard Risk, détail, Shadow AI) |
+| [`FEATURE-SPEC-RISK-SCORE-SIMULATION-v1.md`](./FEATURE-SPEC-RISK-SCORE-SIMULATION-v1.md) | Feature spec | Risk Score **par prompt** + Simulation Mode (extension) |
+| [`FEATURE-SPEC-SECURE-REWRITE-v1.md`](./FEATURE-SPEC-SECURE-REWRITE-v1.md) | Feature spec | Secure Rewrite (anonymisation intelligente 1 clic) |
+| [`20260717_shadow_ai_risk_score.sql`](./20260717_shadow_ai_risk_score.sql) | Migration draft | Tables `user_risk_scores`, `org_ai_tools` + colonnes events |
+
+Grafana (métriques Prometheus) reste dans [`../grafana/`](../grafana/).
+
+---
+
+## Relation avec le monorepo actuel (V2 functional / pre-GA)
+
+| Déjà livré (V2) | Couvert par ces docs V3 | Gap |
+|-----------------|-------------------------|-----|
+| Extension + moteur détection + mask basique | Prompt Protection partiel | Secure Rewrite = evolution du mask |
+| Events metadata, console, dashboard widgets | Analytics basiques | Risk Score user / Shadow AI UI |
+| Policy par profils / groupes | Policy Engine partiel | Trust Score modèles, classification |
+| Proxy MITM, SSO/MFA, multi-tenant, WORM, stores kit | AI Gateway / enterprise | — hors scope de ces specs |
+| OCR, Office multi-format | File Protection partiel | Archives profondes, etc. |
+
+**En bref** : ces docs ne contredisent pas la V2 — elles **cadrent la différenciation produit** au-delà du DLP « detect + mask ».
+
+---
+
+## Pertinence (synthèse d’analyse)
+
+Voir le commentaire d’analyse dans le commit de déplacement / réponse produit.  
+Priorité d’impact commercial estimée :
+
+1. **Secure Rewrite** — différenciateur démo fort, s’appuie sur le mask existant  
+2. **Risk Score prompt + Simulation** — UX extension, effort moteur limité  
+3. **Shadow AI + Risk Score utilisateur** — argument RSSI, tables + jobs + console  
+4. Vision / roadmap claire — boussole, pas code  
+
+**Attention schema** : le SQL draft utilise `UUID` pour `org_id` / `agent_id` ; le monorepo utilise des **TEXT** (`organizations.id`, `agents.id`) et `received_at` (pas `created_at`). À adapter avant merge dans `schema.sql`.
+
+---
+
+## Liens utiles
+
+- Statut V2 : [`../STATUS-V2.md`](../STATUS-V2.md)  
+- Backlog V2 : [`../V2-BACKLOG.md`](../V2-BACKLOG.md)  
+- Design historique : [`../architecture/PLATFORM-v2.md`](../architecture/PLATFORM-v2.md)  
