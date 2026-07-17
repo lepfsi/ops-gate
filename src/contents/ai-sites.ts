@@ -240,12 +240,19 @@ function getPromptText(fromEl?: Element | null): string {
   const host = location.hostname
 
   if (host.includes("chatgpt.com") || host.includes("chat.openai.com")) {
-    const ta =
-      document.querySelector<HTMLElement>("#prompt-textarea") ||
-      document.querySelector<HTMLElement>('[data-testid="prompt-textarea"]') ||
-      document.querySelector<HTMLElement>('div[contenteditable="true"].ProseMirror') ||
-      document.querySelector<HTMLElement>('div[contenteditable="true"]#prompt-textarea')
-    if (ta) return (ta.innerText || ta.textContent || "").trim()
+    const candidates = [
+      document.querySelector<HTMLElement>("#prompt-textarea"),
+      document.querySelector<HTMLElement>('[data-testid="prompt-textarea"]'),
+      document.querySelector<HTMLElement>('#prompt-textarea [contenteditable="true"]'),
+      document.querySelector<HTMLElement>('div[contenteditable="true"].ProseMirror'),
+      document.querySelector<HTMLElement>('form [contenteditable="true"]'),
+      document.querySelector<HTMLElement>('div[contenteditable="true"][data-placeholder]'),
+      document.querySelector<HTMLElement>('div[contenteditable="true"][id*="prompt" i]')
+    ].filter(Boolean) as HTMLElement[]
+    for (const ta of candidates) {
+      const t = (ta.innerText || ta.textContent || "").trim()
+      if (t.length >= 3) return t
+    }
   }
 
   if (host.includes("claude.ai")) {
@@ -357,7 +364,11 @@ function setPromptText(text: string): boolean {
 function isSendButton(el: Element | null): boolean {
   if (!el) return false
   // Ne jamais traiter les contrôles OpsGate comme un envoi IA
-  if (el.closest("#opsgate-alert-banner, #opsgate-toast, #opsgate-active-badge")) {
+  if (
+    el.closest(
+      "#opsgate-alert-banner, #opsgate-toast, #opsgate-active-badge, #opsgate-admin-reply"
+    )
+  ) {
     return false
   }
   const btn = el.closest(
@@ -371,17 +382,31 @@ function isSendButton(el: Element | null): boolean {
   const title = (btn.getAttribute("title") || "").toLowerCase()
   const dataAction = (btn.getAttribute("data-action") || "").toLowerCase()
   const text = (btn.innerText || btn.textContent || "").trim().toLowerCase()
+  const combined = `${aria} ${testId} ${title} ${dataAction} ${text}`
+
+  // Exclusions explicites
+  if (
+    /attach|upload|micro|voice|photo|speech|stop|dictat|file|image|plus|menu|settings|model|search|sidebar/i.test(
+      combined
+    ) &&
+    !/send|envoyer|submit/i.test(combined)
+  ) {
+    return false
+  }
 
   if (
     testId.includes("send") ||
     aria.includes("send") ||
     title.includes("send") ||
-    dataAction.includes("send")
+    dataAction.includes("send") ||
+    /send[-_ ]?(prompt|message)?/i.test(combined)
   ) {
     return true
   }
   if (aria.includes("envoyer") || title.includes("envoyer")) return true
-  if (aria.includes("send message") || aria.includes("envoyer le message")) return true
+  if (aria.includes("send message") || aria.includes("envoyer le message"))
+    return true
+  if (testId === "send-button" || testId === "composer-send-button") return true
 
   // Bouton submit dans un form de composer
   if (
@@ -391,36 +416,41 @@ function isSendButton(el: Element | null): boolean {
     return true
   }
 
-  // Icône seule près du composer (ChatGPT / Claude)
-  if (btn.querySelector("svg") && isNearComposer(btn) && text.length <= 2) {
-    // Exclure attach / mic / etc.
-    if (
-      aria.includes("attach") ||
-      aria.includes("upload") ||
-      aria.includes("micro") ||
-      aria.includes("voice") ||
-      aria.includes("photo") ||
-      testId.includes("attach")
-    ) {
-      return false
+  // Icône seule près du composer (ChatGPT / Claude) — UI change souvent
+  if (btn.querySelector("svg") && isNearComposer(btn) && text.length <= 4) {
+    // Dernier bouton du form / composer = souvent Send
+    const form = btn.closest("form")
+    if (form) {
+      const buttons = Array.from(
+        form.querySelectorAll("button, [role='button']")
+      ).filter((b) => !(b as HTMLButtonElement).disabled)
+      if (buttons[buttons.length - 1] === btn) return true
     }
-    // Souvent le bouton send est le dernier bouton du composer
-    if (aria.includes("send") || testId.includes("send") || !aria) {
-      // si pas d'aria bloquant et proche composer : considérer send si data-testid ou form
-      if (testId.includes("send") || btn.closest("form")) return true
-    }
+    // Adjacent au prompt-textarea
+    const prompt =
+      document.querySelector("#prompt-textarea") ||
+      document.querySelector('[data-testid="prompt-textarea"]')
+    if (prompt && prompt.parentElement?.contains(btn)) return true
+    if (aria.includes("send") || testId.includes("send")) return true
   }
 
-  return testId === "send-button" || testId === "composer-send-button"
+  return false
 }
 
 function isNearComposer(el: Element): boolean {
+  const prompt =
+    document.querySelector("#prompt-textarea") ||
+    document.querySelector('[data-testid="prompt-textarea"]')
   return !!(
     el.closest("form") ||
     el.closest('[class*="composer" i]') ||
     el.closest('[class*="prompt" i]') ||
     el.closest('[class*="input" i]') ||
-    el.closest("#prompt-textarea")?.parentElement?.contains(el)
+    el.closest("#prompt-textarea")?.parentElement?.contains(el) ||
+    (prompt &&
+      (prompt.contains(el) ||
+        prompt.parentElement?.contains(el) ||
+        prompt.closest("form")?.contains(el)))
   )
 }
 
@@ -461,10 +491,27 @@ function handlePotentialSend(event: Event, sourceEl?: Element | null): void {
   if (!allowed) return
 
   const text = getPromptText(sourceEl)
-  if (!text || text.length < 5) return
+  if (!text || text.length < 5) {
+    if (text) {
+      console.log(
+        "[OpsGate] Intercept: texte trop court pour scan (",
+        text.length,
+        "car.)"
+      )
+    }
+    return
+  }
 
   const { detections, rules } = detectTextSync(text)
-  if (detections.length === 0) return
+  if (detections.length === 0) {
+    // Aide debug : l’envoi part car aucune règle n’a matché
+    console.log(
+      "[OpsGate] Intercept: aucune détection sur",
+      text.length,
+      "car. — envoi autorisé. Exemple qui marche: password: SuperSecret!99  ou  sk_live_51N8… (12+ car.)"
+    )
+    return
+  }
 
   // Bloquer IMMÉDIATEMENT
   event.preventDefault()

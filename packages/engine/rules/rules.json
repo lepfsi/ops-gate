@@ -49,10 +49,16 @@
     "category": "general",
     "severity": "high",
     "patterns": [
-      "(?i)\\b(password|passwd|pwd|mot[_\\-]?de[_\\-]?passe)\\s*[=:]\\s*['\\\"]?[^\\s'\\\"]{6,}"
+      "(?i)\\b(password|passwd|pwd)\\s*[=:]\\s*['\\\"]?\\S{6,}",
+      "(?i)\\b(password|passwd|pwd)\\s+is\\s+['\\\"]?\\S{6,}",
+      "(?i)\\b(password|passwd|pwd)\\s+['\\\"][^'\\\"]{6,}['\\\"]",
+      "(?i)\\b(password|passwd|pwd)\\s+(?!is\\b|manager\\b|reset\\b|policy\\b|field\\b|length\\b|change\\b)(?=\\S*[A-Za-z])(?=\\S*[0-9@!#$%])\\S{6,}",
+      "(?i)\\b(mot\\s+de\\s+passe|mot[_\\-]?de[_\\-]?passe)\\s*[=:]\\s*['\\\"]?\\S{6,}",
+      "(?i)\\b(mot\\s+de\\s+passe)\\s+(est|is)\\s*[:＝]?\\s*['\\\"]?\\S{6,}",
+      "(?i)\\b(set\\s+passwd|set\\s+password)\\s+\\S{6,}"
     ],
     "action_default": "mask",
-    "description": "Affectation explicite d'un mot de passe"
+    "description": "Affectation explicite d'un mot de passe (EN/FR)"
   },
   {
     "id": "email-address",

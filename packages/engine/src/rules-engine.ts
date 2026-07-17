@@ -67,7 +67,18 @@ const PLACEHOLDER_PASSWORDS = new Set([
   "test",
   "test123",
   "admin",
-  "root"
+  "root",
+  // mots après « password … » qui ne sont pas des secrets
+  "manager",
+  "reset",
+  "policy",
+  "field",
+  "length",
+  "change",
+  "strength",
+  "complexity",
+  "required",
+  "prompt"
 ])
 
 const EXAMPLE_EMAIL_DOMAINS = new Set([
@@ -159,7 +170,15 @@ export function isValidIban(raw: string): boolean {
 }
 
 function extractPasswordValue(match: string): string {
-  const m = match.match(/[=:]\s*['"]?([^\s'"]+)/)
+  // password: x | password = x | password is x | password SuperSecret1 | mot de passe est x
+  const m =
+    match.match(/[=:]\s*['"]?([^\s'"]+)/) ||
+    match.match(/\bis\s+['"]?([^\s'"]+)/i) ||
+    match.match(/\best\s*[:＝]?\s*['"]?([^\s'"]+)/i) ||
+    match.match(/(?:password|passwd|pwd)\s+['"]([^'"]{6,})['"]/i) ||
+    match.match(
+      /(?:password|passwd|pwd)\s+(?!is\b)([^\s'"]{6,})/i
+    )
   return (m?.[1] || "").toLowerCase()
 }
 
