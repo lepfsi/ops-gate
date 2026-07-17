@@ -1,5 +1,8 @@
 # OpsGate × Prometheus / Grafana (V2 P0)
 
+> **Roadmap produit V3** (Secure Rewrite, Risk Score, Shadow AI…) :  
+> dossier dédié [`../roadmap-v3/`](../roadmap-v3/) — ne pas mélanger avec Grafana.
+
 ## Metrics endpoint
 
 ```

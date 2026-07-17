@@ -1,7 +1,13 @@
 -- ============================================================================
--- Migration: Shadow AI Discovery + Risk Score
+-- Migration DRAFT: Shadow AI Discovery + Risk Score
 -- Date: 2026-07-17
 -- Feature: SHADOW-AI-RISK-SCORE
+-- Emplacement: docs/roadmap-v3/ (pas encore appliqué en prod)
+--
+-- ADAPTER AVANT APPLY :
+--   - organizations.id / agents.id sont TEXT dans OpsGate (pas UUID)
+--   - detection_events utilise received_at (pas created_at)
+--   - gen_random_uuid() nécessite pgcrypto / PG 13+
 -- ============================================================================
 
 -- ----------------------------------------------------------------------------
