@@ -1,9 +1,11 @@
 import {
+  calculatePromptRiskScore,
   detectSensitiveData,
   maskSensitiveData,
   secureRewrite,
   type Detection,
   type DetectionRule,
+  type PromptRiskScore,
   type RewriteResult,
   type SecureRewriteOptions
 } from "@opsgate/engine"
@@ -45,6 +47,11 @@ export function secureRewriteText(
   options?: SecureRewriteOptions
 ): RewriteResult {
   return secureRewrite(text, detections, options)
+}
+
+/** Risk Score par prompt (V3-B) */
+export function promptRiskOf(detections: Detection[]): PromptRiskScore {
+  return calculatePromptRiskScore(detections)
 }
 
 /** Sync path after ensureRulesWarm() — critical for preventDefault */

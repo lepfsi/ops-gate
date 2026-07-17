@@ -1,4 +1,13 @@
-import { secureRewrite, type Detection } from "@opsgate/engine"
+import {
+  buildSimulation,
+  calculatePromptRiskScore,
+  DEFAULT_SIMULATION_THRESHOLD,
+  riskScoreBar,
+  secureRewrite,
+  type Detection,
+  type PromptRiskScore,
+  type SimulationResult
+} from "@opsgate/engine"
 
 import { ext } from "./browser-api"
 import type {
@@ -46,6 +55,10 @@ export interface BannerOptions {
    * Défaut: true — l’API renverra not_enrolled si hors org.
    */
   contactAdminEnabled?: boolean
+  /** Seuil auto Simulation Mode (défaut 40). 0 = jamais auto. */
+  simulationThreshold?: number
+  /** Désactive l’ouverture auto de la simulation */
+  autoSimulation?: boolean
 }
 
 /** Styles isolés dans un Shadow DOM (évite que ChatGPT/Claude écrasent le rouge) */
@@ -80,6 +93,146 @@ const SHADOW_CSS = `
   .wrap.rewrite-mode .alert-main { display: none; }
   .wrap:not(.rewrite-mode) .rewrite-panel { display: none; }
   .wrap.contact-mode .rewrite-panel { display: none !important; }
+  .wrap.sim-mode {
+    width: min(560px, calc(100vw - 24px));
+  }
+  .wrap.sim-mode .alert-main { display: none; }
+  .wrap:not(.sim-mode) .sim-panel { display: none; }
+  .wrap.contact-mode .sim-panel,
+  .wrap.rewrite-mode .sim-panel { display: none !important; }
+  .risk-block {
+    margin-top: 8px;
+    padding: 8px 10px;
+    border-radius: 8px;
+    background: #0f172a;
+    color: #e2e8f0;
+  }
+  .risk-block .risk-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    font-size: 12px;
+    font-weight: 700;
+  }
+  .risk-block .risk-level {
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    font-size: 10px;
+    padding: 2px 7px;
+    border-radius: 999px;
+    background: #334155;
+  }
+  .risk-block .risk-level.critical { background: #7f1d1d; color: #fecaca; }
+  .risk-block .risk-level.high { background: #9a3412; color: #ffedd5; }
+  .risk-block .risk-level.medium { background: #854d0e; color: #fef9c3; }
+  .risk-block .risk-level.low { background: #065f46; color: #d1fae5; }
+  .risk-bar {
+    margin-top: 6px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 11px;
+    letter-spacing: 0.02em;
+    color: #2bd9c5;
+  }
+  .risk-rec {
+    margin: 6px 0 0;
+    font-size: 11px;
+    font-weight: 650;
+    color: #99f6e4;
+    line-height: 1.35;
+  }
+  .sim-panel {
+    display: flex;
+    flex-direction: column;
+    background: #f8fafc;
+  }
+  .sim-header {
+    padding: 14px 16px 10px;
+    border-bottom: 1px solid #e2e8f0;
+    background: linear-gradient(180deg, #fff7ed 0%, #f8fafc 70%);
+  }
+  .sim-header .title {
+    margin: 0;
+    font-size: 15px;
+    font-weight: 750;
+  }
+  .sim-header .sub {
+    margin: 4px 0 0;
+    font-size: 12px;
+    color: #475569;
+    line-height: 1.4;
+  }
+  .sim-impact {
+    display: inline-block;
+    margin-top: 8px;
+    font-size: 11px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding: 3px 8px;
+    border-radius: 999px;
+  }
+  .sim-impact.critical, .sim-impact.high {
+    background: #fef2f2;
+    color: #b91c1c;
+    border: 1px solid #fecaca;
+  }
+  .sim-impact.medium {
+    background: #fffbeb;
+    color: #b45309;
+    border: 1px solid #fde68a;
+  }
+  .sim-impact.low {
+    background: #ecfdf5;
+    color: #047857;
+    border: 1px solid #a7f3d0;
+  }
+  .sim-list {
+    padding: 10px 16px;
+    max-height: min(40vh, 280px);
+    overflow-y: auto;
+  }
+  .sim-item {
+    display: flex;
+    gap: 8px;
+    align-items: flex-start;
+    padding: 8px 10px;
+    margin-bottom: 6px;
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    font-size: 12px;
+  }
+  .sim-item .check {
+    color: #0d9488;
+    font-weight: 800;
+  }
+  .sim-item .lab { font-weight: 700; color: #0f172a; }
+  .sim-item .ex {
+    margin-top: 2px;
+    color: #64748b;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    word-break: break-all;
+  }
+  .sim-rec {
+    margin: 0 16px 10px;
+    padding: 10px 12px;
+    border-radius: 8px;
+    background: #ecfdf5;
+    border: 1px solid #99f6e4;
+    color: #0f766e;
+    font-size: 12px;
+    font-weight: 650;
+    line-height: 1.4;
+  }
+  .sim-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 12px 16px 14px;
+    background: #f8fafc;
+    border-top: 1px solid #e2e8f0;
+  }
   .wrap.mode-block {
     border-color: #fecaca;
   }
@@ -583,7 +736,19 @@ export function showAlertBanner(
     ? `<button type="button" class="btn-contact" data-action="toggle_contact" title="Envoyer un message à l'administrateur">Contacter l'admin</button>`
     : ""
 
-  // Secure Rewrite = ouvre preview côte à côte (sauf block)
+  // Risk score (prompt)
+  const promptRisk: PromptRiskScore = calculatePromptRiskScore(detections)
+  const simThreshold =
+    typeof options.simulationThreshold === "number"
+      ? options.simulationThreshold
+      : DEFAULT_SIMULATION_THRESHOLD
+  const autoSim =
+    options.autoSimulation !== false &&
+    !isBlock &&
+    simThreshold > 0 &&
+    promptRisk.score >= simThreshold
+
+  // Secure Rewrite = ouvre preview ; Simulation Mode en amont si score élevé
   const actionsHtml = isBlock
     ? `
       <button type="button" class="btn-primary" data-action="cancel">${escapeHtml(msgs.btnBlockAck)}</button>
@@ -593,6 +758,7 @@ export function showAlertBanner(
     : isForce
       ? `
       <button type="button" class="btn-accent" data-action="open_rewrite" title="Aperçu Secure Rewrite">${escapeHtml(rewriteLabel)}</button>
+      <button type="button" class="btn-secondary" data-action="open_sim" title="Simulation de fuite">Simuler le risque</button>
       <button type="button" class="btn-secondary" data-action="mask_send">${escapeHtml(maskLabel)}</button>
       ${contactBtnHtml}
       <button type="button" class="btn-secondary" data-action="toggle_details">Voir les détails</button>
@@ -600,12 +766,25 @@ export function showAlertBanner(
     `
       : `
       <button type="button" class="btn-accent" data-action="open_rewrite" title="Aperçu Secure Rewrite">${escapeHtml(rewriteLabel)}</button>
+      <button type="button" class="btn-secondary" data-action="open_sim" title="Simulation de fuite">Simuler le risque</button>
       <button type="button" class="btn-secondary" data-action="mask_send">${escapeHtml(maskLabel)}</button>
       <button type="button" class="btn-danger" data-action="send_anyway">${escapeHtml(allowLabel)}</button>
       ${contactBtnHtml}
       <button type="button" class="btn-secondary" data-action="toggle_details">Voir les détails</button>
       <button type="button" class="btn-ghost" data-action="cancel">${escapeHtml(cancelLabel)}</button>
     `
+
+  const riskBlockHtml = !isBlock
+    ? `
+    <div class="risk-block" id="og-risk-block">
+      <div class="risk-row">
+        <span>Risk Score : ${promptRisk.score}/100</span>
+        <span class="risk-level ${promptRisk.level}">${promptRisk.level}</span>
+      </div>
+      <div class="risk-bar" aria-hidden="true">${riskScoreBar(promptRisk.score)}</div>
+      <p class="risk-rec">${escapeHtml(promptRisk.recommendationLabel)}</p>
+    </div>`
+    : ""
 
   const hostname =
     typeof location !== "undefined" ? location.hostname || "" : ""
@@ -658,9 +837,10 @@ export function showAlertBanner(
           <span class="pill">${escapeHtml(pill)}</span>
           <p class="admin-notice">${escapeHtml(msgs.adminNotice)}${orgBit}</p>
           <p class="post-contact-note" id="og-post-contact"></p>
+          ${riskBlockHtml}
           ${
             !isBlock && high > 0
-              ? `<p class="warn-line">Éléments critiques détectés — le masquage est recommandé par la politique.</p>`
+              ? `<p class="warn-line">Éléments critiques détectés — Secure Rewrite recommandé.</p>`
               : ""
           }
           ${options.note ? `<p class="sub" style="margin-top:6px">${escapeHtml(options.note)}</p>` : ""}
@@ -687,6 +867,26 @@ export function showAlertBanner(
     </div>`
         : ""
     }
+    <div class="sim-panel" id="og-sim" aria-label="Simulation de risque">
+      <div class="sim-header">
+        <p class="title">AI Simulation Mode</p>
+        <p class="sub">Voici ce qui pourrait fuiter si vous envoyez ce contenu tel quel.</p>
+        <div id="og-sim-risk"></div>
+        <span class="sim-impact" id="og-sim-impact"></span>
+      </div>
+      <div class="sim-list" id="og-sim-list"></div>
+      <div class="sim-rec" id="og-sim-rec"></div>
+      <div class="sim-actions">
+        <button type="button" class="btn-accent" data-action="open_rewrite">Lancer Secure Rewrite</button>
+        ${
+          isForce
+            ? ""
+            : `<button type="button" class="btn-danger" data-action="send_anyway">${escapeHtml(allowLabel)}</button>`
+        }
+        <button type="button" class="btn-ghost" data-action="close_sim">Retour à l’alerte</button>
+        <button type="button" class="btn-secondary" data-action="cancel">${escapeHtml(cancelLabel)}</button>
+      </div>
+    </div>
     <div class="rewrite-panel" id="og-rewrite" aria-label="Secure Rewrite preview">
       <div class="rewrite-header">
         <p class="title">Secure Rewrite — aperçu</p>
@@ -738,9 +938,11 @@ export function showAlertBanner(
   let detailsOpen = false
   let contactOpen = false
   let rewriteOpen = false
+  let simOpen = false
   let contactSending = false
   let decided = false
   let lastRewriteMeta: BannerDecisionMeta = {}
+  let lastSim: SimulationResult | null = null
 
   const contactPanel = root.querySelector("#og-contact") as HTMLElement | null
   const contactStatus = root.querySelector(
@@ -836,6 +1038,60 @@ export function showAlertBanner(
   const riskChipClass = (score: number) =>
     score >= 60 ? "high" : score <= 20 ? "low" : ""
 
+  const openSimulation = () => {
+    lastSim = buildSimulation(detections)
+    const sim = lastSim
+    const riskEl = root.querySelector("#og-sim-risk") as HTMLElement | null
+    const impactEl = root.querySelector("#og-sim-impact") as HTMLElement | null
+    const listEl = root.querySelector("#og-sim-list") as HTMLElement | null
+    const recEl = root.querySelector("#og-sim-rec") as HTMLElement | null
+    if (riskEl) {
+      riskEl.innerHTML = `
+        <div class="risk-block" style="margin-top:8px">
+          <div class="risk-row">
+            <span>Risk Score : ${sim.riskScore.score}/100</span>
+            <span class="risk-level ${sim.riskScore.level}">${sim.riskScore.level}</span>
+          </div>
+          <div class="risk-bar">${riskScoreBar(sim.riskScore.score)}</div>
+        </div>`
+    }
+    if (impactEl) {
+      impactEl.className = `sim-impact ${sim.impact}`
+      impactEl.textContent = `Impact estimé : ${sim.impact}`
+    }
+    if (listEl) {
+      listEl.innerHTML = sim.detectedItems
+        .map(
+          (it) => `
+        <div class="sim-item">
+          <span class="check">✓</span>
+          <div>
+            <div class="lab">${escapeHtml(it.label)}</div>
+            ${
+              it.example
+                ? `<div class="ex">${escapeHtml(it.example)}</div>`
+                : ""
+            }
+          </div>
+        </div>`
+        )
+        .join("")
+    }
+    if (recEl) {
+      recEl.textContent = sim.recommendation
+    }
+    simOpen = true
+    rewriteOpen = false
+    contactOpen = false
+    root.classList.remove("contact-mode", "rewrite-mode")
+    root.classList.add("sim-mode")
+  }
+
+  const closeSimulation = () => {
+    simOpen = false
+    root.classList.remove("sim-mode")
+  }
+
   const openRewritePreview = () => {
     const sourceText = (options.sourceText || "").trim()
     if (!sourceText) {
@@ -884,8 +1140,9 @@ export function showAlertBanner(
         : `<strong>Modifications</strong><p class="sub" style="margin:4px 0 0">Aucun remplacement listé (heuristiques éventuelles déjà appliquées).</p>`
     }
     rewriteOpen = true
+    simOpen = false
     contactOpen = false
-    root.classList.remove("contact-mode")
+    root.classList.remove("contact-mode", "sim-mode")
     root.classList.add("rewrite-mode")
     rewriteSecure?.focus()
   }
@@ -989,9 +1246,13 @@ export function showAlertBanner(
         setContactOpen(false)
         return
       }
-      // Preview rewrite : retour à l’alerte (pas cancel)
+      // Preview rewrite / simulation : retour à l’alerte (pas cancel)
       if (rewriteOpen) {
         closeRewritePreview()
+        return
+      }
+      if (simOpen) {
+        closeSimulation()
         return
       }
       decide("cancel")
@@ -1045,6 +1306,14 @@ export function showAlertBanner(
         return
       }
 
+      if (act === "open_sim") {
+        openSimulation()
+        return
+      }
+      if (act === "close_sim") {
+        closeSimulation()
+        return
+      }
       if (act === "open_rewrite") {
         openRewritePreview()
         return
@@ -1077,6 +1346,15 @@ export function showAlertBanner(
 
   document.addEventListener("keydown", onKey, true)
   document.documentElement.appendChild(host)
+
+  // Auto Simulation Mode si score élevé
+  if (autoSim) {
+    try {
+      openSimulation()
+    } catch (e) {
+      console.warn("[OpsGate] auto simulation failed", e)
+    }
+  }
 }
 
 function escapeHtml(s: string): string {

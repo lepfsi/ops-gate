@@ -23,6 +23,18 @@ export {
   type SecureRewriteOptions
 } from "./secure-rewrite"
 export {
+  calculatePromptRiskScore,
+  buildSimulation,
+  riskScoreBar,
+  DEFAULT_SIMULATION_THRESHOLD,
+  type RiskLevel,
+  type RiskRecommendation,
+  type PromptRiskFactor,
+  type PromptRiskScore,
+  type SimulationItem,
+  type SimulationResult
+} from "./prompt-risk"
+export {
   runRulesEngine,
   getRules,
   highestSeverity,
