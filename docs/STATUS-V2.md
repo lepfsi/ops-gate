@@ -82,6 +82,8 @@ Légende : **Livré** = dans le monorepo et utilisable · **Fondations** = API/c
 - [ ] Pilote client réel validé (checklist DEPLOIEMENT §11)  
 - [ ] Clés Stripe **prod** + webhook Dashboard branché (ou process licence vendor)  
 
+**Après V2.0 GA** : différenciation produit → [`V3-BACKLOG.md`](./V3-BACKLOG.md) (Secure Rewrite, Risk Score, Shadow AI) — **ne pas démarrer** tant que la gate pre-GA n’est pas franchie.
+
 ---
 
 ## Documents à lire selon le rôle
@@ -94,7 +96,7 @@ Légende : **Livré** = dans le monorepo et utilisable · **Fondations** = API/c
 | DSI / RSSI | [`DECIDEURS-V2-FR.md`](./DECIDEURS-V2-FR.md) (+ PDF) |
 | Dev / maintainer | [`CHANGELOG-TECHNIQUE.md`](./CHANGELOG-TECHNIQUE.md), [`V2-BACKLOG.md`](./V2-BACKLOG.md) |
 | Capacités techniques | [`architecture/BACKEND-V2-CATALOG.md`](./architecture/BACKEND-V2-CATALOG.md) |
-| Idées / specs **V3** (Secure Rewrite, Risk Score…) | [`roadmap-v3/`](./roadmap-v3/) |
+| **V3** (gelé jusqu’à fin pre-GA) | [`V3-BACKLOG.md`](./V3-BACKLOG.md) · specs [`roadmap-v3/`](./roadmap-v3/) |
 
 ---
 
