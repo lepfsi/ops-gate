@@ -1,11 +1,12 @@
 # OpsGate — User Guide (V1)
 
 **Audience**: console administrators, pilots, support  
-**Product version**: 1.2  
+**Product version**: 1.2 / V2 batch (July 2026)  
 **Language**: English  
 
-This guide covers day-to-day OpsGate use: extension, console, enrollment, policies, licenses, logs, and recovery.  
-For local technical setup (Docker, ports), see also [`GUIDE-STACK-LOCALE.md`](./GUIDE-STACK-LOCALE.md).
+This guide covers day-to-day OpsGate use: extension, console, enrollment, policies, licenses, logs, messages, MFA, and recovery.  
+For local technical setup (Docker, ports), see also [`GUIDE-STACK-LOCALE.md`](./GUIDE-STACK-LOCALE.md).  
+Richer V2 guide: [`GUIDE-UTILISATEUR-V2-EN.md`](./GUIDE-UTILISATEUR-V2-EN.md).
 
 ---
 
@@ -31,9 +32,13 @@ Without **Postgres**, the API uses an in-memory store: **all data is lost on res
 
 **Advanced (login)**: the API URL field is hidden by default; enable it only to point at another instance.
 
-**Single session**: a second sign-in offers “Force sign-out”.
+**Concurrent session**: if another browser is already signed in, the open session gets a prompt (accept / refuse). With no response within **10 s**, the session is released. Alternative: **read-only** (view only, no changes).
+
+**Passkey / Windows Hello**: button on the login screen (after registration under Settings → General).
 
 **Wrong password**: the message shows how many attempts remain. After too many failures, the account is **locked** — a principal admin unlocks it under *Admins & groups*.
+
+**Multi-organization (MSP)**: same email on several orgs → org picker at login; switch requires **MFA code**; **MSP portfolio** for a consolidated view.
 
 ---
 
@@ -64,12 +69,13 @@ Vendor recovery: principal / support only (see §8).
 
 ## 4. Dashboard
 
-Fleet overview: licenses, connected agents, decisions, top threats.
+Fleet overview: licenses, connected agents, decisions, top threats, user requests.
 
+- **Movable / resizable** widgets (local preference).
 - Click an indicator for detail (agent list or logs).
-- **Expand**: charts fill the content area (top bar and left menu stay visible).
-- **Collapse**: back to the normal view.
+- **Expand**: full-screen dashboard (Esc to exit).
 - **Force sync**: pushes config to online agents (effect within ~2 min).
+- Deep links: `#/policy`, `#/agents`, `#/settings/mail`, etc.
 
 ---
 
@@ -130,12 +136,21 @@ A **pack** is the detection signature set pushed to agents without rebuilding th
 | Current | Strong secret `OPSGATE_VENDOR_RECOVERY`; offline delay ≥ 2 h |
 | Recommended V1.x | **One-time code pool** (bottom of *Admins & groups*, principal only) |
 
+### Messages (Kaspersky-style inbox)
+
+End users can **contact admin** from the extension.  
+Console → **Messages**: read, reply, close; the client gets a banner / ack popup.
+
 ### Useful settings
 
-- **Language** FR / EN (Settings → General) — applies to the whole console.  
-- **Log retention** (default 90 days) and log types.  
-- **Login failure threshold** (account lockout).  
-- **Monitoring**: online / long offline thresholds; work-hours schedule.
+- **Language** FR / EN and **date/time** (Settings → General).  
+- **TOTP MFA** + **passkeys** (Windows Hello / fingerprint).  
+- **Configuration backup**: JSON export / import (principal).  
+- **Event log retention** and **legal audit retention** (min. 90 days, WORM).  
+- **Notifications**: email + Telegram / Slack / webhook channels.  
+- **Email / SMTP**: required for OTP, alerts, and scheduled exports.  
+- **Reports**: scheduled log export (day/time/recipients) + **Send test now**.  
+- **Monitoring**: online / long offline thresholds; work schedule; SIEM.
 
 ---
 
@@ -143,17 +158,17 @@ A **pack** is the detection signature set pushed to agents without rebuilding th
 
 Typical decisions: `mask_send`, `send_anyway`, `cancel`, enroll / unenroll.
 
-### Retention
+### Retention & scanned files
 
-- Set by the **organization** (Settings → logs).  
-- Beyond retention: **automatic purge**.  
-- **Export** week, all, or a custom range (CSV / JSON).  
-- Optional weekly archive before purge.
+- Event retention set by the **organization** (Settings → Logs).  
+- Beyond retention: **automatic purge** — export first.  
+- **Manual export** CSV/JSON; **scheduled export** by email (Settings → Reports).  
+- Extension: scan **PDF, DOCX, PPTX, XLSX**; **image OCR** when policy `scanImages` is on.
 
-### Admin audit
+### Admin audit (WORM)
 
-Journal of console actions (policy, profiles, admins, packs…).  
-**Principal** only. Export available.
+Append-only journal with **SHA-256 seal** (integrity chain).  
+**Principal** only. **Verify integrity** button + CSV export.
 
 ---
 
@@ -167,10 +182,11 @@ Timezones: Europe, Cameroon (`Africa/Douala`), Madagascar (`Africa/Antananarivo`
 
 ---
 
-## 11. Assignment rules
+## 11. Agents & assignment rules
 
-Auto rules (label / hostname → group), **AND** conditions, ordered priority.  
-Applied at enroll and via “Re-evaluate”.
+- **Export** agents CSV/JSON; **CSV import** (group / profile / license on already enrolled agents).  
+- **Moving rules**: label / hostname → group; **AND** or **OR** conditions; **permanent** option (even if already grouped).  
+- Applied at enroll and via “Re-evaluate”.
 
 ---
 
@@ -183,6 +199,9 @@ Applied at enroll and via “Re-evaluate”.
 | New volume / other machine | “Empty” DB + DEMO re-seed | Check Docker volume |
 | Short log retention | Old events **purged** | Adjust retention; export first |
 | API restart in memory mode | Loss of agents, events, custom admins | Move to Postgres |
+| No backups | Irrecoverable loss | `scripts/backup-db.ps1` + console config export |
+
+**Backup**: Settings → General → Export backup; full DB: `scripts/backup-db.ps1` (see `architecture/BACKUP.md`).
 
 The `DEMO-OPSGATE` seed runs **only if** the org does not exist yet: it **does not overwrite** an existing org.
 
@@ -222,4 +241,4 @@ Support contact: **contact@dailyops.tech** (include organization code and versio
 
 ---
 
-*OpsGate V1 · User guide · product reference*
+*OpsGate V1.2 / V2 batch · User guide · product reference · July 2026*

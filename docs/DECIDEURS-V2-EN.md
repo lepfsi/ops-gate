@@ -1,7 +1,7 @@
 # OpsGate — Decision-maker documentation V2
 
 **Audience**: CIO, CISO, security architects, risk committees  
-**Product version**: 1.2 / pre-GA V2  
+**Product version**: 1.2 / V2 batch (July 2026)  
 **Vendor**: DailyOps.Tech  
 
 ---
@@ -55,9 +55,9 @@ User ──► AI website (browser)
 | App secrets | OpenAI/Anthropic keys, AWS, Azure, GCP, Stripe, JWT |
 | Identity / PII | Emails, IBAN, payment cards (with FP controls) |
 | Infrastructure | Fortinet, MikroTik, WireGuard, network snippets |
-| Files | Text uploads, PDF/DOCX scanning |
+| Files | Text uploads, PDF/DOCX/**PPTX/XLSX**, **image OCR** (local Tesseract) |
 
-**Privacy by design**: local mode never leaves the device. Org mode sends **metadata** (rule type, decision, hostname) — not full prompts by default.
+**Privacy by design**: local mode never leaves the device. Org mode sends **metadata** (rule type, decision, hostname) — not full prompts by default. File parse and OCR stay **on the endpoint**.
 
 ---
 
@@ -79,10 +79,11 @@ User ──► AI website (browser)
 
 | Mechanism | Use |
 |-----------|-----|
-| Password + TOTP MFA | Pilot / break-glass |
+| Password + TOTP MFA | Pilot / break-glass; **required for multi-tenant** |
 | **OIDC SSO** (Entra, Okta…) | Enterprise default |
-| **SAML 2.0** | Legacy IdPs |
-| **WebAuthn / passkeys** | Passwordless login |
+| **SAML 2.0** | Legacy IdPs; IdP signature required in prod |
+| **WebAuthn / passkeys** | Windows Hello, fingerprint, FIDO2 keys |
+| **Concurrent session** | 10 s consent / read-only (anti-takeover) |
 | **SSO enforce** | Disable local passwords |
 | **JIT** | Create admin on first SSO |
 | **LDAP / AD** | Group & user sync + cron |
@@ -101,7 +102,15 @@ User ──► AI website (browser)
 
 ---
 
-## 7. Compliance & residual risk
+## 7. Compliance, audit & continuity
+
+| Capability | Decision value |
+|------------|----------------|
+| **WORM audit** (SHA-256 chain) | Integrity proof of admin actions |
+| **Legal audit retention** (≥ 90 days) | Retention requirements alignment |
+| **Config + Postgres backup** | Lightweight BCP / recovery |
+| **Scheduled exports + SIEM** | Operational evidence for SOC |
+| **MSP multi-org** | One operator governs many customers |
 
 **Reduces**: accidental AI leaks, blind spots, policy bypass (app lock + MDM).
 
@@ -123,12 +132,14 @@ User ──► AI website (browser)
 
 ## 9. Product status & roadmap
 
-| Delivered (V1.x / V2 prep) | Next |
-|---------------------------|------|
-| Multi-browser, proxy, SSO, MFA, LDAP, SIEM, MSI | Hardened WebAuthn HA, full SAML C14N, Safari App Store |
+| Delivered (V1.x + V2 batch) | Next |
+|----------------------------|------|
+| Multi-browser, proxy, SSO, multi-tenant MFA, passkeys, LDAP, SIEM, MSI | Broader OCR languages, Safari App Store, Stripe GA |
+| PDF/DOCX/PPTX/XLSX scan + image OCR | Self-serve personal portal |
+| WORM audit, backup, multi-channel alerts, MSP portfolio | Full GDPR org soft-delete |
 
 Contact: DailyOps.Tech / OpsGate sales.
 
 ---
 
-*Confidential — for customers and partners.*
+*Confidential — for customers and partners · July 2026*

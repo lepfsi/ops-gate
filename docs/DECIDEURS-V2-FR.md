@@ -1,7 +1,7 @@
 # OpsGate — Documentation décideurs V2
 
 **Pour** : DSI, RSSI, RSSI adjoint, architectes sécurité, comités risques  
-**Version produit** : 1.2 / pré-GA V2  
+**Version produit** : 1.2 / lot V2 (juillet 2026)  
 **Éditeur** : DailyOps.Tech  
 
 ---
@@ -55,9 +55,9 @@ Utilisateur ──► Site IA (navigateur)
 | Secrets applicatifs | Clés API OpenAI/Anthropic, AWS, Azure, GCP, Stripe, JWT |
 | Identité / PII | Emails, IBAN, cartes (avec réduction de faux positifs) |
 | Infrastructure | Fragments Fortinet, MikroTik, WireGuard, configs réseau |
-| Fichiers | Uploads texte, PDF/DOCX (scan) |
+| Fichiers | Uploads texte, PDF/DOCX/**PPTX/XLSX**, **OCR images** (Tesseract local) |
 
-**Privacy by design** : en mode local, rien ne quitte le poste. En mode organisation, ce sont des **métadonnées** (type de règle, décision, hostname) — pas le prompt complet par défaut.
+**Privacy by design** : en mode local, rien ne quitte le poste. En mode organisation, ce sont des **métadonnées** (type de règle, décision, hostname) — pas le prompt complet par défaut. OCR et parse fichiers restent **sur le poste**.
 
 ---
 
@@ -79,10 +79,11 @@ Utilisateur ──► Site IA (navigateur)
 
 | Mécanisme | Usage |
 |-----------|--------|
-| Mot de passe + MFA TOTP | Pilote / secours |
+| Mot de passe + MFA TOTP | Pilote / secours ; **forcé en multi-tenant** |
 | **SSO OIDC** (Entra, Okta…) | Standard entreprise |
-| **SAML 2.0** | IdP legacy / fédérations |
-| **WebAuthn / passkeys** | Login sans mot de passe |
+| **SAML 2.0** | IdP legacy ; signature IdP exigée en prod |
+| **WebAuthn / passkeys** | Windows Hello, empreinte, clés FIDO2 |
+| **Session concurrente** | Consentement 10 s / lecture seule (anti-takeover) |
 | **SSO enforce** | Interdire le password local |
 | **JIT** | Créer l’admin à la 1ʳᵉ connexion SSO |
 | **LDAP / AD** | Sync groupes & users + cron |
@@ -101,7 +102,15 @@ Utilisateur ──► Site IA (navigateur)
 
 ---
 
-## 7. Conformité & risques résiduels
+## 7. Conformité, audit & continuité
+
+| Capacité | Bénéfice décideur |
+|----------|-------------------|
+| **Audit WORM** (chaîne SHA-256) | Preuve d’intégrité des actions admin |
+| **Rétention légale audit** (≥ 90 j) | Alignement exigences de conservation |
+| **Backup config + Postgres** | Continuité d’activité / PRA léger |
+| **Exports planifiés + SIEM** | Preuve opérationnelle pour le SOC |
+| **MSP multi-org** | Un opérateur gouverne plusieurs clients |
 
 **Réduit** : fuites accidentelles vers l’IA, absence de visibilité, contournement policy (lock + MDM).
 
@@ -123,12 +132,14 @@ Utilisateur ──► Site IA (navigateur)
 
 ## 9. Offre & suite produit
 
-| Déjà livré (V1.x / V2 prep) | Suite |
-|-----------------------------|--------|
-| Extension multi-navigateur, proxy, SSO, MFA, LDAP, SIEM, MSI | WebAuthn prod multi-instance, SAML signature stricte, Safari App Store |
+| Déjà livré (V1.x + lot V2) | Suite |
+|---------------------------|--------|
+| Extension multi-navigateur, proxy, SSO, MFA multi-tenant, passkeys, LDAP, SIEM, MSI | OCR multilingue élargi, Safari App Store, billing Stripe GA |
+| Scan fichiers PDF/DOCX/PPTX/XLSX + OCR images | Portal personnel self-serve |
+| Audit WORM, backup, notifications multi-canaux, MSP portfolio | Soft-delete org GDPR full |
 
 Contact : votre équipe DailyOps.Tech / commercial OpsGate.
 
 ---
 
-*Document confidentiel — usage interne client & partenaires.*
+*Document confidentiel — usage interne client & partenaires · juillet 2026*

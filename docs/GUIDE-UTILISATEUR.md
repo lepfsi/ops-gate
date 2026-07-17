@@ -1,11 +1,12 @@
 # OpsGate — Guide utilisateur (V1)
 
 **Public** : administrateurs console, pilotes, support  
-**Version produit** : 1.2  
+**Version produit** : 1.2 / lot V2 (juillet 2026)  
 **Langue** : français  
 
-Ce guide décrit l’usage quotidien d’OpsGate : extension, console, enrôlement, policies, licences, logs et recovery.  
-Pour l’installation technique locale (Docker, ports), voir aussi [`GUIDE-STACK-LOCALE.md`](./GUIDE-STACK-LOCALE.md).
+Ce guide décrit l’usage quotidien d’OpsGate : extension, console, enrôlement, policies, licences, logs, messages, MFA et recovery.  
+Pour l’installation technique locale (Docker, ports), voir aussi [`GUIDE-STACK-LOCALE.md`](./GUIDE-STACK-LOCALE.md).  
+Guide V2 enrichi : [`GUIDE-UTILISATEUR-V2.md`](./GUIDE-UTILISATEUR-V2.md).
 
 ---
 
@@ -31,9 +32,13 @@ Sans **Postgres**, l’API utilise un store **mémoire** : **toutes les données
 
 **Mode avancé (login)** : le champ URL API est masqué par défaut ; l’activer uniquement pour pointer une autre instance.
 
-**Session unique** : une seconde connexion propose « Forcer la déconnexion ».
+**Session concurrente** : si un autre navigateur est déjà connecté, la session ouverte reçoit une demande (accepter / refuser). Sans réponse sous **10 s**, la session est libérée. Alternative : **lecture seule** (consultation, pas de modification).
+
+**Passkey / Windows Hello** : bouton sur l’écran de login (après enregistrement dans Paramètres → Général).
 
 **Mauvais mot de passe** : le message indique combien d’essais restent. Après trop d’échecs, le compte est **verrouillé** — un administrateur principal le débloque dans *Admins & groupes*.
+
+**Multi-organisation (MSP)** : même email sur plusieurs orgs → choix d’org au login ; bascule avec **code MFA** obligatoire ; menu **Portfolio MSP** pour la vue consolidée.
 
 ---
 
@@ -64,12 +69,13 @@ Recovery concepteur : réservé au principal / support (voir §8).
 
 ## 4. Tableau de bord
 
-Vue d’ensemble de la flotte : licences, agents connectés, décisions, menaces fréquentes.
+Vue d’ensemble de la flotte : licences, agents connectés, décisions, menaces fréquentes, demandes utilisateurs.
 
+- Widgets **déplaçables / redimensionnables** (préférence locale).
 - Cliquez un indicateur pour voir le détail (liste d’agents ou logs).
-- **Étendre** : les graphiques remplissent l’écran de contenu (la barre du haut et le menu de gauche restent visibles).
-- **Réduire** : retour à la vue normale.
+- **Étendre** : mode plein écran du dashboard (Échap pour sortir).
 - **Force sync** : pousse la configuration aux agents en ligne (effet sous ~2 min).
+- Liens profonds : `#/policy`, `#/agents`, `#/settings/mail`, etc.
 
 ---
 
@@ -130,12 +136,21 @@ Un **pack** est le jeu de signatures de détection poussé aux agents sans rebui
 | Actuel | Secret fort `OPSGATE_VENDOR_RECOVERY` ; délai offline ≥ 2 h |
 | Recommandé V1.x | **Pool de codes one-time** (bas de page *Admins & groupes*, principal uniquement) |
 
+### Messages (inbox type Kaspersky)
+
+L’utilisateur final peut **contacter l’admin** depuis l’extension.  
+Console → **Messages** : lire, répondre, clôturer ; le client reçoit un bandeau / popup d’accusé.
+
 ### Paramètres utiles
 
-- **Langue** FR / EN (Paramètres → Général) — s’applique à toute la console.  
-- **Rétention des logs** (défaut 90 jours) et types de journaux.  
-- **Seuil d’échecs de login** (verrouillage compte).  
-- **Monitoring** : seuils online / hors-ligne ; planning heures de travail.
+- **Langue** FR / EN et **date/heure** (Paramètres → Général).  
+- **MFA TOTP** + **passkeys** (Windows Hello / empreinte).  
+- **Backup configuration** : export / import JSON (principal).  
+- **Rétention des logs** (events) et **rétention légale audit** (min. 90 j, WORM).  
+- **Notifications** : e-mails + canaux Telegram / Slack / webhook.  
+- **E-mail / SMTP** : requis pour OTP, alertes et exports planifiés.  
+- **Rapports** : export logs planifié (jour/heure/destinataires) + **Envoi test maintenant**.  
+- **Monitoring** : seuils online / hors-ligne ; planning heures de travail ; SIEM.
 
 ---
 
@@ -143,17 +158,17 @@ Un **pack** est le jeu de signatures de détection poussé aux agents sans rebui
 
 Décisions typiques : `mask_send`, `send_anyway`, `cancel`, enroll / unenroll.
 
-### Rétention
+### Rétention & fichiers scannés
 
-- Définie par l’**entreprise** (Paramètres → logs).  
-- Au-delà : **purge automatique**.  
-- **Exporter** la semaine, tout, ou une période (CSV / JSON).  
-- Archive auto fin de semaine si activée.
+- Rétention events définie par l’**entreprise** (Paramètres → Logs).  
+- Au-delà : **purge automatique** — exportez avant.  
+- **Export manuel** CSV/JSON ; **export planifié** par e-mail (Paramètres → Rapports).  
+- Extension : scan **PDF, DOCX, PPTX, XLSX** ; **OCR images** si policy `scanImages` active.
 
-### Audit admin
+### Audit admin (WORM)
 
-Journal des actions console (policy, profils, admins, packs…).  
-Réservé au **principal**. Export disponible.
+Journal append-only avec **sceau SHA-256** (chaîne d’intégrité).  
+Réservé au **principal**. Bouton **Vérifier l’intégrité** + export CSV.
 
 ---
 
@@ -167,10 +182,11 @@ Fuseaux : Europe, Cameroun (`Africa/Douala`), Madagascar (`Africa/Antananarivo`)
 
 ---
 
-## 11. Règles d’affectation
+## 11. Agents & règles d’affectation
 
-Règles auto (label / hostname → groupe), conditions en **AND**, priorité ordonnée.  
-Appliquées à l’enroll et via « Ré-évaluer ».
+- **Export** agents CSV/JSON ; **Import CSV** (groupe / profil / licence sur agents déjà enrollés).  
+- **Moving rules** : label / hostname → groupe ; conditions **AND** ou **OR** ; option **permanent** (même si déjà groupé).  
+- Appliquées à l’enroll et via « Ré-évaluer ».
 
 ---
 
@@ -183,6 +199,9 @@ Appliquées à l’enroll et via « Ré-évaluer ».
 | Nouveau volume / autre machine | DB « vide » + re-seed DEMO | Vérifier le volume Docker |
 | Rétention logs courte | Events anciens **purgés** | Ajuster la rétention ; exporter avant |
 | Redémarrage API en mémoire | Perte agents, events, admins | Passer à Postgres |
+| Pas de backup | Perte irrécupérable | `scripts/backup-db.ps1` + export config console |
+
+**Backup** : Paramètres → Général → Exporter le backup ; base complète : `scripts/backup-db.ps1` (voir `architecture/BACKUP.md`).
 
 Le seed `DEMO-OPSGATE` ne s’exécute **que si** l’org n’existe pas encore : il **ne réécrit pas** une org déjà présente.
 
@@ -222,4 +241,4 @@ Contact support : **contact@dailyops.tech** (indiquer le code organisation et la
 
 ---
 
-*OpsGate V1 · Guide utilisateur · document de référence produit*
+*OpsGate V1.2 / lot V2 · Guide utilisateur · document de référence produit · juillet 2026*
