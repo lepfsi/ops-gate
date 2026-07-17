@@ -47,7 +47,7 @@ Socle déjà présent à réutiliser :
 
 | Epic | Priorité | Effort estimé | Spec | Statut |
 |------|----------|---------------|------|--------|
-| **V3-A Secure Rewrite** | P0 | Moyen | [`FEATURE-SPEC-SECURE-REWRITE-v1.md`](./roadmap-v3/FEATURE-SPEC-SECURE-REWRITE-v1.md) | ⬜ gelé |
+| **V3-A Secure Rewrite** | P0 | Moyen | [`FEATURE-SPEC-SECURE-REWRITE-v1.md`](./roadmap-v3/FEATURE-SPEC-SECURE-REWRITE-v1.md) | ◐ **livré engine + banner** (17/07) |
 | **V3-B Risk Score prompt + Simulation** | P0 | Faible–moyen | [`FEATURE-SPEC-RISK-SCORE-SIMULATION-v1.md`](./roadmap-v3/FEATURE-SPEC-RISK-SCORE-SIMULATION-v1.md) | ⬜ gelé |
 | **V3-C Shadow AI + Risk Score utilisateur** | P0 | Moyen–élevé | [`SHADOW-AI-RISK-SCORE.md`](./roadmap-v3/SHADOW-AI-RISK-SCORE.md) + [wireframes](./roadmap-v3/SHADOW-AI-RISK-SCORE-WIREFRAMES.md) | ⬜ gelé |
 | **V3-D Dashboard Risk / Analytics** | P1 | Moyen | Wireframes § dashboard | ⬜ |
@@ -82,11 +82,14 @@ Alternative acceptable si besoin commercial RSSI d’abord : **V3-C avant V3-A**
 
 | Item | Notes | Done |
 |------|--------|------|
-| `secureRewrite()` dans `@opsgate/engine` | Règles IP, secrets, hostnames, PII… | [ ] |
-| Mapping cohérent dans un même document | Même host → même pseudonyme | [ ] |
-| Modal extension côte à côte | Original vs sécurisé | [ ] |
-| Décision event `secure_rewrite` + scores | `original_risk` / `remaining_risk` | [ ] |
-| Tests unitaires non-régression | Cas Fortinet, clés API, long texte | [ ] |
+| `secureRewrite()` dans `@opsgate/engine` | Règles IP, secrets, hostnames, PII… | [x] |
+| Mapping cohérent dans un même document | Même host → même pseudonyme | [x] |
+| Bouton bandeau **Secure Rewrite & envoyer** | Action principale (mask simple en secondaire) | [x] |
+| Modal côte à côte (preview) | Spec complète — **suite polish** | [ ] |
+| Décision event `secure_rewrite` | Journal + API `masked=true` | [x] |
+| Scores risque original / restant | Calculés + log console | [x] |
+| Fichiers texte | `buildMaskedFileList(..., secure_rewrite)` | [x] |
+| Tests smoke | `node --import tsx scripts/test-secure-rewrite.mjs` | [x] |
 
 **Critères de succès** (spec) : adoption rewrite > 40 % sur medium/high ; gen < 400 ms médiane.
 

@@ -1,6 +1,7 @@
 import {
   detectSensitiveData,
   maskSensitiveData,
+  secureRewrite,
   type Detection,
   type DetectionRule
 } from "@opsgate/engine"
@@ -524,7 +525,8 @@ export async function scanFiles(
 export function buildMaskedFileList(
   original: FileList | File[],
   scans: FileScanResult[],
-  rules?: DetectionRule[] | null
+  rules?: DetectionRule[] | null,
+  mode: "mask" | "secure_rewrite" = "mask"
 ): DataTransfer {
   const dt = new DataTransfer()
   const files = Array.from(original)
@@ -538,7 +540,13 @@ export function buildMaskedFileList(
       (scan.status === "scanned" || scan.status === "too_large_partial") &&
       scan.text
     ) {
-      const masked = maskSensitiveData(scan.text, scan.detections, rules)
+      const masked =
+        mode === "secure_rewrite"
+          ? secureRewrite(scan.text, scan.detections, {
+              consistentMapping: true,
+              aggressiveness: 2
+            }).rewrittenText
+          : maskSensitiveData(scan.text, scan.detections, rules)
       const body = scan.truncated
         ? masked +
           "\n\n/* [OpsGate] Fichier tronqué au scan — vérifiez le reste manuellement */\n"

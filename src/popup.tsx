@@ -15,6 +15,8 @@ function decisionLabel(d: string, source?: string) {
   switch (d) {
     case "mask_send":
       return isFile ? "Fichier masqué" : "Masqué & envoyé"
+    case "secure_rewrite":
+      return isFile ? "Fichier Secure Rewrite" : "Secure Rewrite"
     case "send_anyway":
       return isFile ? "Fichier joint tel quel" : "Envoyé tel quel"
     case "cancel":

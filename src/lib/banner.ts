@@ -413,9 +413,12 @@ export function showAlertBanner(
     ? ` Organisation : ${escapeHtml(options.orgName)}.`
     : ""
 
-  const primaryLabel = isFile
-    ? msgs.btnMask.replace("Envoyer", "joindre")
-    : msgs.btnMask
+  const rewriteLabel = isFile
+    ? "Secure Rewrite & joindre"
+    : msgs.btnSecureRewrite || "Secure Rewrite & envoyer"
+  const maskLabel = isFile
+    ? "Masquer simplement & joindre"
+    : msgs.btnMask || "Masquer simplement"
   const allowLabel = isFile
     ? "Joindre l’original (journalisé)"
     : msgs.btnSendAnyway
@@ -444,6 +447,7 @@ export function showAlertBanner(
     ? `<button type="button" class="btn-contact" data-action="toggle_contact" title="Envoyer un message à l'administrateur">Contacter l'admin</button>`
     : ""
 
+  // Secure Rewrite = action principale (sauf block)
   const actionsHtml = isBlock
     ? `
       <button type="button" class="btn-primary" data-action="cancel">${escapeHtml(msgs.btnBlockAck)}</button>
@@ -452,13 +456,15 @@ export function showAlertBanner(
     `
     : isForce
       ? `
-      <button type="button" class="btn-accent" data-action="mask_send">${escapeHtml(primaryLabel)}</button>
+      <button type="button" class="btn-accent" data-action="secure_rewrite" title="Anonymisation intelligente">${escapeHtml(rewriteLabel)}</button>
+      <button type="button" class="btn-secondary" data-action="mask_send">${escapeHtml(maskLabel)}</button>
       ${contactBtnHtml}
       <button type="button" class="btn-secondary" data-action="toggle_details">Voir les détails</button>
       <button type="button" class="btn-ghost" data-action="cancel">${escapeHtml(cancelLabel)}</button>
     `
       : `
-      <button type="button" class="btn-accent" data-action="mask_send">${escapeHtml(primaryLabel)}</button>
+      <button type="button" class="btn-accent" data-action="secure_rewrite" title="Anonymisation intelligente">${escapeHtml(rewriteLabel)}</button>
+      <button type="button" class="btn-secondary" data-action="mask_send">${escapeHtml(maskLabel)}</button>
       <button type="button" class="btn-danger" data-action="send_anyway">${escapeHtml(allowLabel)}</button>
       ${contactBtnHtml}
       <button type="button" class="btn-secondary" data-action="toggle_details">Voir les détails</button>
@@ -785,7 +791,12 @@ export function showAlertBanner(
         return
       }
 
-      if (act === "mask_send" || act === "send_anyway" || act === "cancel") {
+      if (
+        act === "secure_rewrite" ||
+        act === "mask_send" ||
+        act === "send_anyway" ||
+        act === "cancel"
+      ) {
         decide(act as UserDecision)
       }
     },
@@ -1208,6 +1219,12 @@ export function toastFromDecision(
       break
     case "mask_send":
       showToast(m.toastMask, { tone: "success", title: "Politique OpsGate" })
+      break
+    case "secure_rewrite":
+      showToast(m.toastSecureRewrite || m.toastMask, {
+        tone: "success",
+        title: "Secure Rewrite"
+      })
       break
     case "send_anyway":
       showToast(m.toastSendAnyway, {

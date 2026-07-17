@@ -405,6 +405,18 @@ Env : `OPSGATE_GDPR_PURGE_DAYS` (30), `OPSGATE_GDPR_CRON_MINUTES` (60).
 
 ---
 
+## 27. V3-A Secure Rewrite — engine + banner (17 juillet 2026)
+
+| Sujet | Détail | Fichiers |
+|-------|--------|---------|
+| Engine | `secureRewrite()` + `estimateRiskScore()` | `packages/engine/src/secure-rewrite.ts` |
+| Extension | CTA principal bandeau, decision `secure_rewrite` | `banner.ts`, `ai-sites.ts` |
+| Fichiers | Mode rewrite dans `buildMaskedFileList` | `file-scanner.ts` |
+| Smoke | `scripts/test-secure-rewrite.mjs` | |
+| Suite | Modal preview côte à côte (spec) | V3 polish |
+
+---
+
 ## Convention pour les prochains changements
 
 Quand tu modifies le produit :

@@ -13,7 +13,12 @@ import {
 } from "~lib/banner"
 import { ext } from "~lib/browser-api"
 import { mergeUserMessages } from "~types"
-import { detectTextSync, ensureRulesWarm, maskText } from "~lib/detect"
+import {
+  detectTextSync,
+  ensureRulesWarm,
+  maskText,
+  secureRewriteText
+} from "~lib/detect"
 import {
   buildMaskedFileList,
   mergeDetections,
@@ -490,6 +495,27 @@ function handlePotentialSend(event: Event, sourceEl?: Element | null): void {
         return
       }
 
+      if (decision === "secure_rewrite") {
+        const rw = secureRewriteText(text, detections, {
+          consistentMapping: true,
+          aggressiveness: 2
+        })
+        setPromptText(rw.rewrittenText)
+        logDecision("secure_rewrite", detections, true, "prompt")
+        toastFromDecision("secure_rewrite", msgs)
+        console.log(
+          "[OpsGate] Secure Rewrite",
+          rw.stats.totalReplacements,
+          "remplacements · risque",
+          rw.originalRiskScore,
+          "→",
+          rw.remainingRiskScore
+        )
+        bypassOnce = true
+        setTimeout(() => retriggerSend(sourceEl), 120)
+        return
+      }
+
       if (decision === "mask_send") {
         const masked = maskText(text, detections, rules)
         setPromptText(masked)
@@ -750,30 +776,40 @@ async function processQuarantinedFiles(
             return
           }
 
-          if (decision === "mask_send" && detections.length > 0) {
+          if (
+            (decision === "mask_send" || decision === "secure_rewrite") &&
+            detections.length > 0
+          ) {
+            // Secure Rewrite fichiers : même pipeline mask fichier (contenu texte
+            // déjà nettoyé via engine) — suffixe distinct pour le rewrite
             const dt = buildMaskedFileList(
               frozen,
               scans as FileScanResult[],
-              rules
+              rules,
+              decision === "secure_rewrite" ? "secure_rewrite" : "mask"
             )
+            const suffix =
+              decision === "secure_rewrite"
+                ? ".opsgate-secure"
+                : ".opsgate-masked"
             const maskedFiles = filesFromDataTransfer(dt).map((f) => {
               const dot = f.name.lastIndexOf(".")
               const base = dot > 0 ? f.name.slice(0, dot) : f.name
               const ext = dot > 0 ? f.name.slice(dot) : ""
-              return new File([f], `${base}.opsgate-masked${ext}`, {
+              return new File([f], `${base}${suffix}${ext}`, {
                 type: f.type || "text/plain",
                 lastModified: Date.now()
               })
             })
             const ok = replaceAttachments(maskedFiles, input)
-            logDecision("mask_send", detections, true, "file", fileNames)
+            logDecision(decision, detections, true, "file", fileNames)
             if (ok) {
-              toastFromDecision("mask_send", fileMsgs)
+              toastFromDecision(decision, fileMsgs)
             } else {
               clearAllFileInputs(input)
               downloadMaskedFallback(maskedFiles)
               showToast(
-                "Réinjection refusée par la page. Un fichier masqué a été téléchargé — joignez-le manuellement.",
+                "Réinjection refusée par la page. Un fichier sécurisé a été téléchargé — joignez-le manuellement.",
                 {
                   tone: "warning",
                   title: "Action manuelle requise",

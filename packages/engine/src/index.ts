@@ -15,6 +15,14 @@ export type {
 export { detectSensitiveData } from "./detector"
 export { maskSensitiveData } from "./masker"
 export {
+  secureRewrite,
+  estimateRiskScore,
+  type RewriteStrategy,
+  type RewriteChange,
+  type RewriteResult,
+  type SecureRewriteOptions
+} from "./secure-rewrite"
+export {
   runRulesEngine,
   getRules,
   highestSeverity,
