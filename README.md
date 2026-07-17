@@ -8,6 +8,7 @@ OpsGate est une extension navigateur (**Chrome / Edge / Firefox**, Manifest V3) 
 
 **Traces techniques** : [`docs/CHANGELOG-TECHNIQUE.md`](docs/CHANGELOG-TECHNIQUE.md) · roadmap [`docs/V2-BACKLOG.md`](docs/V2-BACKLOG.md)
 
+**Déploiement client** : [`DEPLOIEMENT-CLIENT.pdf`](docs/DEPLOIEMENT-CLIENT.pdf) · [EN](docs/DEPLOIEMENT-CLIENT-EN.pdf) · [md FR](docs/DEPLOIEMENT-CLIENT.md)  
 **Décideurs (V2)** : [`DECIDEURS-V2-FR.pdf`](docs/DECIDEURS-V2-FR.pdf) · [`DECIDEURS-V2-EN.pdf`](docs/DECIDEURS-V2-EN.pdf)  
 **Guides** : [`GUIDE-UTILISATEUR-V2.pdf`](docs/GUIDE-UTILISATEUR-V2.pdf) · [EN](docs/GUIDE-UTILISATEUR-V2-EN.pdf) · **Tests** : [`GUIDE-TEST-V2.pdf`](docs/GUIDE-TEST-V2.pdf)
 
