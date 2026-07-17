@@ -72,9 +72,9 @@ Console
 Catégories :
 
 - `text` / `config` / `database` (.sql) → lecture texte
-- `office` PDF/DOCX → extraction + détection
-- autres Office → `office_warn` (confirm + log)
-- `image` → skip/OCR V2
+- `office` PDF/DOCX/**PPTX/XLSX** → extraction + détection (`office-extract.ts`)
+- Office **legacy** (doc/xls/ppt binaires) → `office_warn` (confirm + log)
+- `image` → OCR Tesseract.js si policy `scanImages` (sinon skip)
 - `media` → warn confirm
 
 ### 2.5 Banner / décisions utilisateur
@@ -244,13 +244,16 @@ Tables clés : `organizations`, `policies`, `policy_profiles`, `org_admins`, `ad
 
 ## 8. Roadmap / hors V1 (notes)
 
+**État 17/07/2026** : **V2 functional / pre-GA** — voir `docs/STATUS-V2.md`.
+
 Voir `docs/V2-BACKLOG.md` et `docs/architecture/PLATFORM-v2.md` :
 
-- Langue UI (system properties)
-- Extension force-install / non-désactivable (MDM)
-- OCR images, full Office (xlsx/pptx)
-- LDAP / SSO / MFA
-- Proxy inline, multi-tenant SaaS store
+- ~~OCR images, full Office (xlsx/pptx)~~ → **livré**
+- ~~LDAP / SSO / MFA / proxy / multi-tenant~~ → **livré** (passkeys, MSP, WORM…)
+- Extension force-install / non-désactivable (MDM) — **doc + policies** ; déploiement client
+- Publication store réelle (CWS/AMO/Apple) — **reste ops**
+- Billing Stripe portal GA, SAML C14N stricte — **suite**
+- Langue UI (system properties) — optionnel
 
 ---
 
@@ -258,6 +261,8 @@ Voir `docs/V2-BACKLOG.md` et `docs/architecture/PLATFORM-v2.md` :
 
 | Doc | Contenu |
 |-----|---------|
+| `docs/STATUS-V2.md` | Statut produit une page |
+| `docs/DEPLOIEMENT-CLIENT.md` | Install chez le client |
 | `docs/GUIDE-STACK-LOCALE.md` | Docker / API / console / extension locale |
 | `docs/RUNBOOK-OPS.md` | Ops |
 | `docs/VALIDATION.md` | Checklist validation |

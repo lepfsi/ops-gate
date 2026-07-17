@@ -2,7 +2,8 @@
 
 **Public** : développeurs / mainteneurs qui reviennent dans 6 mois ou 5 ans.  
 **But** : ne pas s’égarer — *quoi a été fait, où, comment ça marche, où lire la suite*.  
-**Mis à jour** : 16 juillet 2026  
+**Mis à jour** : 17 juillet 2026  
+**Maturité produit** : **V2 functional / pre-GA** — voir [`STATUS-V2.md`](./STATUS-V2.md)
 
 ---
 
@@ -22,10 +23,13 @@ ops-gate/
 
 | Si tu cherches… | Ouvre… |
 |-----------------|--------|
-| Démarrer la stack | `docs/GUIDE-STACK-LOCALE.md`, `docs/architecture/PROXY-RUNBOOK.md` |
-| Décideurs DSI | `docs/DSI-FILTRAGE-DONNEES-SENSIBLES.md` (+ PDF) |
-| Admins console | `docs/GUIDE-UTILISATEUR.md` (+ PDF) |
-| Roadmap V2 | `docs/V2-BACKLOG.md`, `docs/architecture/PLATFORM-v2.md` |
+| **Statut V2 global** | `docs/STATUS-V2.md`, `docs/RELEASE-v2.md` |
+| Déployer chez un client | `docs/DEPLOIEMENT-CLIENT.md` (+ PDF FR/EN) |
+| Démarrer la stack lab | `docs/GUIDE-STACK-LOCALE.md`, `docs/architecture/PROXY-RUNBOOK.md` |
+| Décideurs DSI | `docs/DECIDEURS-V2-FR.md` (+ PDF), `docs/DSI-FILTRAGE-DONNEES-SENSIBLES.md` |
+| Admins console | `docs/GUIDE-UTILISATEUR-V2.md` (+ PDF) |
+| Roadmap / backlog V2 | `docs/V2-BACKLOG.md`, catalogue `docs/architecture/BACKEND-V2-CATALOG.md` |
+| Design d’origine V2 | `docs/architecture/PLATFORM-v2.md` (référence ; code largement livré) |
 | Règles sensibles | `packages/engine/rules/rules.json` + `packages/engine/src/rules-engine.ts` |
 | Branding PDF | `scripts/pdf_brand.py` (BrandMark login MMC) |
 
@@ -312,15 +316,41 @@ Prod future : services Windows / silent scripts ; pas 3 terminaux ouverts.
 | Docs décideurs | FR/EN + guide user V2 + guide test | `DECIDEURS-V2-*.md`, `GUIDE-*-V2*.md` |
 | PDF brandés | `pnpm docs:pdf:v2` | `scripts/build-v2-docs-pdf.py` |
 
-## 21. Suite recommandée
+## 21. Suite recommandée (historique 16/07 — partiellement livrée)
 
-1. Publication CWS / AMO / Apple réelles  
-2. WebAuthn persisté en Postgres  
-3. SAML C14N exclusive stricte  
-4. LDAP prune + map auto profil  
-5. OIDC state multi-instance (Redis)  
+1. Publication CWS / AMO / Apple réelles — **toujours ouvert (ops)**  
+2. ~~WebAuthn persisté en Postgres~~ → **livré** (UI + PG, lot 17/07)  
+3. SAML C14N exclusive stricte — **ouvert**  
+4. LDAP prune + map auto profil — **optionnel**  
+5. OIDC state multi-instance (Redis) — **ouvert**  
 
-Détail : `docs/V2-BACKLOG.md` · `docs/architecture/PLATFORM-v2.md`.
+## 22. V2 functional / pre-GA — lot terrain (17 juillet 2026)
+
+Consolidation produit : la plupart des epics V2.0 sont **dans le monorepo**. Maturité annoncée : **functional / pre-GA** (pas encore V2.0 GA marketing).
+
+| Sujet | Détail | Fichiers / docs |
+|-------|--------|-----------------|
+| MFA multi-tenant | Code 6 chiffres à chaque switch d’org | auth switch-org, console MFA modal |
+| Session concurrente | Accept/refuse 10 s · session **read-only** | `session-challenge.ts`, `admin_sessions.read_only` |
+| Passkeys UI | Settings + login (Hello / empreinte) | WebAuthn + console |
+| MSP portfolio | Vue multi-org `#/msp` | console, `/auth/msp-overview` |
+| Audit WORM | Chaîne SHA-256 seq / entry_hash / prev_hash | audit integrity API |
+| Dual-key secrets | Rotation secrets vendor/API | `SECRET-ROTATION.md` |
+| Notif multi-canal | Email + Telegram / Slack / webhook | settings notifications |
+| Export logs planifié | Cron + **run-now** + e-mail archive | scheduled export |
+| Backup | JSON org + `scripts/backup-db.ps1` | `/org/backup`, BACKUP.md |
+| Parse fichiers | PDF/DOCX/**PPTX/XLSX** | `office-extract.ts`, `zip-min.ts` |
+| OCR bitmap | Tesseract.js eng (background SW pour CSP) | `ocr-bitmap.ts`, policy `scanImages` |
+| Import CSV agents | Match host/label + group/profile/licence | `POST /org/agents/import-csv` |
+| Moving rules | `conditionLogic` OR + `permanent` | moving-rules |
+| Stripe fondations | Checkout API (portal UX = suite) | `billing-stripe.ts` |
+| Nav console | Sidebar compacte, moins de sous-onglets | console App |
+| Docs statut | STATUS-V2, RELEASE-v2, BACKLOG, catalogue backend | `docs/STATUS-V2.md` etc. |
+| Docs déploiement | Install control plane + extension MDM + proxy | `DEPLOIEMENT-CLIENT*.md/.pdf` |
+
+**Reste avant annonce « V2.0 GA »** : publication store réelle, pilote client checklist, billing Stripe portal, C14N SAML stricte, option OCR `fra`.
+
+Détail vivant : `docs/STATUS-V2.md` · `docs/V2-BACKLOG.md` · `docs/architecture/BACKEND-V2-CATALOG.md`.
 
 ---
 

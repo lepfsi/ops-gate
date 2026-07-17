@@ -1,6 +1,7 @@
 # OpsGate — User / Admin Guide V2
 
 **Version**: 2.1 (product 1.2 + V2 batch July 2026)  
+**Maturity**: **V2 functional / pre-GA** — see [`STATUS-V2.md`](./STATUS-V2.md)  
 **Language**: English  
 **Audience**: console admins, security champions, trainers  
 
@@ -12,7 +13,9 @@ OpsGate protects company data when staff use **AI websites** in the browser.
 This guide covers the **console**, **extension**, optional **proxy**, and SSO options.
 
 For executives (CIO/CISO): see `DECIDEURS-V2-EN.md`.  
-For QA steps: `GUIDE-TEST-V2.md`.
+For **customer install**: `DEPLOIEMENT-CLIENT-EN.md` (+ PDF).  
+For QA steps: `GUIDE-TEST-V2.md`.  
+For product progress: `STATUS-V2.md`.
 
 ---
 
@@ -148,6 +151,8 @@ Windows production: `pnpm proxy:msi` (portable Node included).
 
 ## 11. Support
 
+- Product status V2: `STATUS-V2.md`  
+- Customer deployment: `DEPLOIEMENT-CLIENT-EN.md`  
 - Technical trail: `CHANGELOG-TECHNIQUE.md`, `architecture/*`  
 - Privacy: `PRIVACY.md`  
 - Proxy runbook: `architecture/PROXY-RUNBOOK.md`  

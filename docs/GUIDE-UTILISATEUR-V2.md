@@ -1,6 +1,7 @@
 # OpsGate — Guide utilisateur / administrateur V2
 
 **Version** : 2.1 (produit 1.2 + lot V2 juillet 2026)  
+**Maturité** : **V2 functional / pre-GA** — [`STATUS-V2.md`](./STATUS-V2.md)  
 **Langue** : Français  
 **Public** : administrateurs console, référents sécurité, formateurs  
 
@@ -12,7 +13,9 @@ OpsGate protège les données de l’entreprise lorsque les collaborateurs utili
 Ce guide décrit l’usage quotidien de la **console** et de l’**extension**, ainsi que les options proxy et SSO.
 
 Pour les décideurs (DSI/RSSI) : voir aussi `DECIDEURS-V2-FR.md`.  
-Pour les tests techniques : `GUIDE-TEST-V2.md`.
+Pour l’**installation chez le client** : `DEPLOIEMENT-CLIENT.md` (+ PDF).  
+Pour les tests techniques : `GUIDE-TEST-V2.md`.  
+Pour l’avancement global : `STATUS-V2.md`.
 
 ---
 
@@ -163,6 +166,8 @@ Détail ops : `architecture/SMTP-MAIL.md`.
 
 ## 12. Support
 
+- Statut produit V2 : `STATUS-V2.md`  
+- Déploiement client : `DEPLOIEMENT-CLIENT.md`  
 - Cahier technique : `CHANGELOG-TECHNIQUE.md`, `architecture/*`  
 - Privacy : `PRIVACY.md`  
 - Runbook proxy : `architecture/PROXY-RUNBOOK.md`  

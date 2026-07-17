@@ -2,6 +2,7 @@
 
 **Public** : intégrateur, admin système, DSI / RSSI pilote  
 **Version produit** : 1.2 / lot V2  
+**Maturité** : **V2 functional / pre-GA** — [`STATUS-V2.md`](./STATUS-V2.md)  
 **Objectif** : déployer OpsGate **chez le client** (pas seulement en lab dev)
 
 > Ce document est le **point d’entrée déploiement**.  
@@ -9,6 +10,7 @@
 
 | Document lié | Contenu |
 |--------------|---------|
+| [`STATUS-V2.md`](./STATUS-V2.md) | Avancement produit (livré vs suite) |
 | [`FAQ-DEPLOIEMENT-V2.md`](./FAQ-DEPLOIEMENT-V2.md) | Questions MSI / licences / phases test |
 | [`GUIDE-STACK-LOCALE.md`](./GUIDE-STACK-LOCALE.md) | Lab Docker sur une machine de dev |
 | [`architecture/CHROME-WEB-STORE-MDM.md`](./architecture/CHROME-WEB-STORE-MDM.md) | Force-install Chrome/Edge |

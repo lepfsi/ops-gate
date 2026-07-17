@@ -2,6 +2,7 @@
 
 **Audience**: CIO, CISO, security architects, risk committees  
 **Product version**: 1.2 / V2 batch (July 2026)  
+**Maturity**: **V2 functional / pre-GA** — see [`STATUS-V2.md`](./STATUS-V2.md)  
 **Vendor**: DailyOps.Tech  
 
 ---
@@ -132,14 +133,17 @@ User ──► AI website (browser)
 
 ## 9. Product status & roadmap
 
-| Delivered (V1.x + V2 batch) | Next |
-|----------------------------|------|
-| Multi-browser, proxy, SSO, multi-tenant MFA, passkeys, LDAP, SIEM, MSI | Broader OCR languages, Safari App Store, Stripe GA |
-| PDF/DOCX/PPTX/XLSX scan + image OCR | Self-serve personal portal |
-| WORM audit, backup, multi-channel alerts, MSP portfolio | Full GDPR org soft-delete |
+| Delivered (V1.x + V2 batch) | Next (pre-GA → GA) |
+|----------------------------|---------------------|
+| Multi-browser, proxy, SSO, multi-tenant MFA, passkeys, LDAP, SIEM, MSI | Real store listing (CWS/AMO/Apple), customer pilot |
+| PDF/DOCX/PPTX/XLSX scan + image OCR | Broader OCR languages, public Safari App Store |
+| WORM audit, backup, multi-channel alerts, MSP portfolio | Stripe portal GA, full GDPR org soft-delete |
+
+**Deployment**: integrator guide [`DEPLOIEMENT-CLIENT-EN.md`](./DEPLOIEMENT-CLIENT-EN.md) (+ PDF).  
+**Progress detail**: [`STATUS-V2.md`](./STATUS-V2.md) · [`V2-BACKLOG.md`](./V2-BACKLOG.md).
 
 Contact: DailyOps.Tech / OpsGate sales.
 
 ---
 
-*Confidential — for customers and partners · July 2026*
+*Confidential — for customers and partners · 17 July 2026*
