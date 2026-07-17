@@ -1,6 +1,7 @@
 /**
  * Secure Rewrite — anonymisation intelligente (V3-A).
- * Conserve le sens / structure du texte tout en neutralisant les secrets.
+ * Objectif : conserver le sens / la structure (configs, phrases) et ne
+ * neutraliser que les **valeurs** sensibles (secrets, IP, clés, hosts).
  */
 import type { Detection, Severity } from "./types"
 
@@ -11,6 +12,7 @@ export type RewriteStrategy =
   | "generalize"
   | "placeholder"
   | "pseudonymize"
+  | "structure_preserve"
 
 export interface RewriteChange {
   original: string
@@ -32,9 +34,7 @@ export interface RewriteResult {
 }
 
 export interface SecureRewriteOptions {
-  /** Même valeur d’origine → même remplacement (défaut true) */
   consistentMapping?: boolean
-  /** 1 = doux · 2 = normal · 3 = strict (plus de placeholders forts) */
   aggressiveness?: 1 | 2 | 3
   language?: "fr" | "en"
 }
@@ -69,16 +69,14 @@ function severityWeight(s: Severity): number {
   return 4
 }
 
-/** Score de risque simple 0–100 à partir des détections (transparence UX). */
 export function estimateRiskScore(detections: Detection[]): number {
   if (!detections.length) return 0
   let score = 0
   const cats = new Set(detections.map((d) => d.ruleId))
   for (const d of detections) score += severityWeight(d.severity)
-  // Bonus catégories très sensibles
   for (const id of cats) {
     if (
-      /password|api-key|secret|jwt|aws|azure|gcp|token|private-key|credit-card/i.test(
+      /password|api-key|secret|jwt|aws|azure|gcp|token|private-key|credit-card|stripe/i.test(
         id
       )
     ) {
@@ -104,71 +102,115 @@ function isPrivateIp(ip: string): boolean {
   return false
 }
 
+function mapPrivateIp(ip: string, maps: Maps): string {
+  if (maps.ip.has(ip)) return maps.ip.get(ip)!
+  let rep: string
+  if (ip.startsWith("10.")) rep = "10.x.x.x"
+  else if (ip.startsWith("192.168.")) rep = "192.168.x.x"
+  else if (ip.startsWith("172.")) rep = "172.16.x.x"
+  else rep = "10.x.x.x"
+  maps.ip.set(ip, rep)
+  return rep
+}
+
+function mapDeviceHost(name: string, maps: Maps): string {
+  const k = name.toLowerCase()
+  if (maps.host.has(k)) return maps.host.get(k)!
+  maps.hostSeq += 1
+  // Format qui ne re-matche PAS le pattern FW-/RTR-… (évite double rewrite)
+  const pref = name.match(/^[A-Za-z]+/)?.[0]?.toLowerCase() || "dev"
+  const rep = `${pref.slice(0, 4)}-device-${String(maps.hostSeq).padStart(2, "0")}`
+  maps.host.set(k, rep)
+  return rep
+}
+
+/** Ne redacte que la *valeur* du secret, garde le mot-clé password/… */
+function rewritePasswordPhrase(match: string): string {
+  const redacted = match
+    .replace(
+      /(\b(?:password|passwd|pwd)\b)(\s*(?:=|:|\bis\b)?\s*)(['"]?)(\S+)/gi,
+      (_w, a: string, mid: string, q: string) => `${a}${mid}${q}********`
+    )
+    .replace(
+      /(\bmot\s+de\s+passe\b)(\s*(?:=|:|\best\b|\bis\b)?\s*)(['"]?)(\S+)/gi,
+      (_w, a: string, mid: string, q: string) => `${a}${mid}${q}********`
+    )
+    .replace(
+      /(\bset\s+(?:passwd|password)\b)\s+(\S+)/gi,
+      (_w, a: string) => `${a} ********`
+    )
+  return redacted === match ? "********" : redacted
+}
+
+function rewriteApiKeyToken(match: string): string {
+  if (/^sk[-_]/i.test(match) || /^pk[-_]/i.test(match) || /^rk[-_]/i.test(match)) {
+    // sk_live_… / sk_test_… → sk_live_[REDACTED]
+    const m = match.match(/^(sk|pk|rk)(_(?:live|test)_)?/i)
+    if (m) {
+      const head = m[0]
+      return `${head}[REDACTED]`
+    }
+    return `${match.slice(0, 3)}[REDACTED]`
+  }
+  if (/^AKIA[A-Z0-9]{12,}/i.test(match)) return "AKIA[REDACTED]"
+  if (match.length > 12) return `${match.slice(0, 4)}[REDACTED]`
+  return "[API_KEY]"
+}
+
+/**
+ * Config infra (Fortinet, etc.) : garder la structure, masquer IP / secrets
+ * **dans** le fragment — ne jamais remplacer toute la ligne par CONF-01.
+ */
+function rewriteInfraFragment(match: string, maps: Maps): string {
+  let s = match
+  // set password X
+  s = s.replace(
+    /(\bset\s+(?:password|passwd|private-key)\b)\s+(\S+)/gi,
+    (_w, a: string) => `${a} ********`
+  )
+  // private IPs
+  s = s.replace(
+    /\b(?:10\.\d{1,3}\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3}|172\.(?:1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3})\b/g,
+    (ip) => mapPrivateIp(ip, maps)
+  )
+  // quoted secrets
+  s = s.replace(
+    /(\b(?:password|passwd|secret|community)\b\s+)(["'])([^"']{4,})\2/gi,
+    (_w, a: string, q: string) => `${a}${q}********${q}`
+  )
+  return s
+}
+
 function rewriteMatch(
   match: string,
   detection: Detection,
   maps: Maps,
   aggressiveness: 1 | 2 | 3
-): { replacement: string; strategy: RewriteStrategy; category: string } {
+): { replacement: string; strategy: RewriteStrategy; category: string } | null {
   const id = (detection.ruleId || "").toLowerCase()
   const type = (detection.type || "").toLowerCase()
-  const key = `${id}|${type}`
 
-  // Mots de passe / secrets totaux
-  if (
-    /password|passwd|secret|credential|bearer|jwt|private.?key|ssh-key/i.test(
-      key
-    ) ||
-    /password|secret/i.test(match) && match.length < 64
-  ) {
-    if (
-      /password|passwd|secret|credential|jwt|private|token|key/i.test(id) ||
-      /password|passwd|secret/i.test(type)
-    ) {
-      return {
-        replacement: "********",
-        strategy: "full_redact",
-        category: "password"
-      }
-    }
+  // ── Password : ne pas effacer le mot « password » ──
+  if (/password-assignment|password|passwd/i.test(id) || /mot de passe/i.test(type)) {
+    const rep = rewritePasswordPhrase(match)
+    if (rep === match) return null
+    return { replacement: rep, strategy: "full_redact", category: "password" }
   }
 
-  // API keys — garder préfixe
+  // ── API / cloud keys ──
   if (
     /api-key|openai|anthropic|stripe|github-token|generic-api|aws-access|aws-secret|azure|gcp|huggingface|slack-token/i.test(
       id
     )
   ) {
-    if (/^sk[-_]/i.test(match) || /^pk[-_]/i.test(match)) {
-      const pref = match.slice(0, Math.min(8, match.indexOf("_") + 1 || 7))
-      return {
-        replacement: `${pref}[REDACTED]`,
-        strategy: "prefix_keep",
-        category: "api_key"
-      }
-    }
-    if (/^AKIA[A-Z0-9]{16}/i.test(match)) {
-      return {
-        replacement: "AKIA[REDACTED]",
-        strategy: "prefix_keep",
-        category: "aws_key"
-      }
-    }
-    if (match.length > 12) {
-      return {
-        replacement: `${match.slice(0, 4)}[REDACTED]`,
-        strategy: "prefix_keep",
-        category: "api_key"
-      }
-    }
     return {
-      replacement: "[API_KEY]",
-      strategy: "placeholder",
+      replacement: rewriteApiKeyToken(match),
+      strategy: "prefix_keep",
       category: "api_key"
     }
   }
 
-  // JWT
+  // ── JWT ──
   if (/jwt|bearer/i.test(id) || /^eyJ[A-Za-z0-9_-]+\./.test(match)) {
     return {
       replacement: "[JWT_TOKEN]",
@@ -177,7 +219,7 @@ function rewriteMatch(
     }
   }
 
-  // Credit card
+  // ── Card / IBAN ──
   if (/credit-card|card/i.test(id)) {
     const digits = match.replace(/\D/g, "")
     if (digits.length >= 13) {
@@ -188,8 +230,6 @@ function rewriteMatch(
       }
     }
   }
-
-  // IBAN
   if (/iban/i.test(id)) {
     const clean = match.replace(/\s/g, "")
     if (clean.length > 8) {
@@ -201,7 +241,7 @@ function rewriteMatch(
     }
   }
 
-  // Email
+  // ── Email ──
   if (/email/i.test(id) || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(match)) {
     const lower = match.toLowerCase()
     if (maps.email.has(lower)) {
@@ -220,57 +260,59 @@ function rewriteMatch(
     return { replacement: rep, strategy: "pseudonymize", category: "email" }
   }
 
-  // IP
+  // ── IP (règle dédiée ou match pur IP) ──
   if (
     /ip-private|ip-address|ipv4|private-ip/i.test(id) ||
-    /^\d{1,3}(\.\d{1,3}){3}$/.test(match)
+    (/^\d{1,3}(\.\d{1,3}){3}$/.test(match) && isPrivateIp(match))
   ) {
-    if (maps.ip.has(match)) {
+    const ip = match.trim()
+    if (!/^\d{1,3}(\.\d{1,3}){3}$/.test(ip)) {
+      // match peut être plus large — déléguer fragment
+      const rep = rewriteInfraFragment(match, maps)
+      if (rep === match) return null
       return {
-        replacement: maps.ip.get(match)!,
-        strategy: "partial_mask",
+        replacement: rep,
+        strategy: "structure_preserve",
         category: "ip"
       }
     }
-    let rep: string
-    if (isPrivateIp(match)) {
-      if (match.startsWith("10.")) rep = "10.x.x.x"
-      else if (match.startsWith("192.168.")) rep = "192.168.x.x"
-      else if (match.startsWith("172.")) rep = "172.16.x.x"
-      else rep = "10.x.x.x"
-    } else {
-      maps.ipSeq += 1
-      rep = aggressiveness >= 2 ? "[PUBLIC_IP]" : `203.0.113.${maps.ipSeq}`
-    }
-    maps.ip.set(match, rep)
     return {
-      replacement: rep,
-      strategy: isPrivateIp(match) ? "partial_mask" : "placeholder",
+      replacement: mapPrivateIp(ip, maps),
+      strategy: "partial_mask",
       category: "ip"
     }
   }
 
-  // Hostname / firewall names
+  // ── Configs réseau (Fortinet/Cisco/…) : structure preserve — PAS hostname ──
   if (
-    /hostname|host-name|fqdn|firewall|fortinet|device-name/i.test(id) ||
-    /^(FW|RTR|SW|AP|SRV|DC)[-_][A-Z0-9_-]+$/i.test(match)
+    /fortinet|cisco|juniper|mikrotik|palo|wireguard|openvpn|pfsense|arista|huawei|network-cred/i.test(
+      id
+    )
   ) {
-    const k = match.toLowerCase()
-    if (maps.host.has(k)) {
-      return {
-        replacement: maps.host.get(k)!,
-        strategy: "generalize",
-        category: "hostname"
-      }
+    const rep = rewriteInfraFragment(match, maps)
+    // Lignes purement structurelles (config system interface, edit "port1") :
+    // on les laisse si aucun secret n’a été trouvé dedans
+    if (rep === match) return null
+    return {
+      replacement: rep,
+      strategy: "structure_preserve",
+      category: "infra_config"
     }
-    maps.hostSeq += 1
-    const pref = match.match(/^[A-Za-z]+/)?.[0]?.toUpperCase() || "HOST"
-    const rep = `${pref.slice(0, 4)}-${String(maps.hostSeq).padStart(2, "0")}`
-    maps.host.set(k, rep)
-    return { replacement: rep, strategy: "generalize", category: "hostname" }
   }
 
-  // Username style
+  // ── Hostname / device name EXPLICITE uniquement (pas fortinet) ──
+  if (
+    /^(hostname|host-name|fqdn|device-name)$/i.test(id) ||
+    /^(FW|RTR|SW|AP|SRV|DC|FWG|CORE)[-_][A-Z0-9][-A-Z0-9_]*$/i.test(match)
+  ) {
+    return {
+      replacement: mapDeviceHost(match, maps),
+      strategy: "generalize",
+      category: "hostname"
+    }
+  }
+
+  // ── Username ──
   if (/username|user-name|account|login/i.test(id)) {
     const k = match.toLowerCase()
     if (maps.user.has(k)) {
@@ -286,7 +328,7 @@ function rewriteMatch(
     return { replacement: rep, strategy: "pseudonymize", category: "username" }
   }
 
-  // Certificate thumbprint
+  // ── Cert ──
   if (/cert|thumbprint|fingerprint/i.test(id)) {
     return {
       replacement: "[CERTIFICATE]",
@@ -295,34 +337,16 @@ function rewriteMatch(
     }
   }
 
-  // Paths
+  // ── Paths ──
   if (/path|directory|filepath/i.test(id) || /^\/(opt|home|var|etc)\//.test(match)) {
-    return {
-      replacement: match
-        .replace(/\/home\/[^/]+/g, "/home/user")
-        .replace(/\/Users\/[^/]+/g, "/Users/user")
-        .replace(/entreprise|company|corp/gi, "app"),
-      strategy: "generalize",
-      category: "path"
-    }
+    const rep = match
+      .replace(/\/home\/[^/\s]+/g, "/home/user")
+      .replace(/\/Users\/[^/\s]+/g, "/Users/user")
+    if (rep === match) return null
+    return { replacement: rep, strategy: "generalize", category: "path" }
   }
 
-  // Infra configs blocs — placeholder fort si match long
-  if (
-    /fortinet|cisco|juniper|mikrotik|palo|wireguard|openvpn|pfsense|arista|huawei/i.test(
-      id
-    )
-  ) {
-    if (match.length > 40) {
-      return {
-        replacement: "[NETWORK_CONFIG_REDACTED]",
-        strategy: "placeholder",
-        category: "infra_config"
-      }
-    }
-  }
-
-  // PII générique
+  // ── PII ──
   if (/pii|ssn|phone|national|rh|salary/i.test(id)) {
     return {
       replacement: "[PERSONAL_DATA]",
@@ -331,30 +355,128 @@ function rewriteMatch(
     }
   }
 
-  // Défaut : placeholder lisible
-  const slug = (detection.type || detection.ruleId || "SENSITIVE")
-    .toUpperCase()
-    .replace(/[^A-Z0-9]+/g, "_")
-    .slice(0, 28)
-  return {
-    replacement: `[${slug}]`,
-    strategy: "placeholder",
-    category: detection.category || "general"
+  // ── Défaut : placeholder seulement si le match ressemble à un secret ──
+  if (match.length >= 12 && /[A-Za-z0-9+/=_-]{12,}/.test(match) && !/\s/.test(match)) {
+    const slug = (detection.type || detection.ruleId || "SENSITIVE")
+      .toUpperCase()
+      .replace(/[^A-Z0-9]+/g, "_")
+      .slice(0, 28)
+    return {
+      replacement: `[${slug}]`,
+      strategy: "placeholder",
+      category: detection.category || "general"
+    }
   }
+
+  // Phrase structurelle / trop générique → ne pas toucher
+  return null
 }
 
 /**
- * Génère une version intelligemment anonymisée du texte.
+ * Passe heuristique : masque ce que les règles n’ont pas encore couvert
+ * (IP privées isolées, sk_live_ courts, noms FW-*, etc.)
  */
+function heuristicPass(
+  text: string,
+  maps: Maps,
+  changes: RewriteChange[]
+): string {
+  let out = text
+
+  // Stripe / sk_ keys (y compris démos un peu courtes)
+  out = out.replace(
+    /\b((?:sk|pk|rk)_(?:live|test)_)([0-9a-zA-Z]{8,})\b/g,
+    (_w, pref: string, rest: string) => {
+      const original = pref + rest
+      const replacement = `${pref}[REDACTED]`
+      if (original !== replacement) {
+        changes.push({
+          original,
+          replacement,
+          category: "api_key",
+          strategy: "prefix_keep",
+          ruleId: "heuristic-stripe"
+        })
+      }
+      return replacement
+    }
+  )
+
+  // OpenAI-like sk-...
+  out = out.replace(/\b(sk-[A-Za-z0-9]{16,})\b/g, (original) => {
+    const replacement = `sk-[REDACTED]`
+    changes.push({
+      original,
+      replacement,
+      category: "api_key",
+      strategy: "prefix_keep",
+      ruleId: "heuristic-sk"
+    })
+    return replacement
+  })
+
+  // AWS access key
+  out = out.replace(/\b(AKIA[A-Z0-9]{16})\b/g, (original) => {
+    const replacement = "AKIA[REDACTED]"
+    changes.push({
+      original,
+      replacement,
+      category: "aws_key",
+      strategy: "prefix_keep",
+      ruleId: "heuristic-akia"
+    })
+    return replacement
+  })
+
+  // Private IPs (toujours, même hors règle keyword)
+  out = out.replace(
+    /\b(?:10\.\d{1,3}\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3}|172\.(?:1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3})\b/g,
+    (ip) => {
+      const replacement = mapPrivateIp(ip, maps)
+      if (ip !== replacement) {
+        changes.push({
+          original: ip,
+          replacement,
+          category: "ip",
+          strategy: "partial_mask",
+          ruleId: "heuristic-ip"
+        })
+      }
+      return replacement
+    }
+  )
+
+  // Device hostnames type FW-PARIS-01 — ignorer déjà anonymisés (*-device-NN)
+  out = out.replace(
+    /\b((?:FW|RTR|SW|AP|SRV|DC|FWG|CORE|HOST)[-_][A-Z0-9][-A-Z0-9_]{1,32})\b/gi,
+    (name) => {
+      if (/-device-\d+$/i.test(name)) return name
+      const replacement = mapDeviceHost(name, maps)
+      if (name !== replacement) {
+        changes.push({
+          original: name,
+          replacement,
+          category: "hostname",
+          strategy: "generalize",
+          ruleId: "heuristic-host"
+        })
+      }
+      return replacement
+    }
+  )
+
+  return out
+}
+
 export function secureRewrite(
   text: string,
   detections: Detection[],
   options?: SecureRewriteOptions
 ): RewriteResult {
   const originalRiskScore = estimateRiskScore(detections)
-  if (!text || detections.length === 0) {
+  if (!text) {
     return {
-      rewrittenText: text || "",
+      rewrittenText: "",
       changes: [],
       originalRiskScore,
       remainingRiskScore: 0,
@@ -366,7 +488,7 @@ export function secureRewrite(
   const aggressiveness = (options?.aggressiveness || 2) as 1 | 2 | 3
   const maps = emptyMaps()
 
-  // Dédupliquer par match exact, garder la détection la plus sévère
+  // Dédupliquer matches — garder sévérité max
   const byMatch = new Map<string, Detection>()
   for (const d of detections) {
     const m = d.match
@@ -380,7 +502,6 @@ export function secureRewrite(
     if (order[d.severity] > order[prev.severity]) byMatch.set(m, d)
   }
 
-  // Remplacements cohérents (plus longs d’abord)
   const pairs: Array<{
     original: string
     replacement: string
@@ -389,25 +510,27 @@ export function secureRewrite(
     ruleId: string
   }> = []
 
+  const globalMap = new Map<string, string>()
   const sorted = [...byMatch.entries()].sort(
     (a, b) => b[0].length - a[0].length
   )
 
-  const globalMap = new Map<string, string>()
-
   for (const [original, detection] of sorted) {
     if (consistent && globalMap.has(original)) {
       const replacement = globalMap.get(original)!
-      pairs.push({
-        original,
-        replacement,
-        strategy: "placeholder",
-        category: detection.category || "general",
-        ruleId: detection.ruleId
-      })
+      if (replacement !== original) {
+        pairs.push({
+          original,
+          replacement,
+          strategy: "placeholder",
+          category: detection.category || "general",
+          ruleId: detection.ruleId
+        })
+      }
       continue
     }
     const r = rewriteMatch(original, detection, maps, aggressiveness)
+    if (!r || r.replacement === original) continue
     if (consistent) globalMap.set(original, r.replacement)
     pairs.push({
       original,
@@ -418,9 +541,8 @@ export function secureRewrite(
     })
   }
 
-  // Appliquer via split (évite regex sur contenus arbitraires)
+  // Appliquer (plus longs d’abord)
   let rewritten = text
-  // Ordonner encore par longueur pour éviter partial replace
   pairs.sort((a, b) => b.original.length - a.original.length)
   for (const p of pairs) {
     if (!p.original || p.original === p.replacement) continue
@@ -428,38 +550,59 @@ export function secureRewrite(
     rewritten = rewritten.split(p.original).join(p.replacement)
   }
 
-  const byCategory: Record<string, number> = {}
-  const changes: RewriteChange[] = []
-  for (const p of pairs) {
-    if (!text.includes(p.original)) continue
-    changes.push({
+  const changes: RewriteChange[] = pairs
+    .filter((p) => text.includes(p.original) && p.original !== p.replacement)
+    .map((p) => ({
       original: p.original,
       replacement: p.replacement,
       category: p.category,
       strategy: p.strategy,
       ruleId: p.ruleId
-    })
-    byCategory[p.category] = (byCategory[p.category] || 0) + 1
+    }))
+
+  // Passe heuristique (IP / sk_ / FW- non couverts par les rules)
+  rewritten = heuristicPass(rewritten, maps, changes)
+
+  // Dédupliquer changes
+  const uniqChanges = changes.filter(
+    (c, i, arr) =>
+      arr.findIndex(
+        (x) => x.original === c.original && x.replacement === c.replacement
+      ) === i
+  )
+
+  const byCategory: Record<string, number> = {}
+  for (const c of uniqChanges) {
+    byCategory[c.category] = (byCategory[c.category] || 0) + 1
   }
 
-  // Score restant : re-scan naïf — si le rewrite a bien enlevé les matches
+  // Score restant
   let remaining = 0
-  for (const p of pairs) {
-    if (rewritten.includes(p.original)) remaining += 15
+  if (
+    /\bsk_(?:live|test)_[0-9a-zA-Z]{12,}\b/i.test(rewritten) ||
+    /\bAKIA[A-Z0-9]{16}\b/.test(rewritten)
+  ) {
+    remaining += 40
   }
-  // Traces de secrets encore visibles
-  if (/sk[-_]live|AKIA[A-Z0-9]{16}|eyJ[A-Za-z0-9_-]{10,}\./.test(rewritten)) {
-    remaining = Math.max(remaining, 40)
+  if (
+    /\b(?:10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(?:1[6-9]|2\d|3[0-1])\.\d+\.\d+)\b/.test(
+      rewritten
+    )
+  ) {
+    remaining += 20
+  }
+  if (/\b(?:password|passwd)\s*[=:]\s*\S{6,}/i.test(rewritten)) {
+    remaining += 30
   }
   const remainingRiskScore = Math.min(100, remaining)
 
   return {
     rewrittenText: rewritten,
-    changes,
+    changes: uniqChanges,
     originalRiskScore,
     remainingRiskScore,
     stats: {
-      totalReplacements: changes.length,
+      totalReplacements: uniqChanges.length,
       byCategory
     }
   }

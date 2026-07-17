@@ -180,9 +180,33 @@
     "patterns": [
       "\\b(?:10\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}|192\\.168\\.\\d{1,3}\\.\\d{1,3}|172\\.(?:1[6-9]|2\\d|3[0-1])\\.\\d{1,3}\\.\\d{1,3})\\b"
     ],
-    "keywords": ["firewall", "vlan", "gateway", "subnet", "interface"],
+    "keywords": [
+      "firewall",
+      "vlan",
+      "gateway",
+      "subnet",
+      "interface",
+      "config",
+      "set ip",
+      "ip address",
+      "private",
+      "lan",
+      "at ",
+      "host"
+    ],
     "action_default": "warn",
     "description": "IP privées (souvent dans une config réseau)"
+  },
+  {
+    "id": "device-hostname",
+    "name": "Nom d'équipement réseau",
+    "category": "infra",
+    "severity": "medium",
+    "patterns": [
+      "\\b(?:FW|RTR|SW|AP|SRV|DC|FWG|CORE)[-_][A-Z0-9][-A-Z0-9_]{1,32}\\b"
+    ],
+    "action_default": "warn",
+    "description": "Hostname type FW-PARIS-01, RTR-CORE-1 (souvent dans un prompt d'infra)"
   },
   {
     "id": "connection-string",
@@ -318,10 +342,11 @@
     "category": "general",
     "severity": "high",
     "patterns": [
-      "\\bsk_live_[0-9a-zA-Z]{20,}\\b",
-      "\\brk_live_[0-9a-zA-Z]{20,}\\b",
-      "\\bpk_live_[0-9a-zA-Z]{20,}\\b",
-      "\\bsk_test_[0-9a-zA-Z]{20,}\\b"
+      "\\bsk_live_[0-9a-zA-Z]{8,}\\b",
+      "\\brk_live_[0-9a-zA-Z]{8,}\\b",
+      "\\bpk_live_[0-9a-zA-Z]{8,}\\b",
+      "\\bsk_test_[0-9a-zA-Z]{8,}\\b",
+      "\\bpk_test_[0-9a-zA-Z]{8,}\\b"
     ],
     "action_default": "mask",
     "description": "Clés secrètes / publishable Stripe"
