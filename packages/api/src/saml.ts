@@ -184,7 +184,8 @@ export function parseSamlResponse(
 }
 
 /**
- * Soft signature check: verify SignatureValue over SignedInfo if present.
+ * Signature check over SignedInfo.
+ * Tries exclusive C14N (with InclusiveNamespaces PrefixList) then raw SignedInfo.
  * Returns null if no signature block; false if verify fails; true if ok.
  */
 function verifyXmlSignatureSoft(
@@ -192,22 +193,154 @@ function verifyXmlSignatureSoft(
   certPem: string
 ): boolean | null {
   const sigVal = xml.match(
-    /<ds:SignatureValue[^>]*>([^<]+)<\/ds:SignatureValue>/i
+    /<(?:ds:)?SignatureValue[^>]*>([^<]+)<\/(?:ds:)?SignatureValue>/i
   )?.[1]
   const signedInfo = xml.match(
-    /(<ds:SignedInfo[\s\S]*?<\/ds:SignedInfo>)/i
+    /(<(?:ds:)?SignedInfo[\s\S]*?<\/(?:ds:)?SignedInfo>)/i
   )?.[1]
   if (!sigVal || !signedInfo) return null
-  try {
-    const verifier = createVerify("RSA-SHA256")
-    // C14N approximate: use raw SignedInfo (many IdPs still verify with exclusive C14N — soft)
-    verifier.update(signedInfo)
-    verifier.end()
-    const sig = Buffer.from(sigVal.replace(/\s+/g, ""), "base64")
-    return verifier.verify(certPem, sig)
-  } catch {
-    return false
+  const sig = Buffer.from(sigVal.replace(/\s+/g, ""), "base64")
+  const candidates = [
+    exclusiveC14nSignedInfo(signedInfo, xml),
+    stripXmlnsNoise(signedInfo),
+    signedInfo
+  ]
+  const algos = ["RSA-SHA256", "RSA-SHA1", "sha256", "sha1"] as const
+  for (const payload of candidates) {
+    if (!payload) continue
+    for (const algo of algos) {
+      try {
+        const verifier = createVerify(algo)
+        verifier.update(payload)
+        verifier.end()
+        if (verifier.verify(certPem, sig)) return true
+      } catch {
+        /* try next */
+      }
+    }
   }
+  return false
+}
+
+/**
+ * Exclusive C14N (approximation) for SignedInfo — covers common IdP layouts.
+ * - Collect InclusiveNamespaces PrefixList from CanonicalizationMethod
+ * - Declare needed xmlns on SignedInfo root
+ * - Sort attributes, collapse whitespace between tags
+ */
+function exclusiveC14nSignedInfo(signedInfo: string, fullXml: string): string {
+  try {
+    const prefixList =
+      signedInfo.match(
+        /InclusiveNamespaces[^>]*PrefixList="([^"]*)"/i
+      )?.[1] ||
+      fullXml.match(
+        /InclusiveNamespaces[^>]*PrefixList="([^"]*)"/i
+      )?.[1] ||
+      ""
+    const prefixes = prefixList
+      .split(/\s+/)
+      .map((p) => p.trim())
+      .filter(Boolean)
+
+    // Map prefix → namespace URI from full document (and SignedInfo)
+    const nsMap = new Map<string, string>()
+    const nsRe = /xmlns:([A-Za-z_][\w.-]*)\s*=\s*"([^"]+)"/g
+    let m: RegExpExecArray | null
+    const search = fullXml + "\n" + signedInfo
+    while ((m = nsRe.exec(search)) !== null) {
+      if (!nsMap.has(m[1]!)) nsMap.set(m[1]!, m[2]!)
+    }
+    // default ds namespace often present
+    if (!nsMap.has("ds")) {
+      nsMap.set("ds", "http://www.w3.org/2000/09/xmldsig#")
+    }
+    if (!nsMap.has("saml") && /saml:/i.test(signedInfo)) {
+      nsMap.set("saml", "urn:oasis:names:tc:SAML:2.0:assertion")
+    }
+    if (!nsMap.has("samlp") && /samlp:/i.test(signedInfo)) {
+      nsMap.set("samlp", "urn:oasis:names:tc:SAML:2.0:protocol")
+    }
+
+    // Strip existing xmlns from SignedInfo (re-inject exclusive set)
+    let body = signedInfo
+      .replace(/\s+xmlns(?::[A-Za-z_][\w.-]*)?="[^"]*"/g, "")
+      .replace(/>\s+</g, "><")
+      .trim()
+
+    // Build xmlns attrs (lexicographic by attribute name for C14N)
+    const xmlnsAttrs: string[] = []
+    // default xmlns if element uses unprefixed ds-like names rarely
+    for (const p of prefixes.length ? prefixes : collectUsedPrefixes(body)) {
+      const uri = nsMap.get(p)
+      if (uri) xmlnsAttrs.push(`xmlns:${p}="${uri}"`)
+    }
+    // Always ensure ds is present on SignedInfo
+    if (!xmlnsAttrs.some((a) => a.startsWith("xmlns:ds=")) && nsMap.has("ds")) {
+      xmlnsAttrs.push(`xmlns:ds="${nsMap.get("ds")}"`)
+    }
+    xmlnsAttrs.sort()
+
+    body = body.replace(
+      /^<((?:ds:)?SignedInfo)(\s|>)/,
+      (_, name: string, end: string) => {
+        const attrs = xmlnsAttrs.length ? " " + xmlnsAttrs.join(" ") : ""
+        return end === ">"
+          ? `<${name}${attrs}>`
+          : `<${name}${attrs} `
+      }
+    )
+    // Sort attributes on each start-tag (simple pairs)
+    body = body.replace(/<([A-Za-z_][\w:.-]*)([^>]*)>/g, (all, name, attrs) => {
+      if (!attrs || !String(attrs).trim()) return all
+      if (String(attrs).endsWith("/")) {
+        // self-closing
+        const inner = String(attrs).slice(0, -1).trim()
+        const sorted = sortXmlAttributes(inner)
+        return `<${name}${sorted ? " " + sorted : ""}/>`
+      }
+      const sorted = sortXmlAttributes(String(attrs).trim())
+      return `<${name}${sorted ? " " + sorted : ""}>`
+    })
+    return body
+  } catch {
+    return signedInfo
+  }
+}
+
+function collectUsedPrefixes(xml: string): string[] {
+  const set = new Set<string>()
+  const re = /\b([A-Za-z_][\w.-]*):[A-Za-z_]/g
+  let m: RegExpExecArray | null
+  while ((m = re.exec(xml)) !== null) {
+    if (m[1] !== "xmlns") set.add(m[1]!)
+  }
+  return [...set]
+}
+
+function sortXmlAttributes(attrStr: string): string {
+  if (!attrStr.trim()) return ""
+  const attrs: string[] = []
+  const re = /([A-Za-z_][\w:.-]*)\s*=\s*("([^"]*)"|'([^']*)')/g
+  let m: RegExpExecArray | null
+  while ((m = re.exec(attrStr)) !== null) {
+    const val = m[3] !== undefined ? m[3] : m[4]
+    attrs.push(`${m[1]}="${val}"`)
+  }
+  attrs.sort((a, b) => {
+    // C14N: namespace decls first (xmlns), then other attrs by name
+    const an = a.split("=")[0]!
+    const bn = b.split("=")[0]!
+    const aNs = an === "xmlns" || an.startsWith("xmlns:")
+    const bNs = bn === "xmlns" || bn.startsWith("xmlns:")
+    if (aNs !== bNs) return aNs ? -1 : 1
+    return an < bn ? -1 : an > bn ? 1 : 0
+  })
+  return attrs.join(" ")
+}
+
+function stripXmlnsNoise(xml: string): string {
+  return xml.replace(/>\s+</g, "><").trim()
 }
 
 export function samlStatusPayload(cfg: SamlConfig | null) {

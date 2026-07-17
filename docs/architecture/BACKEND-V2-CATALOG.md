@@ -16,7 +16,7 @@
 | Bulk import CSV agents | ✅ | `POST /v1/org/agents/import-csv` |
 | Moving rules AND | ✅ | multi-conditions |
 | Moving rules OR / permanent | ✅ | `conditionLogic`, `permanent` |
-| Portal / billing Stripe | ◐ | `billing-stripe.ts` + checkout · portal UX V2.1 |
+| Portal / billing Stripe | ✅ | Checkout + portal + webhook sièges · UI console licence |
 | Backup config + DB | ✅ | `/org/backup`, `scripts/backup-db.ps1` |
 | Audit WORM | ✅ | SHA-256 chain + integrity API |
 | MSP multi-org | ✅ | portfolio + MFA switch |
@@ -91,18 +91,25 @@ agent_id,device_label,host_name,group,profile,license
 
 ---
 
-## 6. Stripe (V2.1 fondations)
+## 6. Stripe (portal personnel)
 
 ```
 OPSGATE_STRIPE_SECRET_KEY=sk_…
 OPSGATE_STRIPE_PUBLISHABLE_KEY=pk_…
 OPSGATE_STRIPE_PRICE_SEAT=price_…
+OPSGATE_STRIPE_WEBHOOK_SECRET=whsec_…
 OPSGATE_CONSOLE_URL=https://…
 ```
 
-- `GET /v1/billing/status`
-- `POST /v1/billing/checkout` `{ quantity }` → URL Checkout  
-- **Manque pour GA** : webhook `checkout.session.completed` → update seats, UI portal personnel
+| Endpoint | Rôle |
+|----------|------|
+| `GET /v1/billing/status` | Public + enrichi si session console |
+| `POST /v1/billing/checkout` | `{ quantity }` → Checkout Session (principal) |
+| `POST /v1/billing/portal` | Customer Portal (après 1er checkout) |
+| `POST /v1/billing/webhook` | Signature Stripe → sièges + `monitoring.stripeBilling` |
+
+UI console : **Paramètres → Gestion des licences** (bloc Abonnement Stripe).  
+Events Dashboard à brancher : `checkout.session.completed`, `customer.subscription.*`.
 
 ---
 

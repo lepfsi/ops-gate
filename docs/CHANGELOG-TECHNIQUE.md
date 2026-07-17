@@ -348,9 +348,20 @@ Consolidation produit : la plupart des epics V2.0 sont **dans le monorepo**. Mat
 | Docs statut | STATUS-V2, RELEASE-v2, BACKLOG, catalogue backend | `docs/STATUS-V2.md` etc. |
 | Docs déploiement | Install control plane + extension MDM + proxy | `DEPLOIEMENT-CLIENT*.md/.pdf` |
 
-**Reste avant annonce « V2.0 GA »** : publication store réelle, pilote client checklist, billing Stripe portal, C14N SAML stricte, option OCR `fra`.
+**Reste avant annonce « V2.0 GA »** : publication store réelle, pilote client checklist, clés Stripe prod + webhook Dashboard, validation SAML IdP clients, soft-delete GDPR.
 
 Détail vivant : `docs/STATUS-V2.md` · `docs/V2-BACKLOG.md` · `docs/architecture/BACKEND-V2-CATALOG.md`.
+
+## 23. Portal personnel Stripe + SAML C14N + OCR fr (17 juillet 2026)
+
+| Sujet | Détail | Fichiers |
+|-------|--------|---------|
+| Checkout + portal | Session Checkout + Customer Portal | `billing-stripe.ts`, `POST /billing/checkout\|portal` |
+| Webhook sièges | HMAC `Stripe-Signature` → `setOrgLicenseSeats` + `stripeBilling` | `POST /billing/webhook` |
+| UI console | Bloc abonnement sous Paramètres → Licences | `App.tsx`, `api.ts`, `i18n.ts` |
+| SAML sig | Exclusive C14N approx + multi-algo RSA-SHA256/SHA1 | `saml.ts` |
+| OCR | `eng+fra` si `navigator.language` fr | `ocr-bitmap.ts` |
+| Smoke | `node scripts/test-billing-stripe.mjs` | |
 
 ---
 

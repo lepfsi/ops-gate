@@ -373,6 +373,19 @@ const fr: Dict = {
   "lic.key": "Licence (identifiant)",
   "lic.expires": "Expiration",
   "lic.seats": "Sièges total achetés",
+  "lic.billingTitle": "Abonnement en ligne (Stripe)",
+  "lic.billingHint":
+    "Achetez ou ajustez des sièges via Checkout, puis gérez l’abonnement dans le portail Stripe (CB, factures, résiliation).",
+  "lic.billingOff":
+    "Billing non configuré sur l’API (OPSGATE_STRIPE_SECRET_KEY + PRICE_SEAT). Vous pouvez toujours coller une clé OPS-… fournie par DailyOps.",
+  "lic.billingStatus": "Statut abonnement",
+  "lic.billingQty": "Nombre de sièges",
+  "lic.billingCheckout": "Payer / souscrire (Checkout)",
+  "lic.billingPortal": "Gérer mon abonnement",
+  "lic.billingPortalNeedCheckout":
+    "Disponible après un premier Checkout (client Stripe créé)",
+  "lic.billingSuccess": "Paiement Stripe terminé — sièges mis à jour sous peu",
+  "lic.billingCancel": "Checkout Stripe annulé",
   "lic.add": "Ajouter une licence",
   "lic.revoke": "Supprimer la licence",
   "lic.revoked": "Licence supprimée · retour essai",
@@ -1037,6 +1050,19 @@ const en: Dict = {
   "lic.key": "License (id)",
   "lic.expires": "Expiration",
   "lic.seats": "Total seats purchased",
+  "lic.billingTitle": "Online subscription (Stripe)",
+  "lic.billingHint":
+    "Buy or adjust seats via Checkout, then manage the subscription in the Stripe portal (card, invoices, cancel).",
+  "lic.billingOff":
+    "Billing not configured on the API (OPSGATE_STRIPE_SECRET_KEY + PRICE_SEAT). You can still paste an OPS-… key from DailyOps.",
+  "lic.billingStatus": "Subscription status",
+  "lic.billingQty": "Seat quantity",
+  "lic.billingCheckout": "Pay / subscribe (Checkout)",
+  "lic.billingPortal": "Manage my subscription",
+  "lic.billingPortalNeedCheckout":
+    "Available after the first Checkout (Stripe customer created)",
+  "lic.billingSuccess": "Stripe payment done — seats will update shortly",
+  "lic.billingCancel": "Stripe Checkout cancelled",
   "lic.add": "Add license",
   "lic.revoke": "Remove license",
   "lic.revoked": "License removed · back to trial",

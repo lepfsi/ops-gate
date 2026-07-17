@@ -26,13 +26,25 @@ export type OcrBitmapResult =
 let workerPromise: Promise<any> | null = null
 let workerFailed = false
 
+/** Langues OCR : eng par défaut ; +fra si navigateur fr (télécharge le pack Tesseract). */
+function ocrLangs(): string {
+  try {
+    const nav =
+      typeof navigator !== "undefined" ? navigator.language || "" : ""
+    if (/^fr\b/i.test(nav)) return "eng+fra"
+  } catch {
+    /* ignore */
+  }
+  return "eng"
+}
+
 async function getWorker() {
   if (workerFailed) throw new Error("ocr_worker_unavailable")
   if (!workerPromise) {
     workerPromise = (async () => {
       const { createWorker } = await import("tesseract.js")
-      // eng : pack léger (chiffres cartes, IBAN, secrets en clair)
-      const worker = await createWorker("eng", 1, {})
+      // eng : pack léger ; eng+fra si UI fr (IBAN / secrets en contexte FR)
+      const worker = await createWorker(ocrLangs(), 1, {})
       return worker
     })().catch((e) => {
       workerFailed = true

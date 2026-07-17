@@ -2712,6 +2712,10 @@ export function createApp() {
     if (body.licenseDisplay) {
       delete body.licenseDisplay
     }
+    // Billing Stripe: uniquement via webhook / checkout (pas PATCH client)
+    if ((body as { stripeBilling?: unknown }).stripeBilling) {
+      delete (body as { stripeBilling?: unknown }).stripeBilling
+    }
     const updated = await store.updateOrgMonitoring(org.id, body)
     await store.appendAdminAudit({
       orgId: org.id,
@@ -3755,9 +3759,22 @@ export function createApp() {
     return { ok: true }
   }
 
-  // ── Billing Stripe (V2.1 fondations) ─────────────────────────
+  // ── Billing Stripe (portal personnel / sièges) ───────────────
   v1.get("/billing/status", async (c) => {
     const { billingPublicStatus } = await import("./billing-stripe")
+    const { mergeMonitoringSettings } = await import("./types")
+    // Auth optionnelle : enrichit avec snapshot org si session console
+    const gate = await requireConsoleAuth(c, "console_access")
+    if (gate.ok) {
+      const org = await store.getOrg(gate.orgId)
+      const mon = mergeMonitoringSettings(org?.monitoring)
+      return c.json({
+        ...billingPublicStatus(mon.stripeBilling),
+        org_id: org?.id || null,
+        org_seats: org?.licenseSeats ?? 0,
+        is_personal: !!org?.isPersonal
+      })
+    }
     return c.json(billingPublicStatus())
   })
 
@@ -3775,12 +3792,15 @@ export function createApp() {
     } catch {
       body = {}
     }
+    const { mergeMonitoringSettings } = await import("./types")
+    const mon = mergeMonitoringSettings(org.monitoring)
     const { createCheckoutSession } = await import("./billing-stripe")
     const r = await createCheckoutSession({
       orgId: org.id,
       orgCode: org.orgCode || org.id,
       customerEmail: gate.admin.email,
-      quantity: body.quantity ?? 1
+      customerId: mon.stripeBilling?.customerId,
+      quantity: body.quantity ?? Math.max(1, org.licenseSeats || 1)
     })
     if (!r.ok) return c.json({ error: r.error }, 503)
     await store.appendAdminAudit({
@@ -3789,9 +3809,129 @@ export function createApp() {
       adminEmail: gate.admin.email,
       adminLabel: gate.admin.label,
       action: "org_settings_update",
-      detail: `Stripe checkout session ${r.session_id}`
+      detail: `Stripe checkout session ${r.session_id} qty=${body.quantity ?? 1}`
     })
     return c.json({ ok: true, url: r.url, session_id: r.session_id })
+  })
+
+  /** Customer Portal Stripe — gérer abonnement / CB */
+  v1.post("/billing/portal", async (c) => {
+    const gate = await requireConsoleAuth(c, "console_access")
+    if (!gate.ok) return c.json({ error: gate.error }, gate.status)
+    if (!gate.admin.isPrincipal) {
+      return c.json({ error: "principal_only" }, 403)
+    }
+    const org = await store.getOrg(gate.orgId)
+    if (!org) return c.json({ error: "no_org" }, 404)
+    const { mergeMonitoringSettings } = await import("./types")
+    const mon = mergeMonitoringSettings(org.monitoring)
+    const customerId = mon.stripeBilling?.customerId
+    if (!customerId) {
+      return c.json(
+        {
+          error: "no_stripe_customer",
+          hint: "Passez d'abord par Checkout pour créer le client Stripe"
+        },
+        400
+      )
+    }
+    const { createBillingPortalSession } = await import("./billing-stripe")
+    const r = await createBillingPortalSession({ customerId })
+    if (!r.ok) return c.json({ error: r.error }, 503)
+    await store.appendAdminAudit({
+      orgId: org.id,
+      adminId: gate.admin.id,
+      adminEmail: gate.admin.email,
+      adminLabel: gate.admin.label,
+      action: "org_settings_update",
+      detail: "Stripe customer portal session opened"
+    })
+    return c.json({ ok: true, url: r.url })
+  })
+
+  /**
+   * Webhook Stripe (raw body + signature).
+   * Config Dashboard : checkout.session.completed, customer.subscription.*
+   */
+  v1.post("/billing/webhook", async (c) => {
+    const {
+      getStripeConfig,
+      verifyStripeWebhookSignature,
+      interpretStripeEvent,
+      mergeStripeBilling
+    } = await import("./billing-stripe")
+    const { mergeMonitoringSettings } = await import("./types")
+    const cfg = getStripeConfig()
+    if (!cfg?.webhookSecret) {
+      return c.json({ error: "webhook_not_configured" }, 503)
+    }
+    const rawBody = await c.req.text()
+    const sig = c.req.header("stripe-signature") || undefined
+    if (!verifyStripeWebhookSignature(rawBody, sig, cfg.webhookSecret)) {
+      return c.json({ error: "invalid_signature" }, 400)
+    }
+    let event: Record<string, unknown>
+    try {
+      event = JSON.parse(rawBody) as Record<string, unknown>
+    } catch {
+      return c.json({ error: "invalid_json" }, 400)
+    }
+    const applied = interpretStripeEvent(event)
+    if (!applied.ok) {
+      if (applied.skip) {
+        return c.json({ ok: true, skipped: true, reason: applied.error })
+      }
+      return c.json({ error: applied.error }, 400)
+    }
+    const org = await store.getOrg(applied.orgId)
+    if (!org) {
+      console.warn(
+        `[billing] webhook org_not_found id=${applied.orgId} action=${applied.action}`
+      )
+      return c.json({ ok: true, warning: "org_not_found" })
+    }
+    const prevMon = mergeMonitoringSettings(org.monitoring)
+    const nextBilling = mergeStripeBilling(
+      prevMon.stripeBilling,
+      applied.billing
+    )
+    await store.setOrgLicenseSeats(org.id, applied.seats)
+    const lic = prevMon.licenseDisplay || {
+      companyName: "",
+      address: "",
+      contactEmail: "",
+      mode: "trial" as const
+    }
+    // Sièges Stripe : mode full opérationnel si abo actif
+    const active =
+      nextBilling.subscriptionStatus === "active" ||
+      nextBilling.subscriptionStatus === "trialing"
+    await store.updateOrgMonitoring(org.id, {
+      stripeBilling: nextBilling,
+      licenseDisplay: {
+        ...lic,
+        mode: active || applied.seats > 0 ? "full" : lic.mode || "trial",
+        seats: applied.seats,
+        companyName: lic.companyName || org.name,
+        contactEmail: lic.contactEmail || org.primaryEmail || "",
+        activatedAt: lic.activatedAt || new Date().toISOString(),
+        licenseKeyFingerprint:
+          lic.licenseKeyFingerprint ||
+          `stripe:${(nextBilling.subscriptionId || "sub").slice(0, 12)}`
+      }
+    })
+    await store.appendAdminAudit({
+      orgId: org.id,
+      adminId: "stripe-webhook",
+      adminEmail: "stripe@webhook",
+      adminLabel: "Stripe",
+      action: "org_settings_update",
+      detail: `Stripe ${applied.action} → seats=${applied.seats} status=${nextBilling.subscriptionStatus}`
+    })
+    console.log(
+      `[billing] ${applied.action} org=${org.orgCode || org.id} seats=${applied.seats}`
+    )
+    return c.json({ ok: true, org_id: org.id, seats: applied.seats })
   })
 
   /** Santé émission (scripts ops) — secret jamais renvoyé */

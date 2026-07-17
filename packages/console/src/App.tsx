@@ -3114,6 +3114,11 @@ function SystemSettingsView({
   const [licenseKeyInput, setLicenseKeyInput] = useState("")
   const [licMode, setLicMode] = useState<"trial" | "full">("trial")
   const [licDaysLeft, setLicDaysLeft] = useState<number | null>(null)
+  const [billingEnabled, setBillingEnabled] = useState(false)
+  const [billingPortalOk, setBillingPortalOk] = useState(false)
+  const [billingSubStatus, setBillingSubStatus] = useState<string | null>(null)
+  const [billingQty, setBillingQty] = useState(5)
+  const [billingNote, setBillingNote] = useState("")
   const [onlineMin, setOnlineMin] = useState(15)
   const [offlineMin, setOfflineMin] = useState(120)
   const [schedOn, setSchedOn] = useState(false)
@@ -3411,8 +3416,37 @@ function SystemSettingsView({
       } catch {
         /* ignore */
       }
+      try {
+        const b = await api.billingStatus()
+        setBillingEnabled(!!b.enabled && !!b.price_seat_configured)
+        setBillingPortalOk(!!b.portal_available)
+        setBillingSubStatus(b.subscription_status || null)
+        if (
+          typeof b.subscription_quantity === "number" &&
+          b.subscription_quantity > 0
+        ) {
+          setBillingQty(b.subscription_quantity)
+        } else if (typeof b.org_seats === "number" && b.org_seats > 0) {
+          setBillingQty(b.org_seats)
+        }
+        setBillingNote(b.note || "")
+        // Retour Stripe Checkout
+        try {
+          const q = new URLSearchParams(window.location.search)
+          const bill = q.get("billing")
+          if (bill === "success") {
+            setInfo(t("lic.billingSuccess") || "Paiement Stripe enregistré")
+          } else if (bill === "cancel") {
+            setInfo(t("lic.billingCancel") || "Checkout Stripe annulé")
+          }
+        } catch {
+          /* ignore */
+        }
+      } catch {
+        setBillingEnabled(false)
+      }
     })()
-  }, [setError, orgName, primaryEmail])
+  }, [setError, orgName, primaryEmail, t, setInfo])
 
   const dayLabels: [number, string][] = [
     [1, "Lun"],
@@ -4307,6 +4341,109 @@ function SystemSettingsView({
                 </div>
               </div>
             )}
+
+            {/* Portal personnel / billing Stripe */}
+            <div
+              className="form-stack"
+              style={{
+                marginTop: 12,
+                padding: 12,
+                border: "1px solid var(--line)",
+                borderRadius: 4,
+                background: "var(--surface-2)"
+              }}>
+              <h4 style={{ margin: "0 0 4px", fontSize: 14 }}>
+                {t("lic.billingTitle")}
+              </h4>
+              <p className="muted" style={{ fontSize: 12, margin: 0 }}>
+                {billingEnabled
+                  ? t("lic.billingHint")
+                  : t("lic.billingOff")}
+              </p>
+              {billingSubStatus && (
+                <p style={{ fontSize: 13, margin: "6px 0 0" }}>
+                  {t("lic.billingStatus")}:{" "}
+                  <strong className="mono">{billingSubStatus}</strong>
+                </p>
+              )}
+              {billingEnabled && (
+                <>
+                  <label className="field-label" style={{ marginTop: 8 }}>
+                    {t("lic.billingQty")}
+                  </label>
+                  <input
+                    className="input"
+                    type="number"
+                    min={1}
+                    max={500}
+                    value={billingQty}
+                    onChange={(e) =>
+                      setBillingQty(
+                        Math.min(500, Math.max(1, Number(e.target.value) || 1))
+                      )
+                    }
+                    style={{ maxWidth: 120 }}
+                  />
+                  <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+                    <button
+                      type="button"
+                      className="btn"
+                      disabled={busy}
+                      onClick={async () => {
+                        setBusy(true)
+                        setError(null)
+                        try {
+                          const r = await api.billingCheckout(billingQty)
+                          if (r.url) {
+                            window.location.href = r.url
+                            return
+                          }
+                          setError("billing_no_url")
+                        } catch (e) {
+                          setError(String(e))
+                        } finally {
+                          setBusy(false)
+                        }
+                      }}>
+                      {t("lic.billingCheckout")}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn secondary"
+                      disabled={busy || !billingPortalOk}
+                      title={
+                        billingPortalOk
+                          ? undefined
+                          : t("lic.billingPortalNeedCheckout")
+                      }
+                      onClick={async () => {
+                        setBusy(true)
+                        setError(null)
+                        try {
+                          const r = await api.billingPortal()
+                          if (r.url) {
+                            window.location.href = r.url
+                            return
+                          }
+                          setError("billing_no_url")
+                        } catch (e) {
+                          setError(String(e))
+                        } finally {
+                          setBusy(false)
+                        }
+                      }}>
+                      {t("lic.billingPortal")}
+                    </button>
+                  </div>
+                </>
+              )}
+              {!billingEnabled && billingNote && (
+                <p className="muted" style={{ fontSize: 11, marginTop: 6 }}>
+                  {billingNote}
+                </p>
+              )}
+            </div>
+
             {!addLicOpen ? (
               <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
                 <button
