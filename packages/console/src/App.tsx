@@ -477,7 +477,7 @@ export default function App() {
       return { tab, dashSection }
     }
     if (tab === "settings") {
-      // settingsTab vit dans SettingsView — on lit le hash ou general
+      // settingsTab vit dans SettingsView - on lit le hash ou general
       const h = parseConsoleHash(window.location.hash)
       return {
         tab,
@@ -1705,7 +1705,7 @@ function SessionTakeoverModal({
         <h2 style={{ marginTop: 0 }}>{t("login.takeoverTitle")}</h2>
         <p style={{ fontSize: 13, lineHeight: 1.45 }}>
           {t("login.takeoverHint", {
-            hint: challenge.requester_hint || "—",
+            hint: challenge.requester_hint || "-",
             n: left
           })}
         </p>
@@ -2262,7 +2262,7 @@ function SummaryView({
                         disabled={busy || offline}
                         title={
                           offline
-                            ? "Offline — force sync unavailable"
+                            ? "Offline - force sync unavailable"
                             : "Force resync policy/pack"
                         }
                         onClick={() =>
@@ -2327,7 +2327,7 @@ function SummaryView({
         </div>
       )}
 
-      {/* Panneaux contextuels — masqués en mode étendu (graphiques seuls) */}
+      {/* Panneaux contextuels - masqués en mode étendu (graphiques seuls) */}
       {!dashExpanded && <div id="dash-panel">
       {panel === "online" && (
         <div className="card dash-context-panel">
@@ -2457,7 +2457,7 @@ function SummaryView({
                       <td>
                         <strong>
                           {(e.device_label || "")
-                            .replace(/^OpsGate\s+Proxy\s*[-:–—]?\s*/i, "")
+                            .replace(/^OpsGate\s+Proxy\s*[-:--]?\s*/i, "")
                             .trim() || " - "}
                         </strong>
                       </td>
@@ -3167,7 +3167,7 @@ function DateTimePrefsPanel({
         <p className="muted" style={{ fontSize: 12, margin: "4px 0 0" }}>
           {t("dt.preview")}:{" "}
           <span className="mono" style={{ fontWeight: 500 }}>
-            {/* Aperçu discret du format choisi — pas une horloge « widget » */}
+            {/* Aperçu discret du format choisi - pas une horloge « widget » */}
             <LiveClock />
           </span>
         </p>
@@ -3491,7 +3491,7 @@ function SystemSettingsView({
           setSmtpTlsInsecure(!!sm.tlsInsecure)
           setSmtpPwdSet(!!sm.password_set)
         }
-        // SMTP : pas de mailStatus ici (lent) — chargé à l'onglet mail
+        // SMTP : pas de mailStatus ici (lent) - chargé à l'onglet mail
         const ld = m.ldap
         if (ld) {
           setLdapOn(!!ld.enabled)
@@ -3996,7 +3996,7 @@ function SystemSettingsView({
                           t("gdpr.deletedOk") ||
                           "Organisation marquée pour suppression"
                       )
-                      // Session bientôt invalide — inviter à recharger
+                      // Session bientôt invalide - inviter à recharger
                       setTimeout(() => {
                         window.location.hash = "#/settings/general"
                         window.location.reload()
@@ -4223,7 +4223,7 @@ function SystemSettingsView({
                     const r = await api.orgBackupImport(json)
                     setInfo(
                       t("backup.imported", {
-                        list: (r.applied || []).join(", ") || "—"
+                        list: (r.applied || []).join(", ") || "-"
                       })
                     )
                   } catch (err) {
@@ -5673,7 +5673,7 @@ function SystemSettingsView({
                     setSmtpPwdSet(!!r.smtp.password_set)
                     setSmtpStatusLine(
                       r.status.configured
-                        ? `${t("mail.configured")} · ${r.status.host || ""} · ${smtpFrom.trim() || "—"}`
+                        ? `${t("mail.configured")} · ${r.status.host || ""} · ${smtpFrom.trim() || "-"}`
                         : t("mail.notConfigured")
                     )
                     setInfo(t("mail.save") + " OK")
@@ -5700,7 +5700,7 @@ function SystemSettingsView({
                       )
                     } else {
                       setInfo(
-                        `${t("mail.test")} OK (${r.verify.source || "—"})`
+                        `${t("mail.test")} OK (${r.verify.source || "-"})`
                       )
                     }
                   } catch (e) {
@@ -6238,7 +6238,7 @@ function SupportView({
                                   setInfo(
                                     m.admin_reply
                                       ? "Fil fermé"
-                                      : "Fil fermé — l’utilisateur sera notifié (popup)"
+                                      : "Fil fermé - l’utilisateur sera notifié (popup)"
                                   )
                                   await load()
                                 } catch (e) {
@@ -6656,7 +6656,7 @@ function LoginScreen({
                   className="input"
                   value={selectedOrgId}
                   onChange={(e) => setSelectedOrgId(e.target.value)}>
-                  <option value="">— Choisir —</option>
+                  <option value="">- Choisir -</option>
                   {orgChoices.map((o) => (
                     <option key={o.org_id} value={o.org_id}>
                       {o.name} ({o.org_code})
@@ -6973,7 +6973,7 @@ function LoginScreen({
                   {devOtp ? (
                     <>
                       {" "}
-                      — lab uniquement : <code>{devOtp}</code>
+                      - lab uniquement : <code>{devOtp}</code>
                     </>
                   ) : (
                     " (vérifiez votre boîte de réception / spam)."
@@ -8661,7 +8661,7 @@ function PeopleView({
               className="input"
               value={grpProfile}
               onChange={(e) => setGrpProfile(e.target.value)}>
-              <option value="">—</option>
+              <option value="">-</option>
               {profiles.map((p) => (
                 <option key={p.id} value={p.id}>
                   {p.name}
@@ -8841,7 +8841,7 @@ function PeopleView({
       {(isPrincipal ||
         sessionAdmin.permissions?.includes("email_password_reset")) && (
           <div className="card">
-            <h2>OTP — mon compte</h2>
+            <h2>OTP - mon compte</h2>
             <p className="muted" style={{ fontSize: 13 }}>
               Réinitialisation de <strong>votre</strong> mot de passe par e-mail
               (compte connecté). SMTP : Paramètres → E-mail / SMTP.
@@ -9735,7 +9735,7 @@ function AgentsView({
                   Profil{sortMark("profile")}
                 </th>
                 <th
-                  title="Congé / panne / hors site — hors alertes offline long"
+                  title="Congé / panne / hors site - hors alertes offline long"
                   style={{ width: 120, minWidth: 100 }}>
                   Maint.
                 </th>
@@ -9859,7 +9859,7 @@ function AgentsView({
                       className="input"
                       disabled={busy}
                       value={a.maintenance_mode || ""}
-                      title="Mode maintenance — exclut des alertes hors-ligne prolongé"
+                      title="Mode maintenance - exclut des alertes hors-ligne prolongé"
                       onChange={async (e) => {
                         const v = e.target.value
                         const mode =
@@ -9893,7 +9893,7 @@ function AgentsView({
                   <td className="cell-narrow muted" style={{ fontSize: 11 }}>
                     {a.enrolled_at
                       ? new Date(a.enrolled_at).toLocaleString("fr-FR")
-                      : "—"}
+                      : "-"}
                   </td>
                   <td className="cell-actions">
                     <div className="btn-group">
@@ -10061,7 +10061,7 @@ function eventDetailSummary(e: {
   if (e.file_names?.length) {
     parts.push(e.file_names.slice(0, 2).join(", "))
   }
-  return parts.filter(Boolean).join(" · ") || "—"
+  return parts.filter(Boolean).join(" · ") || "-"
 }
 
 function downloadTextFile(filename: string, content: string, mime: string) {
@@ -10116,7 +10116,7 @@ function PagerBar({
   return (
     <div className="pager-bar">
       <span>
-        {total === 0 ? "0 entrée" : `${from}–${to} / ${total}`}
+        {total === 0 ? "0 entrée" : `${from}-${to} / ${total}`}
       </span>
       <div className="row">
         <PageSizeSelect
@@ -10582,7 +10582,7 @@ function EventsView({
                       <td>
                         <strong>
                           {(e.device_label || "")
-                            .replace(/^OpsGate\s+Proxy\s*[-:–—]?\s*/i, "")
+                            .replace(/^OpsGate\s+Proxy\s*[-:--]?\s*/i, "")
                             .trim() || " - "}
                         </strong>
                         {e.source === "proxy" ? (
@@ -10861,11 +10861,19 @@ function MspPortfolioView({
   return (
     <div className="msp-portfolio">
       <div className="card" style={{ marginBottom: 14 }}>
-        <h2 style={{ marginTop: 0 }}>{t("msp.portfolio")}</h2>
-        <p className="muted" style={{ fontSize: 13, maxWidth: 640 }}>
-          {t("msp.portfolioHint")}
-        </p>
-        <div className="msp-totals">
+        <div
+          className="row"
+          style={{ justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+          <h2 style={{ margin: 0 }}>{t("msp.portfolio")}</h2>
+          <button
+            type="button"
+            className="btn secondary btn-sm"
+            disabled={busy}
+            onClick={() => void load()}>
+            {t("top.refresh")}
+          </button>
+        </div>
+        <div className="msp-totals" style={{ marginTop: 14 }}>
           <div className="msp-stat">
             <span className="muted">{t("msp.statOrgs")}</span>
             <strong>{data.org_count}</strong>
@@ -10879,7 +10887,7 @@ function MspPortfolioView({
           <div className="msp-stat">
             <span className="muted">{t("msp.statSeats")}</span>
             <strong>
-              {totals.seats_used}/{totals.seats || "—"}
+              {totals.seats_used}/{totals.seats || "-"}
             </strong>
           </div>
           <div className="msp-stat">
@@ -10895,65 +10903,93 @@ function MspPortfolioView({
             </strong>
           </div>
         </div>
-        <button
-          type="button"
-          className="btn secondary btn-sm"
-          disabled={busy}
-          onClick={() => void load()}>
-          {t("top.refresh")}
-        </button>
       </div>
       <div className="msp-grid">
-        {data.orgs.map((o) => (
-          <div
-            key={o.org_id}
-            className={`card msp-org-card${o.current ? " msp-org-card--current" : ""}`}>
-            <div className="row" style={{ justifyContent: "space-between", gap: 8 }}>
-              <div>
-                <strong>{o.name}</strong>
-                <div className="mono muted" style={{ fontSize: 12 }}>
-                  {o.org_code}
+        {data.orgs.map((o) => {
+          const offline = (o as { offline_long?: number }).offline_long ?? 0
+          const days = o.license_days_left
+          const seatsPct =
+            typeof o.seats === "number" && o.seats > 0
+              ? Math.round(((o.seats_used || 0) / o.seats) * 100)
+              : null
+          return (
+            <div
+              key={o.org_id}
+              className={`card msp-org-card${o.current ? " msp-org-card--current" : ""}`}>
+              <div
+                className="row"
+                style={{ justifyContent: "space-between", gap: 8, marginBottom: 10 }}>
+                <div style={{ minWidth: 0 }}>
+                  <strong style={{ fontSize: 15 }}>{o.name}</strong>
+                  <div className="mono muted" style={{ fontSize: 11, marginTop: 2 }}>
+                    {o.org_code}
+                  </div>
+                </div>
+                {o.current ? (
+                  <span className="lic-status ok">{t("msp.current")}</span>
+                ) : null}
+              </div>
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "1fr 1fr",
+                  gap: 10,
+                  fontSize: 13
+                }}>
+                <div>
+                  <div className="muted" style={{ fontSize: 11 }}>
+                    {t("msp.agentsOnline")}
+                  </div>
+                  <strong>
+                    {o.online}/{o.agents}
+                  </strong>
+                  {offline > 0 ? (
+                    <div className="muted" style={{ fontSize: 11 }}>
+                      {offline} offline long
+                    </div>
+                  ) : null}
+                </div>
+                <div>
+                  <div className="muted" style={{ fontSize: 11 }}>
+                    {t("msp.seats")}
+                  </div>
+                  <strong>
+                    {o.seats_used}/{o.seats || "-"}
+                  </strong>
+                  {seatsPct != null ? (
+                    <div className="muted" style={{ fontSize: 11 }}>
+                      {seatsPct}%
+                    </div>
+                  ) : null}
+                </div>
+                <div style={{ gridColumn: "1 / -1" }}>
+                  <div className="muted" style={{ fontSize: 11 }}>
+                    {t("msp.license")}
+                  </div>
+                  <strong>
+                    {o.license_mode}
+                    {days != null ? ` · ${days} j` : ""}
+                  </strong>
+                  {days != null && days <= 30 ? (
+                    <div style={{ color: "var(--warn, #b45309)", fontSize: 11, fontWeight: 650 }}>
+                      Expire bientôt
+                    </div>
+                  ) : null}
                 </div>
               </div>
-              {o.current ? (
-                <span className="lic-status ok">{t("msp.current")}</span>
-              ) : null}
+              {!o.current && (
+                <button
+                  type="button"
+                  className="btn btn-sm"
+                  style={{ width: "100%", marginTop: 12 }}
+                  disabled={switchBusy}
+                  onClick={() => onSwitch(o.org_id)}>
+                  {t("msp.openTenant")}
+                </button>
+              )}
             </div>
-            <dl className="msp-org-meta">
-              <div>
-                <dt>{t("msp.agentsOnline")}</dt>
-                <dd>
-                  {o.online}/{o.agents}
-                </dd>
-              </div>
-              <div>
-                <dt>{t("msp.seats")}</dt>
-                <dd>
-                  {o.seats_used}/{o.seats || "—"}
-                </dd>
-              </div>
-              <div>
-                <dt>{t("msp.license")}</dt>
-                <dd>
-                  {o.license_mode}
-                  {o.license_days_left != null
-                    ? ` · ${o.license_days_left} j`
-                    : ""}
-                </dd>
-              </div>
-            </dl>
-            {!o.current && (
-              <button
-                type="button"
-                className="btn btn-sm"
-                style={{ width: "100%", marginTop: 8 }}
-                disabled={switchBusy}
-                onClick={() => onSwitch(o.org_id)}>
-                {t("msp.openTenant")}
-              </button>
-            )}
-          </div>
-        ))}
+          )
+        })}
       </div>
     </div>
   )
@@ -11308,7 +11344,7 @@ function AuditView({
                       {r.seq != null ? `#${r.seq} ` : ""}
                       {r.entry_hash
                         ? r.entry_hash.slice(0, 10) + "…"
-                        : "—"}
+                        : "-"}
                     </td>
                   </tr>
                 ))}
@@ -11707,8 +11743,8 @@ function MovingRulesView({
                 onChange={(e) =>
                   setCondLogic(e.target.value === "or" ? "or" : "and")
                 }>
-                <option value="and">AND — toutes les conditions</option>
-                <option value="or">OR — au moins une condition</option>
+                <option value="and">AND - toutes les conditions</option>
+                <option value="or">OR - au moins une condition</option>
               </select>
               <label className="field-label">Priorité (plus petit = d’abord)</label>
               <input
@@ -11738,7 +11774,7 @@ function MovingRulesView({
                     if (e.target.checked) setOnlyUnassigned(false)
                   }}
                 />
-                Permanent — s’applique même si l’agent a déjà un groupe
+                Permanent - s’applique même si l’agent a déjà un groupe
               </label>
               <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
                 <input

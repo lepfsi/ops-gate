@@ -1,8 +1,8 @@
-# OpsGate V2 — FAQ déploiement & composants
+# OpsGate V2 - FAQ déploiement & composants
 
-**Public** : intégrateur, DSI, pilote test, support  
-**Date** : 17 juillet 2026  
-**Statut** : aligné monorepo · **V2 functional / pre-GA** — voir [`STATUS-V2.md`](./STATUS-V2.md)  
+**Public** : intégrateur, DSI, pilote test, support 
+**Date** : 17 juillet 2026 
+**Statut** : aligné monorepo · **V2 functional / pre-GA** - voir [`STATUS-V2.md`](./STATUS-V2.md) 
 **Déploiement détaillé** : [`DEPLOIEMENT-CLIENT.md`](./DEPLOIEMENT-CLIENT.md)
 
 ---
@@ -18,7 +18,7 @@
 
 Le MSI **n’est pas un autre produit** : c’est le packaging Windows de `packages/proxy` (MITM multi-IA, soft-block / soft-mask, enroll vers l’API).
 
-- **Remplace** : ouvrir un PowerShell et lancer `pnpm proxy:dev` sur chaque PC.  
+- **Remplace** : ouvrir un PowerShell et lancer `pnpm proxy:dev` sur chaque PC. 
 - **Ne remplace pas** : l’API, la console, Postgres, ni l’extension navigateur.
 
 Install silencieux :
@@ -33,26 +33,26 @@ Après install : binaires sous `C:\Program Files\OpsGate\Proxy\`, data sous `%Pr
 
 ## 2. Licences et « signature du code » chez le client
 
-**Deux notions différentes — ne pas les confondre.**
+**Deux notions différentes - ne pas les confondre.**
 
 ### A. Licence produit (sièges / org)
 
-1. Le client **enrôle** extension et/ou proxy avec un **code organisation** (ex. `DEMO-OPSGATE` ou le code fourni).  
-2. L’agent joint **votre** tenant API (`POST /v1/enroll`).  
-3. La console assigne des **sièges** (`licenseSeats` / assignation agent).  
+1. Le client **enrôle** extension et/ou proxy avec un **code organisation** (ex. `DEMO-OPSGATE` ou le code fourni). 
+2. L’agent joint **votre** tenant API (`POST /v1/enroll`). 
+3. La console assigne des **sièges** (`licenseSeats` / assignation agent). 
 4. Sans siège (après grâce) → protection inactive côté agent.
 
-Ce n’est **pas** la signature Authenticode du MSI.  
+Ce n’est **pas** la signature Authenticode du MSI. 
 C’est : **code org + token agent + sièges** gérés par le control plane.
 
 ### B. Signature des packs de règles (ed25519)
 
-Les **rule packs** publiés par l’API portent un **checksum + signature** (ed25519).  
+Les **rule packs** publiés par l’API portent un **checksum + signature** (ed25519). 
 L’agent vérifie que le pack vient bien de **votre** control plane (anti-tamper des règles), pas le binaire MSI.
 
 ### C. Signature Windows / store (hors licence OpsGate)
 
-Signer le MSI (Authenticode) ou publier l’extension (CWS / AMO) sert à **la confiance OS / navigateur** (SmartScreen, force-install).  
+Signer le MSI (Authenticode) ou publier l’extension (CWS / AMO) sert à **la confiance OS / navigateur** (SmartScreen, force-install). 
 Cela n’active **pas** automatiquement les sièges : l’enrôlement org reste obligatoire.
 
 **En résumé** : chez le client, on reconnaît l’agent par **enroll (org_code + empreinte machine)** et la licence par **sièges org** ; le pack est signé par l’API ; le MSI signé rassure Windows, pas le moteur de licences.
@@ -61,17 +61,17 @@ Cela n’active **pas** automatiquement les sièges : l’enrôlement org reste 
 
 ## 3. Déployer pour un test aujourd’hui (graduel)
 
-Hypothèse : **un serveur de management** (votre PC ou un serveur lab) + **un poste utilisateur** de test.  
+Hypothèse : **un serveur de management** (votre PC ou un serveur lab) + **un poste utilisateur** de test. 
 Sur un seul PC de lab, tout peut cohabiter en `127.0.0.1`.
 
-### Phase 0 — Prérequis
+### Phase 0 - Prérequis
 
-- Windows 10/11, droits admin pour MSI / CA  
-- Node 20+ et pnpm **uniquement sur la machine qui build / héberge l’API**  
-- Docker Desktop (Postgres recommandé)  
-- Chrome ou Edge pour l’extension  
+- Windows 10/11, droits admin pour MSI / CA 
+- Node 20+ et pnpm **uniquement sur la machine qui build / héberge l’API** 
+- Docker Desktop (Postgres recommandé) 
+- Chrome ou Edge pour l’extension 
 
-### Phase 1 — Control plane (serveur de management)
+### Phase 1 - Control plane (serveur de management)
 
 ```powershell
 cd C:\Users\Utilisateur\ops-gate
@@ -81,7 +81,7 @@ pnpm install
 docker compose up -d
 $env:DATABASE_URL = "postgres://opsgate:opsgate@127.0.0.1:5432/opsgate"
 
-# Terminal A — API
+# Terminal A - API
 pnpm api:dev
 # Attendu : store=postgres · http://127.0.0.1:8787
 ```
@@ -94,15 +94,15 @@ curl http://127.0.0.1:8787/health
 ```
 
 ```powershell
-# Terminal B — Console
+# Terminal B - Console
 pnpm console:dev
 # → http://127.0.0.1:5173
-# Login démo : admin@demo.local / 0000  (changer en prod)
+# Login démo : admin@demo.local / 0000 (changer en prod)
 ```
 
 **Succès phase 1** : login console, dashboard, code org visible (ex. `DEMO-OPSGATE`).
 
-### Phase 2 — Extension (protection navigateur)
+### Phase 2 - Extension (protection navigateur)
 
 ```powershell
 # Sur la machine de build
@@ -113,13 +113,13 @@ pnpm build:chrome
 
 Dans l’extension **Options** :
 
-1. URL API = `http://127.0.0.1:8787` (ou IP du serveur de management, ex. `http://10.0.0.12:8787`)  
-2. Code org = celui de la console  
-3. Enrôler  
+1. URL API = `http://127.0.0.1:8787` (ou IP du serveur de management, ex. `http://10.0.0.12:8787`) 
+2. Code org = celui de la console 
+3. Enrôler 
 
 **Succès phase 2** : agent visible console ; prompt secret sur ChatGPT → bandeau mask/block.
 
-### Phase 3 — Proxy local (filet HTTPS) — lab monorepo
+### Phase 3 - Proxy local (filet HTTPS) - lab monorepo
 
 ```powershell
 # Terminal C (dev)
@@ -129,7 +129,7 @@ pnpm proxy:enroll
 pnpm proxy:dev
 ```
 
-### Phase 4 — Proxy MSI (comme le client final)
+### Phase 4 - Proxy MSI (comme le client final)
 
 ```powershell
 # Build une fois (machine de build)
@@ -147,9 +147,9 @@ Pointer l’API **avant/après** install si le management n’est pas en 127.0.0
 ```powershell
 # Exemple : variable machine (adapter selon post-install / service)
 [System.Environment]::SetEnvironmentVariable(
-  "OPSGATE_API_URL", "http://10.0.0.12:8787", "Machine")
+ "OPSGATE_API_URL", "http://10.0.0.12:8787", "Machine")
 [System.Environment]::SetEnvironmentVariable(
-  "OPSGATE_ORG_CODE", "DEMO-OPSGATE", "Machine")
+ "OPSGATE_ORG_CODE", "DEMO-OPSGATE", "Machine")
 # Relancer le service / tâche OpsGate Proxy
 ```
 
@@ -163,10 +163,10 @@ PAC (navigateur → proxy local seulement pour l’IA) :
 
 **Succès phase 4** : `opsgate-proxy.cmd status` OK ; health `http://127.0.0.1:8888/opsgate-proxy/health` ; events `source=proxy` en console.
 
-### Phase 5 — Soft-mask on-wire (option prod)
+### Phase 5 - Soft-mask on-wire (option prod)
 
 ```powershell
-$env:OPSGATE_PROXY_SOFT_MASK = "1"   # rewrite body masqué
+$env:OPSGATE_PROXY_SOFT_MASK = "1" # rewrite body masqué
 # redémarrer proxy (MSI service ou pnpm proxy:dev)
 ```
 
@@ -177,13 +177,13 @@ cd C:\Users\Utilisateur\ops-gate
 pnpm install
 docker compose up -d
 $env:DATABASE_URL = "postgres://opsgate:opsgate@127.0.0.1:5432/opsgate"
-pnpm api:dev                    # Terminal A
-pnpm console:dev                # Terminal B
-pnpm build:chrome               # puis charger l’extension
+pnpm api:dev # Terminal A
+pnpm console:dev # Terminal B
+pnpm build:chrome # puis charger l’extension
 pnpm proxy:gen-ca
 certutil -addstore -user Root "packages\proxy\data\ca\ca-cert.pem"
 pnpm proxy:enroll
-pnpm proxy:dev                  # Terminal C  — ou MSI en phase 4
+pnpm proxy:dev # Terminal C - ou MSI en phase 4
 ```
 
 ---
@@ -280,10 +280,10 @@ Flux type :
 
 ```
 Utilisateur → site IA
-    → Extension (bandeau / mask) 
-    → [option] Proxy local (2e filet)
-    → API (events, policy sync)
-    → Console (visibilité DSI)
+ → Extension (bandeau / mask) 
+ → [option] Proxy local (2e filet)
+ → API (events, policy sync)
+ → Console (visibilité DSI)
 ```
 
 ---
@@ -301,8 +301,8 @@ Utilisateur → site IA
 
 **On a toujours besoin** de `pnpm api:dev` / `console:dev` / `build:chrome` pour :
 
-- développer,  
-- héberger le control plane en lab,  
+- développer, 
+- héberger le control plane en lab, 
 - produire les artefacts (MSI, zip extension).
 
 **Ce qui les remplace côté utilisateur final** :
@@ -344,7 +344,7 @@ Ce qui **n’est pas** « un seul clic silencieux pour tout le produit » : API 
 | **Proxy (MSI)** | Variable d’environnement machine `OPSGATE_API_URL` (et `OPSGATE_ORG_CODE`) + redémarrage tâche/service |
 | **Console** | Build/config pointant vers l’API (mode avancé login / variable d’env selon déploiement) |
 
-Par défaut lab : `http://127.0.0.1:8787`.  
+Par défaut lab : `http://127.0.0.1:8787`. 
 En entreprise : URL **stable** (DNS recommandé plutôt qu’IP brute) + HTTPS.
 
 Le proxy écoute **localement** (`127.0.0.1:8888`) : on ne change en général **pas** l’IP du proxy, seulement celle du **control plane** (management).
@@ -355,12 +355,12 @@ Le proxy écoute **localement** (`127.0.0.1:8888`) : on ne change en général *
 
 ```
 [Poste utilisateur]
-  Extension  ──enroll/events──►  [Serveur management]
-  Proxy MSI  ──enroll/events──►       API :8787
-  PAC → 127.0.0.1:8888                │
-                                      ├─ Postgres
-                                      ├─ Console admin
-                                      └─ Licences + packs signés
+ Extension ──enroll/events──► [Serveur management]
+ Proxy MSI ──enroll/events──► API :8787
+ PAC → 127.0.0.1:8888 │
+ ├─ Postgres
+ ├─ Console admin
+ └─ Licences + packs signés
 
 Licence = sièges org après enroll
 Pack règles = signature ed25519 API
@@ -380,4 +380,4 @@ MSI signé Windows = confiance OS (≠ licence produit)
 | `docs/GUIDE-UTILISATEUR-V2.md` | Usage admin (sans build) |
 | `docs/DECIDEURS-V2-FR.md` | Argumentaire DSI |
 
-© DailyOps.Tech — OpsGate V2
+© DailyOps.Tech - OpsGate V2

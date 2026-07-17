@@ -1,11 +1,11 @@
-# OpsGate — Guide utilisateur (V1)
+# OpsGate - Guide utilisateur (V1)
 
-**Public** : administrateurs console, pilotes, support  
-**Version produit** : 1.2 / lot V2 (juillet 2026)  
-**Langue** : français  
+**Public** : administrateurs console, pilotes, support 
+**Version produit** : 1.2 / lot V2 (juillet 2026) 
+**Langue** : français 
 
-Ce guide décrit l’usage quotidien d’OpsGate : extension, console, enrôlement, policies, licences, logs, messages, MFA et recovery.  
-Pour l’installation technique locale (Docker, ports), voir aussi [`GUIDE-STACK-LOCALE.md`](./GUIDE-STACK-LOCALE.md).  
+Ce guide décrit l’usage quotidien d’OpsGate : extension, console, enrôlement, policies, licences, logs, messages, MFA et recovery. 
+Pour l’installation technique locale (Docker, ports), voir aussi [`GUIDE-STACK-LOCALE.md`](./GUIDE-STACK-LOCALE.md). 
 Guide V2 enrichi : [`GUIDE-UTILISATEUR-V2.md`](./GUIDE-UTILISATEUR-V2.md).
 
 ---
@@ -36,7 +36,7 @@ Sans **Postgres**, l’API utilise un store **mémoire** : **toutes les données
 
 **Passkey / Windows Hello** : bouton sur l’écran de login (après enregistrement dans Paramètres → Général).
 
-**Mauvais mot de passe** : le message indique combien d’essais restent. Après trop d’échecs, le compte est **verrouillé** — un administrateur principal le débloque dans *Admins & groupes*.
+**Mauvais mot de passe** : le message indique combien d’essais restent. Après trop d’échecs, le compte est **verrouillé** - un administrateur principal le débloque dans *Admins & groupes*.
 
 **Multi-organisation (MSP)** : même email sur plusieurs orgs → choix d’org au login ; bascule avec **code MFA** obligatoire ; menu **Portfolio MSP** pour la vue consolidée.
 
@@ -62,7 +62,7 @@ Clé de licence personnelle → mode personnel (pas de télémétrie org vers la
 
 ### Désinscription
 
-Si la policy l’exige : identifiant + mot de passe administrateur.  
+Si la policy l’exige : identifiant + mot de passe administrateur. 
 Recovery concepteur : réservé au principal / support (voir §8).
 
 ---
@@ -85,29 +85,29 @@ Vue d’ensemble de la flotte : licences, agents connectés, décisions, menaces
 
 S’applique aux agents **licenciés sans profil / groupe** spécifique.
 
-- **Sites IA** : catalogue par groupes + sites personnalisés  
-- **Action par défaut** : `warn` | `mask_recommend` | `mask_force` | `block`  
-- **Collecte d’events** : on/off  
+- **Sites IA** : catalogue par groupes + sites personnalisés 
+- **Action par défaut** : `warn` | `mask_recommend` | `mask_force` | `block` 
+- **Collecte d’events** : on/off 
 - **Messages utilisateur** : textes du bandeau (optionnel)
 
 Enregistrer puis **Synchroniser** (ou attendre le poll ≤ 2 min).
 
 ### Policies par département (profils)
 
-1. Créer un profil (ex. Finance).  
-2. Assigner via **groupes** (ou agent).  
-3. Les agents du groupe héritent du profil.  
+1. Créer un profil (ex. Finance). 
+2. Assigner via **groupes** (ou agent). 
+3. Les agents du groupe héritent du profil. 
 4. Vous pouvez **désactiver** un profil sans le supprimer.
 
 ---
 
 ## 6. Licences
 
-- Un **siège** = un agent protégé.  
-- Sans siège : période de **grâce** (24 h), puis protection inactive (**unlicensed**).  
-- L’assignation à un **groupe** (ou manuelle) active en général le siège.  
-- Essai : **30 jours** à la création de l’organisation.  
-- Licence full : clé du type `OPS-XXXX-XXXX-XXXX-XXXX` (Paramètres → Licences).  
+- Un **siège** = un agent protégé. 
+- Sans siège : période de **grâce** (24 h), puis protection inactive (**unlicensed**). 
+- L’assignation à un **groupe** (ou manuelle) active en général le siège. 
+- Essai : **30 jours** à la création de l’organisation. 
+- Licence full : clé du type `OPS-XXXX-XXXX-XXXX-XXXX` (Paramètres → Licences). 
 - Dashboard : listes Licensed / Grace / UNLICENSED.
 
 ---
@@ -116,7 +116,7 @@ Enregistrer puis **Synchroniser** (ou attendre le poll ≤ 2 min).
 
 Un **pack** est le jeu de signatures de détection poussé aux agents sans rebuilder l’extension.
 
-- **Publier** : nouvelle version (éventuellement sans certaines règles bruyantes).  
+- **Publier** : nouvelle version (éventuellement sans certaines règles bruyantes). 
 - **Activer** : version reçue au prochain sync.
 
 ---
@@ -125,8 +125,8 @@ Un **pack** est le jeu de signatures de détection poussé aux agents sans rebui
 
 ### Admins & groupes
 
-- Plusieurs administrateurs ; un ou plusieurs **principals** (accès complet).  
-- **Modifier** un compte · **Nouveau mdp** · **Déverrouiller** · supprimer (selon droits).  
+- Plusieurs administrateurs ; un ou plusieurs **principals** (accès complet). 
+- **Modifier** un compte · **Nouveau mdp** · **Déverrouiller** · supprimer (selon droits). 
 - **Groupes** pour lier agents et profils policy.
 
 ### Recovery concepteur
@@ -138,18 +138,18 @@ Un **pack** est le jeu de signatures de détection poussé aux agents sans rebui
 
 ### Messages (inbox type Kaspersky)
 
-L’utilisateur final peut **contacter l’admin** depuis l’extension.  
+L’utilisateur final peut **contacter l’admin** depuis l’extension. 
 Console → **Messages** : lire, répondre, clôturer ; le client reçoit un bandeau / popup d’accusé.
 
 ### Paramètres utiles
 
-- **Langue** FR / EN et **date/heure** (Paramètres → Général).  
-- **MFA TOTP** + **passkeys** (Windows Hello / empreinte).  
-- **Backup configuration** : export / import JSON (principal).  
-- **Rétention des logs** (events) et **rétention légale audit** (min. 90 j, WORM).  
-- **Notifications** : e-mails + canaux Telegram / Slack / webhook.  
-- **E-mail / SMTP** : requis pour OTP, alertes et exports planifiés.  
-- **Rapports** : export logs planifié (jour/heure/destinataires) + **Envoi test maintenant**.  
+- **Langue** FR / EN et **date/heure** (Paramètres → Général). 
+- **MFA TOTP** + **passkeys** (Windows Hello / empreinte). 
+- **Backup configuration** : export / import JSON (principal). 
+- **Rétention des logs** (events) et **rétention légale audit** (min. 90 j, WORM). 
+- **Notifications** : e-mails + canaux Telegram / Slack / webhook. 
+- **E-mail / SMTP** : requis pour OTP, alertes et exports planifiés. 
+- **Rapports** : export logs planifié (jour/heure/destinataires) + **Envoi test maintenant**. 
 - **Monitoring** : seuils online / hors-ligne ; planning heures de travail ; SIEM.
 
 ---
@@ -160,23 +160,23 @@ Décisions typiques : `mask_send`, `send_anyway`, `cancel`, enroll / unenroll.
 
 ### Rétention & fichiers scannés
 
-- Rétention events définie par l’**entreprise** (Paramètres → Logs).  
-- Au-delà : **purge automatique** — exportez avant.  
-- **Export manuel** CSV/JSON ; **export planifié** par e-mail (Paramètres → Rapports).  
+- Rétention events définie par l’**entreprise** (Paramètres → Logs). 
+- Au-delà : **purge automatique** - exportez avant. 
+- **Export manuel** CSV/JSON ; **export planifié** par e-mail (Paramètres → Rapports). 
 - Extension : scan **PDF, DOCX, PPTX, XLSX** ; **OCR images** si policy `scanImages` active.
 
 ### Audit admin (WORM)
 
-Journal append-only avec **sceau SHA-256** (chaîne d’intégrité).  
+Journal append-only avec **sceau SHA-256** (chaîne d’intégrité). 
 Réservé au **principal**. Bouton **Vérifier l’intégrité** + export CSV.
 
 ---
 
 ## 10. Monitoring & horaires
 
-- Seuils **online** / **not connected long time**  
-- **Planning** (fuseau, jours, pauses) pour ne pas alerter hors heures  
-- Rétention logs + archive hebdo  
+- Seuils **online** / **not connected long time** 
+- **Planning** (fuseau, jours, pauses) pour ne pas alerter hors heures 
+- Rétention logs + archive hebdo 
 
 Fuseaux : Europe, Cameroun (`Africa/Douala`), Madagascar (`Africa/Antananarivo`), etc.
 
@@ -184,13 +184,13 @@ Fuseaux : Europe, Cameroun (`Africa/Douala`), Madagascar (`Africa/Antananarivo`)
 
 ## 11. Agents & règles d’affectation
 
-- **Export** agents CSV/JSON ; **Import CSV** (groupe / profil / licence sur agents déjà enrollés).  
-- **Moving rules** : label / hostname → groupe ; conditions **AND** ou **OR** ; option **permanent** (même si déjà groupé).  
+- **Export** agents CSV/JSON ; **Import CSV** (groupe / profil / licence sur agents déjà enrollés). 
+- **Moving rules** : label / hostname → groupe ; conditions **AND** ou **OR** ; option **permanent** (même si déjà groupé). 
 - Appliquées à l’enroll et via « Ré-évaluer ».
 
 ---
 
-## 12. Données & base — pourquoi tout peut « disparaître »
+## 12. Données & base - pourquoi tout peut « disparaître »
 
 | Cause | Effet | Prévention |
 |-------|--------|------------|

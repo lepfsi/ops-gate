@@ -106,7 +106,7 @@ let bypassOnce = false
 /** En attente de décision */
 let pending = false
 
-/** Settings en cache synchrone — ne jamais await avant preventDefault */
+/** Settings en cache synchrone - ne jamais await avant preventDefault */
 let settings: OpsGateSettings = { ...DEFAULT_SETTINGS }
 
 async function refreshSettings() {
@@ -431,7 +431,7 @@ function isSendButton(el: Element | null): boolean {
     return true
   }
 
-  // Icône seule près du composer (ChatGPT / Claude) — UI change souvent
+  // Icône seule près du composer (ChatGPT / Claude) - UI change souvent
   if (btn.querySelector("svg") && isNearComposer(btn) && text.length <= 4) {
     // Dernier bouton du form / composer = souvent Send
     const form = btn.closest("form")
@@ -523,7 +523,7 @@ function handlePotentialSend(event: Event, sourceEl?: Element | null): void {
     console.log(
       "[OpsGate] Intercept: aucune détection sur",
       text.length,
-      "car. — envoi autorisé. Exemple qui marche: password: SuperSecret!99  ou  sk_live_51N8… (12+ car.)"
+      "car. - envoi autorisé. Exemple qui marche: password: SuperSecret!99  ou  sk_live_51N8… (12+ car.)"
     )
     return
   }
@@ -536,7 +536,7 @@ function handlePotentialSend(event: Event, sourceEl?: Element | null): void {
 
   const pr = promptRiskOf(detections)
   console.log(
-    "[OpsGate] Envoi bloqué —",
+    "[OpsGate] Envoi bloqué -",
     detections.length,
     "détection(s):",
     detections.map((d) => d.type).join(", "),
@@ -601,7 +601,7 @@ function handlePotentialSend(event: Event, sourceEl?: Element | null): void {
             return
           }
 
-          // send_anyway — interdit en mask_force (banner le filtre déjà)
+          // send_anyway - interdit en mask_force (banner le filtre déjà)
           if (action === "mask_force") {
             toastFromDecision("blocked", msgs)
             return
@@ -736,7 +736,7 @@ function replaceAttachments(
     return false
   }
 
-  // Un seul input — sinon risque de multi-joindre le même fichier
+  // Un seul input - sinon risque de multi-joindre le même fichier
   const target = inputs[0]
   const ok = injectFilesIntoInput(target, files)
   if (ok) {
@@ -912,7 +912,7 @@ async function processQuarantinedFiles(
                 clearAllFileInputs(input)
                 downloadMaskedFallback(maskedFiles)
                 showToast(
-                  "Réinjection refusée par la page. Un fichier sécurisé a été téléchargé — joignez-le manuellement.",
+                  "Réinjection refusée par la page. Un fichier sécurisé a été téléchargé - joignez-le manuellement.",
                   {
                     tone: "warning",
                     title: "Action manuelle requise",
@@ -930,7 +930,7 @@ async function processQuarantinedFiles(
               return
             }
 
-            // Joindre l'original (choix conscient) — y compris confirm media/office
+            // Joindre l'original (choix conscient) - y compris confirm media/office
             const ok = replaceAttachments(frozen, input)
             await logDecision(
               "send_anyway",
@@ -1126,7 +1126,7 @@ function showActiveBadge() {
   if (document.getElementById(id)) return
   const el = document.createElement("div")
   el.id = id
-  el.title = "OpsGate actif — protection des prompts IA"
+  el.title = "OpsGate actif - protection des prompts IA"
   el.innerHTML = `
     <svg width="16" height="16" viewBox="0 0 32 32" aria-hidden="true">
       <path fill="none" stroke="#67e8f9" stroke-width="2.2" stroke-linecap="round"

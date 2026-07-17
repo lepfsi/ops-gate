@@ -178,7 +178,7 @@ async function handleMessage(message: OpsGateMessage): Promise<unknown> {
 
     case "LOG_DETECTION": {
       // Journal local + report cloud (mask_send / send_anyway / cancel / secure_rewrite)
-      // appendJournal attend le POST (ou enqueue) — ne pas fire-and-forget ici.
+      // appendJournal attend le POST (ou enqueue) - ne pas fire-and-forget ici.
       const entry = await appendJournal(message.entry)
       // Relancer la file au cas où d’autres events étaient en attente
       try {
@@ -216,7 +216,7 @@ async function handleMessage(message: OpsGateMessage): Promise<unknown> {
           settings: current
         }
       }
-      // Enrolled but not yet successful sync — still soft lock for most fields
+      // Enrolled but not yet successful sync - still soft lock for most fields
       if (current.agentToken && current.orgId) {
         const keys = Object.keys(message.partial)
         const onlyApi =

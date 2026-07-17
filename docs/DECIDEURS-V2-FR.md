@@ -1,9 +1,9 @@
-# OpsGate — Documentation décideurs V2
+# OpsGate - Documentation décideurs V2
 
-**Pour** : DSI, RSSI, RSSI adjoint, architectes sécurité, comités risques  
-**Version produit** : 1.2 / lot V2 (juillet 2026)  
-**Maturité** : **V2 functional / pre-GA** — synthèse [`STATUS-V2.md`](./STATUS-V2.md)  
-**Éditeur** : DailyOps.Tech  
+**Pour** : DSI, RSSI, RSSI adjoint, architectes sécurité, comités risques 
+**Version produit** : 1.2 / lot V2 (juillet 2026) 
+**Maturité** : **V2 functional / pre-GA** - synthèse [`STATUS-V2.md`](./STATUS-V2.md) 
+**Éditeur** : DailyOps.Tech 
 
 ---
 
@@ -23,28 +23,28 @@ OpsGate **n’est pas** un CASB réseau complet, ni un outil d’espionnage des 
 
 ```
 Utilisateur ──► Site IA (navigateur)
-                    │
-         ┌──────────┼──────────┐
-         ▼          ▼          ▼
-    Extension   Proxy local   (option)
-    (contenu)   (HTTPS MITM)
-         │          │
-         └────┬─────┘
-              ▼
-     Moteur de règles (@opsgate/engine)
-     secrets · PII · configs réseau · clés cloud
-              │
-              ▼
-     Banner / soft-block / soft-mask
-              │
-              ▼
-     Console + API (événements métadonnées)
-     SIEM · métriques · rapports PDF
+ │
+ ┌──────────┼──────────┐
+ ▼ ▼ ▼
+ Extension Proxy local (option)
+ (contenu) (HTTPS MITM)
+ │ │
+ └────┬─────┘
+ ▼
+ Moteur de règles (@opsgate/engine)
+ secrets · PII · configs réseau · clés cloud
+ │
+ ▼
+ Banner / soft-block / soft-mask
+ │
+ ▼
+ Console + API (événements métadonnées)
+ SIEM · métriques · rapports PDF
 ```
 
-1. **Détection** dans le navigateur (et/ou le proxy) avant envoi.  
-2. **Décision** : masquer les secrets, bloquer, ou journaliser selon la policy.  
-3. **Gouvernance** : admins définissent règles, groupes, profils, licences.  
+1. **Détection** dans le navigateur (et/ou le proxy) avant envoi. 
+2. **Décision** : masquer les secrets, bloquer, ou journaliser selon la policy. 
+3. **Gouvernance** : admins définissent règles, groupes, profils, licences. 
 4. **Preuve** : events, audit, exports, SIEM, PDF sécurité.
 
 ---
@@ -58,7 +58,7 @@ Utilisateur ──► Site IA (navigateur)
 | Infrastructure | Fragments Fortinet, MikroTik, WireGuard, configs réseau |
 | Fichiers | Uploads texte, PDF/DOCX/**PPTX/XLSX**, **OCR images** (Tesseract local) |
 
-**Privacy by design** : en mode local, rien ne quitte le poste. En mode organisation, ce sont des **métadonnées** (type de règle, décision, hostname) — pas le prompt complet par défaut. OCR et parse fichiers restent **sur le poste**.
+**Privacy by design** : en mode local, rien ne quitte le poste. En mode organisation, ce sont des **métadonnées** (type de règle, décision, hostname) - pas le prompt complet par défaut. OCR et parse fichiers restent **sur le poste**.
 
 ---
 
@@ -121,13 +121,13 @@ Utilisateur ──► Site IA (navigateur)
 
 ---
 
-## 8. Indicateurs de succès (KPI pilote 30–90 j)
+## 8. Indicateurs de succès (KPI pilote 30-90 j)
 
-- % postes avec extension force-installée  
-- Nombre d’events « mask / block » / semaine  
-- Temps de déploiement policy (force-sync < 2 min)  
-- Incidents « secret collé dans ChatGPT » avant / après  
-- Couverture multi-IA (liste hosts)  
+- % postes avec extension force-installée 
+- Nombre d’events « mask / block » / semaine 
+- Temps de déploiement policy (force-sync < 2 min) 
+- Incidents « secret collé dans ChatGPT » avant / après 
+- Couverture multi-IA (liste hosts) 
 
 ---
 
@@ -139,11 +139,11 @@ Utilisateur ──► Site IA (navigateur)
 | Scan fichiers PDF/DOCX/PPTX/XLSX + OCR images | OCR fr offline embarqué, Safari App Store public |
 | Audit WORM, backup, notif multi-canaux, MSP, **portal Stripe**, **soft-delete GDPR** | Clés Stripe prod, publication stores, pilote client |
 
-**Installation** : guide intégrateur [`DEPLOIEMENT-CLIENT.md`](./DEPLOIEMENT-CLIENT.md) (+ PDF FR/EN).  
+**Installation** : guide intégrateur [`DEPLOIEMENT-CLIENT.md`](./DEPLOIEMENT-CLIENT.md) (+ PDF FR/EN). 
 **Avancement détaillé** : [`STATUS-V2.md`](./STATUS-V2.md) · [`V2-BACKLOG.md`](./V2-BACKLOG.md).
 
 Contact : votre équipe DailyOps.Tech / commercial OpsGate.
 
 ---
 
-*Document confidentiel — usage interne client & partenaires · 17 juillet 2026*
+*Document confidentiel - usage interne client & partenaires · 17 juillet 2026*

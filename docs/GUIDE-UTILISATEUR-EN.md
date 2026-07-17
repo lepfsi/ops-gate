@@ -1,11 +1,11 @@
-# OpsGate — User Guide (V1)
+# OpsGate - User Guide (V1)
 
-**Audience**: console administrators, pilots, support  
-**Product version**: 1.2 / V2 batch (July 2026)  
-**Language**: English  
+**Audience**: console administrators, pilots, support 
+**Product version**: 1.2 / V2 batch (July 2026) 
+**Language**: English 
 
-This guide covers day-to-day OpsGate use: extension, console, enrollment, policies, licenses, logs, messages, MFA, and recovery.  
-For local technical setup (Docker, ports), see also [`GUIDE-STACK-LOCALE.md`](./GUIDE-STACK-LOCALE.md).  
+This guide covers day-to-day OpsGate use: extension, console, enrollment, policies, licenses, logs, messages, MFA, and recovery. 
+For local technical setup (Docker, ports), see also [`GUIDE-STACK-LOCALE.md`](./GUIDE-STACK-LOCALE.md). 
 Richer V2 guide: [`GUIDE-UTILISATEUR-V2-EN.md`](./GUIDE-UTILISATEUR-V2-EN.md).
 
 ---
@@ -36,7 +36,7 @@ Without **Postgres**, the API uses an in-memory store: **all data is lost on res
 
 **Passkey / Windows Hello**: button on the login screen (after registration under Settings → General).
 
-**Wrong password**: the message shows how many attempts remain. After too many failures, the account is **locked** — a principal admin unlocks it under *Admins & groups*.
+**Wrong password**: the message shows how many attempts remain. After too many failures, the account is **locked** - a principal admin unlocks it under *Admins & groups*.
 
 **Multi-organization (MSP)**: same email on several orgs → org picker at login; switch requires **MFA code**; **MSP portfolio** for a consolidated view.
 
@@ -62,7 +62,7 @@ Personal license key → personal mode (no org telemetry to the console).
 
 ### Unenroll
 
-If policy requires it: admin identifier + password.  
+If policy requires it: admin identifier + password. 
 Vendor recovery: principal / support only (see §8).
 
 ---
@@ -85,29 +85,29 @@ Fleet overview: licenses, connected agents, decisions, top threats, user request
 
 Applies to **licensed** agents without a specific profile / group.
 
-- **AI sites**: catalog by groups + custom sites  
-- **Default action**: `warn` | `mask_recommend` | `mask_force` | `block`  
-- **Event collection**: on/off  
+- **AI sites**: catalog by groups + custom sites 
+- **Default action**: `warn` | `mask_recommend` | `mask_force` | `block` 
+- **Event collection**: on/off 
 - **User messages**: banner texts (optional)
 
 Save then **Sync** (or wait for poll ≤ 2 min).
 
 ### Department policies (profiles)
 
-1. Create a profile (e.g. Finance).  
-2. Assign via **groups** (or agent).  
-3. Agents in the group inherit the profile.  
+1. Create a profile (e.g. Finance). 
+2. Assign via **groups** (or agent). 
+3. Agents in the group inherit the profile. 
 4. You can **disable** a profile without deleting it.
 
 ---
 
 ## 6. Licenses
 
-- One **seat** = one protected agent.  
-- Without a seat: **grace** period (24 h), then inactive protection (**unlicensed**).  
-- Assigning to a **group** (or manually) usually activates the seat.  
-- Trial: **30 days** from organization creation.  
-- Full license: key like `OPS-XXXX-XXXX-XXXX-XXXX` (Settings → Licenses).  
+- One **seat** = one protected agent. 
+- Without a seat: **grace** period (24 h), then inactive protection (**unlicensed**). 
+- Assigning to a **group** (or manually) usually activates the seat. 
+- Trial: **30 days** from organization creation. 
+- Full license: key like `OPS-XXXX-XXXX-XXXX-XXXX` (Settings → Licenses). 
 - Dashboard: Licensed / Grace / UNLICENSED lists.
 
 ---
@@ -116,7 +116,7 @@ Save then **Sync** (or wait for poll ≤ 2 min).
 
 A **pack** is the detection signature set pushed to agents without rebuilding the extension.
 
-- **Publish**: new version (optionally without noisy rules).  
+- **Publish**: new version (optionally without noisy rules). 
 - **Activate**: version received on next sync.
 
 ---
@@ -125,8 +125,8 @@ A **pack** is the detection signature set pushed to agents without rebuilding th
 
 ### Admins & groups
 
-- Multiple administrators; one or more **principals** (full access).  
-- **Edit** account · **New password** · **Unlock** · delete (by role).  
+- Multiple administrators; one or more **principals** (full access). 
+- **Edit** account · **New password** · **Unlock** · delete (by role). 
 - **Groups** link agents and policy profiles.
 
 ### Vendor recovery
@@ -138,18 +138,18 @@ A **pack** is the detection signature set pushed to agents without rebuilding th
 
 ### Messages (Kaspersky-style inbox)
 
-End users can **contact admin** from the extension.  
+End users can **contact admin** from the extension. 
 Console → **Messages**: read, reply, close; the client gets a banner / ack popup.
 
 ### Useful settings
 
-- **Language** FR / EN and **date/time** (Settings → General).  
-- **TOTP MFA** + **passkeys** (Windows Hello / fingerprint).  
-- **Configuration backup**: JSON export / import (principal).  
-- **Event log retention** and **legal audit retention** (min. 90 days, WORM).  
-- **Notifications**: email + Telegram / Slack / webhook channels.  
-- **Email / SMTP**: required for OTP, alerts, and scheduled exports.  
-- **Reports**: scheduled log export (day/time/recipients) + **Send test now**.  
+- **Language** FR / EN and **date/time** (Settings → General). 
+- **TOTP MFA** + **passkeys** (Windows Hello / fingerprint). 
+- **Configuration backup**: JSON export / import (principal). 
+- **Event log retention** and **legal audit retention** (min. 90 days, WORM). 
+- **Notifications**: email + Telegram / Slack / webhook channels. 
+- **Email / SMTP**: required for OTP, alerts, and scheduled exports. 
+- **Reports**: scheduled log export (day/time/recipients) + **Send test now**. 
 - **Monitoring**: online / long offline thresholds; work schedule; SIEM.
 
 ---
@@ -160,23 +160,23 @@ Typical decisions: `mask_send`, `send_anyway`, `cancel`, enroll / unenroll.
 
 ### Retention & scanned files
 
-- Event retention set by the **organization** (Settings → Logs).  
-- Beyond retention: **automatic purge** — export first.  
-- **Manual export** CSV/JSON; **scheduled export** by email (Settings → Reports).  
+- Event retention set by the **organization** (Settings → Logs). 
+- Beyond retention: **automatic purge** - export first. 
+- **Manual export** CSV/JSON; **scheduled export** by email (Settings → Reports). 
 - Extension: scan **PDF, DOCX, PPTX, XLSX**; **image OCR** when policy `scanImages` is on.
 
 ### Admin audit (WORM)
 
-Append-only journal with **SHA-256 seal** (integrity chain).  
+Append-only journal with **SHA-256 seal** (integrity chain). 
 **Principal** only. **Verify integrity** button + CSV export.
 
 ---
 
 ## 10. Monitoring & schedule
 
-- **Online** / **not connected long time** thresholds  
-- **Schedule** (timezone, days, breaks) to avoid off-hours alerts  
-- Log retention + weekly archive  
+- **Online** / **not connected long time** thresholds 
+- **Schedule** (timezone, days, breaks) to avoid off-hours alerts 
+- Log retention + weekly archive 
 
 Timezones: Europe, Cameroon (`Africa/Douala`), Madagascar (`Africa/Antananarivo`), etc.
 
@@ -184,13 +184,13 @@ Timezones: Europe, Cameroon (`Africa/Douala`), Madagascar (`Africa/Antananarivo`
 
 ## 11. Agents & assignment rules
 
-- **Export** agents CSV/JSON; **CSV import** (group / profile / license on already enrolled agents).  
-- **Moving rules**: label / hostname → group; **AND** or **OR** conditions; **permanent** option (even if already grouped).  
+- **Export** agents CSV/JSON; **CSV import** (group / profile / license on already enrolled agents). 
+- **Moving rules**: label / hostname → group; **AND** or **OR** conditions; **permanent** option (even if already grouped). 
 - Applied at enroll and via “Re-evaluate”.
 
 ---
 
-## 12. Data & database — why everything can “disappear”
+## 12. Data & database - why everything can “disappear”
 
 | Cause | Effect | Prevention |
 |-------|--------|------------|

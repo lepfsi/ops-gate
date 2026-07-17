@@ -13,8 +13,8 @@
  *  - worker réutilisé (singleton)
  */
 
-const MAX_OCR_INPUT_BYTES = 4_000_000
-const MAX_OCR_SIDE = 1600
+const MAX_OCR_INPUT_BYTES = 8_000_000
+const MAX_OCR_SIDE = 2200
 const OCR_TIMEOUT_MS = 30_000
 const MAX_OCR_TEXT = 100_000
 

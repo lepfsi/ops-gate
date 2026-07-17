@@ -106,7 +106,7 @@ function shouldApplyRule(rule: DetectionRule, text: string): boolean {
     const keywordRequired = [
       "ip-private-block",
       "license-key",
-      "iban",
+      // IBAN : détection par checksum (pas de keyword obligatoire)
       "aws-secret-key",
       "huawei-vrp-config",
       "mikrotik-routeros",
@@ -147,7 +147,7 @@ export function isValidLuhn(num: string): boolean {
 }
 
 export function isValidIban(raw: string): boolean {
-  const iban = raw.replace(/\s+/g, "").toUpperCase()
+  const iban = raw.replace(/[\s.\-]/g, "").toUpperCase()
   if (!/^[A-Z]{2}\d{2}[A-Z0-9]{11,30}$/.test(iban)) return false
   if (iban.length < 15 || iban.length > 34) return false
 
@@ -167,6 +167,41 @@ export function isValidIban(raw: string): boolean {
     remainder = Number(block) % 97
   }
   return remainder === 1
+}
+
+/** True si le match téléphone est une sous-séquence d’un IBAN valide du texte. */
+function looksLikeIbanFragment(raw: string, fullText: string): boolean {
+  const compact = fullText.replace(/[\s.\-]/g, "").toUpperCase()
+  // Extraire candidats IBAN (pays + chiffres/lettres)
+  const re = /[A-Z]{2}\d{2}[A-Z0-9]{11,30}/g
+  let m: RegExpExecArray | null
+  while ((m = re.exec(compact)) !== null) {
+    if (isValidIban(m[0])) {
+      const phoneDigits = raw.replace(/\D/g, "")
+      const ibanDigits = m[0].replace(/\D/g, "")
+      if (phoneDigits.length >= 8 && ibanDigits.includes(phoneDigits)) {
+        return true
+      }
+      // match brut collé sans espaces
+      if (m[0].includes(raw.replace(/[\s.\-]/g, "").toUpperCase())) {
+        return true
+      }
+    }
+  }
+  // Forme espacée type FR76 3000 6000 …
+  const spaced = fullText.toUpperCase()
+  const reSp =
+    /\b[A-Z]{2}\d{2}(?:[\s.\-]*[A-Z0-9]{2,4}){3,10}\b/g
+  let ms: RegExpExecArray | null
+  while ((ms = reSp.exec(spaced)) !== null) {
+    if (isValidIban(ms[0]) && ms[0].includes(raw.trim().toUpperCase().slice(0, 8))) {
+      return true
+    }
+    const ibanDigits = ms[0].replace(/\D/g, "")
+    const phoneDigits = raw.replace(/\D/g, "")
+    if (phoneDigits.length >= 8 && ibanDigits.includes(phoneDigits)) return true
+  }
+  return false
 }
 
 function extractPasswordValue(match: string): string {
@@ -243,16 +278,10 @@ function isFalsePositive(ruleId: string, raw: string, fullText: string): boolean
       return false
     }
     case "iban": {
+      // Checksum IBAN (mod 97) suffit : pas de keyword obligatoire
+      // (évite que des sous-séquences soient classées téléphone)
       if (!isValidIban(raw)) return true
-      const lower = fullText.toLowerCase()
-      const hasBankCtx =
-        lower.includes("iban") ||
-        lower.includes("bic") ||
-        lower.includes("swift") ||
-        lower.includes("rib") ||
-        lower.includes("bancaire") ||
-        lower.includes("bank account")
-      return !hasBankCtx
+      return false
     }
     case "password-assignment": {
       const val = extractPasswordValue(raw)
@@ -269,6 +298,9 @@ function isFalsePositive(ruleId: string, raw: string, fullText: string): boolean
       const digits = raw.replace(/\D/g, "")
       if (digits.length < 10 || digits.length > 15) return true
       if (/^0{5,}/.test(digits) || /^1{8,}/.test(digits)) return true
+      // IBAN collés / espacés : sous-séquences numériques (ex. 0xxx dans FR76…)
+      // ne doivent pas compter comme téléphone
+      if (looksLikeIbanFragment(raw, fullText)) return true
       return false
     }
     case "generic-api-key": {
