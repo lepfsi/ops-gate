@@ -11,6 +11,7 @@
 | Document lié | Contenu |
 |--------------|---------|
 | [`STATUS-V2.md`](./STATUS-V2.md) | Avancement produit (livré vs suite) |
+| [`PUBLICATION-STORES.md`](./PUBLICATION-STORES.md) | Package & soumission CWS / AMO / Safari |
 | [`FAQ-DEPLOIEMENT-V2.md`](./FAQ-DEPLOIEMENT-V2.md) | Questions MSI / licences / phases test |
 | [`GUIDE-STACK-LOCALE.md`](./GUIDE-STACK-LOCALE.md) | Lab Docker sur une machine de dev |
 | [`architecture/CHROME-WEB-STORE-MDM.md`](./architecture/CHROME-WEB-STORE-MDM.md) | Force-install Chrome/Edge |
@@ -247,8 +248,10 @@ pnpm build:firefox
 | Firefox | AMO + `policies.json` |
 
 ```powershell
-pnpm store:chrome   # → dist/chrome-store/ (ZIP + politiques MDM)
-pnpm store:firefox  # → dist/firefox-amo/
+pnpm store:all      # → dist/chrome-store/ + firefox-amo/ + safari-store/ + STORES-INDEX.md
+pnpm store:chrome   # CWS seul
+pnpm store:firefox  # AMO seul
+# Guide : docs/PUBLICATION-STORES.md
 ```
 
 Détail policies :  

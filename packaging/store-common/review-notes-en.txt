@@ -1,0 +1,38 @@
+OpsGate — reviewer notes (Chrome Web Store / Edge / AMO)
+
+BUILD
+  pnpm install
+  pnpm build:chrome   # or build:firefox
+  Output: build/chrome-mv3-prod/ or build/firefox-mv3-prod/
+
+PURPOSE
+  Prevent accidental leakage of secrets, API keys, PII and infrastructure
+  configuration fragments into generative AI web apps (ChatGPT, Claude,
+  Gemini, Copilot, Perplexity, etc.).
+
+ARCHITECTURE
+  - Manifest V3 browser extension (Plasmo)
+  - Content scripts only on an allowlist of AI site hosts
+  - Local rules engine (@opsgate/engine) — regex / heuristics on device
+  - Optional org enrollment to a customer-hosted control plane API
+
+NETWORK / PRIVACY
+  - Default local_only mode: no OpsGate network calls
+  - Org mode: sends detection metadata only (rule ids, decision, hostname)
+    — not the full prompt body by default
+  - No advertising, no sale of personal data
+  - Privacy policy: see hosted docs/PRIVACY.md URL in listing
+
+PERMISSIONS
+  - storage: local journal, enrollment token, policy cache
+  - alarms: periodic policy sync (~2 minutes) when enrolled
+  - host permissions: AI sites for content-script injection only
+  - optional 127.0.0.1:8787: local/on-prem control plane during pilots
+
+SOURCE
+  Minified production bundle via Plasmo/Parcel.
+  Source: monorepo tag matching package version (or private enterprise tag
+  provided to reviewers on request).
+
+CONTACT
+  DailyOps.Tech / OpsGate support (publisher email in store listing)

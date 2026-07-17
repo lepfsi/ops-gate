@@ -203,6 +203,18 @@ if (Test-Path $tplSrc) {
   }
 }
 
+# Common store materials
+$common = Join-Path $Root "packaging\store-common"
+if (Test-Path $common) {
+  Copy-Item (Join-Path $common "review-notes-en.txt") (Join-Path $listing "review-notes-en.txt") -ErrorAction SilentlyContinue
+  Copy-Item (Join-Path $common "privacy-policy-hosting.md") (Join-Path $listing "privacy-policy-hosting.md") -ErrorAction SilentlyContinue
+}
+
+$icon128 = Join-Path $Root "assets\icons\icon-128.png"
+if (Test-Path $icon128) {
+  Copy-Item $icon128 (Join-Path $listing "icon-128.png")
+}
+
 Write-Host @"
 
 === Firefox AMO package ready ===
@@ -213,5 +225,6 @@ Write-Host @"
 
 Upload: https://addons.mozilla.org/developers/addon/submit/
 Enterprise unlisted + policies.json recommended for corps.
+Full guide: docs/PUBLICATION-STORES.md
 
 "@ -ForegroundColor Green

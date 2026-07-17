@@ -30,7 +30,7 @@ Design d’origine : [`architecture/PLATFORM-v2.md`](./architecture/PLATFORM-v2.
 | **V2-B SSO** | ✅ | OIDC PKCE + JWKS + JIT + sso_enforce · SAML SP (sig en prod) |
 | **V2-C MFA** | ✅ | TOTP + QR · multi-tenant forcé · passkeys UI + PG · challenge session |
 | **V2-D Multi-tenant** | ✅ | RLS, quotas, rate-limit, MSP portfolio, MFA switch |
-| **V2-E Store / MDM** | ✅ packaging | Artefacts + policies ; **publication compte store = client/ops** |
+| **V2-E Store / MDM** | ✅ packaging + runbook | `pnpm store:all` · PUBLICATION-STORES · **soumission compte = ops** |
 | **V2-F Compléments** | ✅ / ◐ | Audit WORM, CSV, webhooks notif, exports planifiés · billing Stripe = fondations |
 
 ---
@@ -62,9 +62,10 @@ Design d’origine : [`architecture/PLATFORM-v2.md`](./architecture/PLATFORM-v2.
 
 | Item | Statut | Notes |
 |------|--------|--------|
-| Chrome Web Store package + MDM | ✅ | Reste : compte publisher réel |
-| Firefox AMO package + policies | ✅ | Reste : soumission AMO |
-| Safari MV3 build | ✅ | Reste : App Store Apple |
+| Chrome Web Store package + MDM | ✅ | `pnpm store:chrome` · reste : compte + review |
+| Firefox AMO package + policies | ✅ | `pnpm store:firefox` · reste : soumission AMO |
+| Safari MV3 + prep store | ✅ | `pnpm store:safari` · reste : Xcode ship Apple |
+| Kit multi-store unifié | ✅ | `pnpm store:all` · `docs/PUBLICATION-STORES.md` |
 | LDAP / AD + cron | ✅ | Test/sync console · prune/map profil = optionnel |
 
 ### P3 — Fichiers, agents, billing, polish
@@ -91,7 +92,7 @@ Design d’origine : [`architecture/PLATFORM-v2.md`](./architecture/PLATFORM-v2.
 
 ## Suite recommandée (post-current)
 
-1. **Publication** CWS / AMO / Apple (comptes et process métier)  
+1. **Soumission** CWS / AMO / Apple (comptes + review — kit monorepo prêt via `pnpm store:all`)  
 2. **SAML** tests IdP clients réels (C14N exclusive améliorée dans le code)  
 3. ~~Stripe webhook + portal~~ → **livré** (reste : clés prod Dashboard)  
 4. **OCR** pack `fra` embarqué offline (aujourd’hui eng+fra si locale fr, download runtime)  

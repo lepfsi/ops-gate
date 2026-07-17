@@ -35,8 +35,8 @@ Il reste surtout la **publication store** réelle, le **billing Stripe GA** et q
 | Export logs planifié | **Livré** | cron + run-now |
 | Import CSV agents | **Livré** | Agents → Import CSV |
 | Moving rules OR/permanent | **Livré** | |
-| Package CWS/AMO/MDM | **Livré (artefacts)** | pas la soumission compte |
-| Safari App Store | **Build only** | packaging Apple à faire |
+| Package CWS/AMO/MDM | **Livré (artefacts + runbook)** | `pnpm store:all` · soumission compte = ops |
+| Safari App Store | **Prep livrée** | `pnpm store:safari` + convert Xcode ; ship Apple = ops |
 | Billing Stripe portal | **Livré** | Checkout + Customer Portal UI + webhook sièges |
 | Soft-delete org GDPR | **Livré** | export DSAR, soft-delete, restore, hard purge cron |
 
@@ -59,8 +59,8 @@ Légende : **Livré** = dans le monorepo et utilisable · **Fondations** = API/c
 
 | Sujet | Pourquoi |
 |-------|----------|
-| Listing CWS/AMO live | Compte éditeur + process review Google/Mozilla |
-| Safari public | Process Apple / Xcode ship |
+| Listing CWS/AMO **live** (review acceptée) | Compte éditeur + soumission (artefacts monorepo prêts) |
+| Safari public App Store | Mac + Apple Developer (prep monorepo prête) |
 | Stripe live (clés prod + webhook Dashboard) | Config ops, pas code monorepo |
 | SAML tous IdP en prod | C14N exclusive améliorée ; valider par IdP client |
 | OCR fr offline embarqué | eng+fra si navigateur fr (télécharge pack Tesseract) |
@@ -77,7 +77,8 @@ Légende : **Livré** = dans le monorepo et utilisable · **Fondations** = API/c
 - [x] Doc déploiement client + guides PDF  
 - [x] Portal personnel Stripe (UI + checkout + portal + webhook sièges)  
 - [x] Soft-delete org GDPR (export + grace + hard purge)  
-- [ ] Au moins un canal store (CWS unlisted **publié**)  
+- [x] Kit packaging multi-store (`pnpm store:all` + PUBLICATION-STORES)  
+- [ ] Au moins un canal store (CWS unlisted **publié** en review)  
 - [ ] Pilote client réel validé (checklist DEPLOIEMENT §11)  
 - [ ] Clés Stripe **prod** + webhook Dashboard branché (ou process licence vendor)  
 
@@ -88,6 +89,7 @@ Légende : **Livré** = dans le monorepo et utilisable · **Fondations** = API/c
 | Rôle | Document |
 |------|----------|
 | Intégrateur / install | [`DEPLOIEMENT-CLIENT.md`](./DEPLOIEMENT-CLIENT.md) (+ PDF) |
+| Publication stores | [`PUBLICATION-STORES.md`](./PUBLICATION-STORES.md) |
 | Admin console | [`GUIDE-UTILISATEUR-V2.md`](./GUIDE-UTILISATEUR-V2.md) (+ PDF) |
 | DSI / RSSI | [`DECIDEURS-V2-FR.md`](./DECIDEURS-V2-FR.md) (+ PDF) |
 | Dev / maintainer | [`CHANGELOG-TECHNIQUE.md`](./CHANGELOG-TECHNIQUE.md), [`V2-BACKLOG.md`](./V2-BACKLOG.md) |

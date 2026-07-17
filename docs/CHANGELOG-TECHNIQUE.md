@@ -381,6 +381,20 @@ Env : `OPSGATE_GDPR_PURGE_DAYS` (30), `OPSGATE_GDPR_CRON_MINUTES` (60).
 
 ---
 
+## 25. Kit publication stores multi-canal (17 juillet 2026)
+
+| Sujet | Détail | Fichiers |
+|-------|--------|---------|
+| `pnpm store:all` | Chrome + Firefox + Safari prep + index | `package-all-stores.ps1` |
+| `pnpm store:safari` | Build safari-mv3 + convert script macOS | `package-safari-store.ps1` |
+| Guide unifié | Checklists CWS / AMO / Safari / Edge | `docs/PUBLICATION-STORES.md` |
+| Matériel common | Review notes EN + hébergement privacy | `packaging/store-common/` |
+| Validation CWS | manifest_version 3 check | `package-chrome-store.ps1` |
+
+**Ops restant** : comptes éditeur, privacy HTTPS live, screenshots, cliquer Submit.
+
+---
+
 ## Convention pour les prochains changements
 
 Quand tu modifies le produit :
