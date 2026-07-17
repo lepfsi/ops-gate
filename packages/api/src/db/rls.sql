@@ -40,6 +40,7 @@ DECLARE
     'rule_packs',
     'detection_events',
     'recovery_codes',
+    'user_inbox_messages',
     'log_exports',
     'password_reset_challenges',
     'admin_audit_events',

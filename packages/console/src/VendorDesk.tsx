@@ -78,6 +78,7 @@ export default function VendorDesk() {
   const [expandedKey, setExpandedKey] = useState<string | null>(null)
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(10)
+  const [search, setSearch] = useState("")
 
   const loadList = useCallback(async (key: string) => {
     const r = await vendorFetch<{ licenses: Issued[] }>(
@@ -91,19 +92,45 @@ export default function VendorDesk() {
     document.title = "OpsGate · Bureau concepteur"
   }, [])
 
-  const pageCount = Math.max(1, Math.ceil(list.length / pageSize))
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    if (!q) return list
+    return list.filter(
+      (L) =>
+        L.org_code?.toLowerCase().includes(q) ||
+        L.company_name?.toLowerCase().includes(q) ||
+        L.contact_email?.toLowerCase().includes(q) ||
+        L.license_key?.toLowerCase().includes(q)
+    )
+  }, [list, search])
+
+  const stats = useMemo(() => {
+    const now = Date.now()
+    let expiring = 0
+    let full = 0
+    for (const L of list) {
+      if (L.kind === "full" || !L.kind) full++
+      const exp = Date.parse(L.expires_at)
+      if (Number.isFinite(exp) && exp - now < 30 * 86400000 && exp > now) {
+        expiring++
+      }
+    }
+    return { total: list.length, full, expiring }
+  }, [list])
+
+  const pageCount = Math.max(1, Math.ceil(filtered.length / pageSize))
   const pageItems = useMemo(() => {
     const start = (page - 1) * pageSize
-    return list.slice(start, start + pageSize)
-  }, [list, page, pageSize])
+    return filtered.slice(start, start + pageSize)
+  }, [filtered, page, pageSize])
 
   useEffect(() => {
     if (page > pageCount) setPage(pageCount)
   }, [page, pageCount])
 
-  function resetForm() {
+  function resetForm(options?: { clearLastKey?: boolean }) {
     setForm(emptyForm())
-    setLastKey(null)
+    if (options?.clearLastKey !== false) setLastKey(null)
   }
 
   function closeForm() {
@@ -234,20 +261,52 @@ export default function VendorDesk() {
         {err && <p className="err">{err}</p>}
         {info && <p className="ok">{info}</p>}
 
+        <div
+          className="row"
+          style={{
+            gap: 16,
+            marginBottom: 16,
+            flexWrap: "wrap",
+            fontSize: 13
+          }}>
+          <span>
+            <strong>{stats.total}</strong> licence(s)
+          </span>
+          <span>
+            <strong>{stats.full}</strong> full
+          </span>
+          <span
+            style={{
+              color: stats.expiring > 0 ? "#b45309" : undefined
+            }}>
+            <strong>{stats.expiring}</strong> expirent ≤ 30 j
+          </span>
+        </div>
+
         {/* Bouton ouverture formulaire */}
         {!formOpen && (
-          <div className="row" style={{ marginBottom: 16, gap: 8 }}>
+          <div className="row" style={{ marginBottom: 16, gap: 8, flexWrap: "wrap" }}>
             <button
               className="btn"
               type="button"
               onClick={() => {
-                resetForm()
+                resetForm({ clearLastKey: true })
                 setFormOpen(true)
                 setInfo(null)
                 setErr(null)
               }}>
               + Générer une licence
             </button>
+            <input
+              className="input"
+              style={{ minWidth: 200, flex: 1 }}
+              placeholder="Rechercher org, société, e-mail, clé…"
+              value={search}
+              onChange={(e) => {
+                setSearch(e.target.value)
+                setPage(1)
+              }}
+            />
             <button
               className="btn secondary"
               type="button"
@@ -430,12 +489,12 @@ export default function VendorDesk() {
                       setLastKey(r.license_key)
                       setInfo(
                         r.tenant?.created
-                          ? `Licence OK · tenant · login ${r.tenant.principal_email || form.email} / ${r.tenant.temp_password || "0000"} · téléchargez le PDF`
-                          : `Licence générée (${r.kind || form.kind}) · téléchargez le PDF`
+                          ? `Licence OK · tenant · login ${r.tenant.principal_email || form.email} / ${r.tenant.temp_password || "0000"} · téléchargez le PDF ci-dessous`
+                          : `Licence générée (${r.kind || form.kind}) · téléchargez le PDF ci-dessous`
                       )
                       await loadList(vendorKey)
-                      // Ferme le formulaire et le vide (garde lastKey visible brièvement dans info)
-                      resetForm()
+                      // Ferme et vide le formulaire ; conserve la dernière clé pour le bandeau PDF
+                      resetForm({ clearLastKey: false })
                       setFormOpen(false)
                       setExpandedKey(r.license_key)
                       setPage(1)
@@ -455,52 +514,60 @@ export default function VendorDesk() {
                 </button>
               </div>
             </div>
-            {lastKey && (
-              <div
-                style={{
-                  marginTop: 14,
-                  padding: 12,
-                  background: "var(--surface-2)",
-                  borderRadius: 8
+          </div>
+        )}
+
+        {/* Bandeau post-génération : clé + PDF (formulaire déjà fermé/vidé) */}
+        {lastKey && !formOpen && (
+          <div
+            className="card"
+            style={{
+              marginBottom: 16,
+              borderColor: "var(--teal, #2BD9C5)",
+              borderWidth: 1
+            }}>
+            <div className="field-label">Dernière licence générée</div>
+            <code
+              className="mono"
+              style={{ fontSize: 14, wordBreak: "break-all" }}>
+              {lastKey}
+            </code>
+            <div
+              className="row"
+              style={{ gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+              <button
+                className="btn secondary btn-sm"
+                type="button"
+                onClick={() => {
+                  void navigator.clipboard.writeText(lastKey)
+                  setInfo("Clé copiée")
                 }}>
-                <div className="field-label">Dernière clé</div>
-                <code
-                  className="mono"
-                  style={{ fontSize: 14, wordBreak: "break-all" }}>
-                  {lastKey}
-                </code>
-                <div
-                  className="row"
-                  style={{ gap: 8, marginTop: 8, flexWrap: "wrap" }}>
-                  <button
-                    className="btn secondary btn-sm"
-                    type="button"
-                    onClick={() => {
-                      void navigator.clipboard.writeText(lastKey)
-                      setInfo("Clé copiée")
-                    }}>
-                    Copier
-                  </button>
-                  <button
-                    className="btn btn-sm"
-                    type="button"
-                    disabled={busy}
-                    onClick={async () => {
-                      setBusy(true)
-                      try {
-                        await downloadPdf(lastKey)
-                        setInfo("PDF brandé téléchargé")
-                      } catch (e) {
-                        setErr(String(e))
-                      } finally {
-                        setBusy(false)
-                      }
-                    }}>
-                    Télécharger PDF
-                  </button>
-                </div>
-              </div>
-            )}
+                Copier la clé
+              </button>
+              <button
+                className="btn btn-sm"
+                type="button"
+                disabled={busy}
+                onClick={async () => {
+                  setBusy(true)
+                  try {
+                    await downloadPdf(lastKey)
+                    setInfo("PDF brandé téléchargé")
+                  } catch (e) {
+                    setErr(String(e))
+                  } finally {
+                    setBusy(false)
+                  }
+                }}>
+                Télécharger le PDF brandé
+              </button>
+              <button
+                className="btn secondary btn-sm"
+                type="button"
+                onClick={() => setLastKey(null)}>
+                Masquer
+              </button>
+            </div>
           </div>
         )}
 

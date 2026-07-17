@@ -141,6 +141,8 @@ export type FileScanStatus =
   | "warn_confirm"
   | "office_warn"
   | "image_skipped"
+  | "image_ocr_limited"
+  | "image_ocr_failed"
   | "media_warn"
 
 export interface FileScanOptions {
@@ -199,9 +201,15 @@ export function isScannableFile(file: File, opts: FileScanOptions = {}): boolean
   if (cat === "media") return false // warn only
   if (cat === "image") return !!opts.scanImages
   if (cat === "office") {
-    // PDF + DOCX extraits en lib ; autres Office → warn only
+    // PDF / DOCX / PPTX / XLSX extraits ; legacy Office → warn only
     const ext = extensionOf(file.name)
-    return ext === "pdf" || ext === "docx"
+    return (
+      ext === "pdf" ||
+      ext === "docx" ||
+      ext === "pptx" ||
+      ext === "xlsx" ||
+      ext === "xlsm"
+    )
   }
   if (cat === "database") {
     if (opts.scanDatabases === false) return false
@@ -264,19 +272,141 @@ export async function scanFile(
           "Image non scannée (OCR désactivé en policy). Confirmez l’envoi — un log sera enregistré."
       }
     }
-    // OCR non embarqué en V1 (perf) — warning
-    return {
-      ...base,
-      status: "image_skipped",
-      userHint:
-        "OCR image non disponible dans cette version. Confirmez l’envoi — un log sera enregistré."
+    const ext = extensionOf(file.name)
+    // SVG : texte XML direct (pas Tesseract)
+    if (ext === "svg") {
+      try {
+        const svgText = await readFileAsText(file, MAX_FILE_BYTES)
+        const plain = svgText
+          .replace(/<[^>]+>/g, " ")
+          .replace(/\s+/g, " ")
+          .trim()
+        if (plain.length > 8) {
+          const detections = detectSensitiveData(plain, rules)
+          return {
+            ...base,
+            status: "scanned",
+            text: plain.slice(0, 200_000),
+            detections
+          }
+        }
+      } catch {
+        /* fall through OCR / name */
+      }
+    }
+    // OCR bitmap (PNG/JPEG/WebP/…) — background d’abord (évite CSP page), puis local
+    try {
+      const { OCR_LIMITS, fileToBase64, ocrBitmapFile } = await import(
+        "./ocr-bitmap"
+      )
+      if (file.size > OCR_LIMITS.maxInputBytes) {
+        const nameHits = detectSensitiveData(
+          `${file.name} ${file.name.replace(/[_\-.]+/g, " ")}`,
+          rules
+        )
+        return {
+          ...base,
+          status: "image_ocr_limited",
+          detections: nameHits,
+          userHint: `Image trop grande pour OCR (> ${Math.round(OCR_LIMITS.maxInputBytes / 1_000_000)} Mo). Confirmez l’envoi — log enregistré.`
+        }
+      }
+
+      type OcrOut =
+        | { ok: true; text: string; truncated: boolean }
+        | { ok: false; error: string }
+
+      let ocr: OcrOut
+      // 1) Service worker (fiable sur sites à CSP strict)
+      try {
+        const { sendMessage } = await import("./browser-api")
+        const b64 = await fileToBase64(file)
+        const resp = (await sendMessage({
+          type: "OCR_BITMAP",
+          base64: b64,
+          mime: file.type || "image/png",
+          fileName: file.name
+        })) as {
+          ok?: boolean
+          text?: string
+          truncated?: boolean
+          error?: string
+        }
+        if (resp?.ok && typeof resp.text === "string") {
+          ocr = {
+            ok: true,
+            text: resp.text,
+            truncated: !!resp.truncated
+          }
+        } else {
+          throw new Error(resp?.error || "bg_ocr_failed")
+        }
+      } catch {
+        // 2) Fallback content-script (lab / pages permissives)
+        const local = await ocrBitmapFile(file)
+        ocr =
+          local.ok === true
+            ? { ok: true, text: local.text, truncated: local.truncated }
+            : { ok: false, error: local.ok === false ? local.error : "ocr_failed" }
+      }
+
+      if (ocr.ok === true && ocr.text.trim().length >= 3) {
+        const detections = detectSensitiveData(ocr.text, rules)
+        return {
+          ...base,
+          status: ocr.truncated ? "too_large_partial" : "scanned",
+          text: ocr.text,
+          detections,
+          truncated: ocr.truncated,
+          userHint: ocr.truncated
+            ? "OCR partiel (texte tronqué)."
+            : undefined
+        }
+      }
+      if (ocr.ok === true && ocr.text.trim().length < 3) {
+        return {
+          ...base,
+          status: "scanned",
+          text: "",
+          detections: [],
+          userHint: "OCR : peu ou pas de texte détecté dans l’image."
+        }
+      }
+      const nameHits = detectSensitiveData(
+        `${file.name} ${file.name.replace(/[_\-.]+/g, " ")}`,
+        rules
+      )
+      const errMsg = ocr.ok === false ? ocr.error : "error"
+      return {
+        ...base,
+        status: "image_ocr_failed",
+        detections: nameHits,
+        userHint: `OCR indisponible (${errMsg}). Confirmez l’envoi — log enregistré.`
+      }
+    } catch (e) {
+      const nameHits = detectSensitiveData(
+        `${file.name} ${file.name.replace(/[_\-.]+/g, " ")}`,
+        rules
+      )
+      return {
+        ...base,
+        status: "image_ocr_failed",
+        detections: nameHits,
+        userHint: `OCR en échec (${e instanceof Error ? e.message : "error"}). Confirmez l’envoi — log enregistré.`
+      }
     }
   }
 
   if (category === "office") {
     const ext = extensionOf(file.name)
-    // PDF / DOCX : parse réel via pdfjs + mammoth
-    if (ext === "pdf" || ext === "docx") {
+    // PDF / DOCX / PPTX / XLSX
+    if (
+      ext === "pdf" ||
+      ext === "docx" ||
+      ext === "pptx" ||
+      ext === "xlsx" ||
+      ext === "xlsm"
+    ) {
       try {
         const { extractOfficeText } = await import("./office-extract")
         const extracted = await extractOfficeText(file, MAX_FILE_BYTES)
@@ -309,12 +439,12 @@ export async function scanFile(
         }
       }
     }
-    // Autres Office (doc, xlsx, pptx…) — pas encore de parser embarqué
+    // Legacy Office binaires (doc, xls, ppt) — non supportés
     return {
       ...base,
       status: "office_warn",
       userHint:
-        "Document bureautique (legacy Office / tableur / présentation) : extraction non supportée dans cette version. Confirmez l’envoi — un log avec type et nom de fichier sera enregistré."
+        "Format Office legacy (doc/xls/ppt) non supporté — utilisez DOCX / XLSX / PPTX. Confirmez l’envoi — log avec type et nom enregistré."
     }
   }
 

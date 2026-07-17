@@ -416,6 +416,11 @@ export class PgStore implements OpsGateStore {
     this.pool = pool
   }
 
+  /** Exposé pour WebAuthn / jobs qui partagent le pool */
+  getPgPool(): pg.Pool {
+    return this.pool
+  }
+
   static async create(databaseUrl: string): Promise<PgStore> {
     const raw = new Pool({ connectionString: databaseUrl })
     const pool = wrapPoolWithRls(raw)
@@ -453,7 +458,15 @@ export class PgStore implements OpsGateStore {
       `ALTER TABLE detection_events ADD COLUMN IF NOT EXISTS exit_admin_id TEXT`,
       `ALTER TABLE detection_events ADD COLUMN IF NOT EXISTS exit_admin_label TEXT`,
       `ALTER TABLE moving_rules ADD COLUMN IF NOT EXISTS conditions_json TEXT NOT NULL DEFAULT '[]'`,
+      `ALTER TABLE moving_rules ADD COLUMN IF NOT EXISTS condition_logic TEXT NOT NULL DEFAULT 'and'`,
+      `ALTER TABLE moving_rules ADD COLUMN IF NOT EXISTS permanent BOOLEAN NOT NULL DEFAULT FALSE`,
       `ALTER TABLE admin_sessions ADD COLUMN IF NOT EXISTS last_activity_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`,
+      `ALTER TABLE admin_sessions ADD COLUMN IF NOT EXISTS read_only BOOLEAN NOT NULL DEFAULT FALSE`,
+      // WORM audit : colonnes avant index (bases déjà créées sans seq)
+      `ALTER TABLE admin_audit_events ADD COLUMN IF NOT EXISTS seq BIGINT`,
+      `ALTER TABLE admin_audit_events ADD COLUMN IF NOT EXISTS entry_hash TEXT`,
+      `ALTER TABLE admin_audit_events ADD COLUMN IF NOT EXISTS prev_hash TEXT`,
+      `CREATE INDEX IF NOT EXISTS admin_audit_org_seq_idx ON admin_audit_events(org_id, seq DESC)`,
       // Nouveaux agents : pas de licence tant qu'aucun groupe (sauf assignation manuelle)
       `ALTER TABLE agents ALTER COLUMN license_assigned SET DEFAULT FALSE`,
       `ALTER TABLE policies ADD COLUMN IF NOT EXISTS user_messages_json TEXT NOT NULL DEFAULT '{}'`,
@@ -506,7 +519,29 @@ export class PgStore implements OpsGateStore {
         consumed_at TIMESTAMPTZ,
         consumed_agent_id TEXT,
         active BOOLEAN NOT NULL DEFAULT TRUE
-      )`
+      )`,
+      `CREATE TABLE IF NOT EXISTS user_inbox_messages (
+        id TEXT PRIMARY KEY,
+        org_id TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+        agent_id TEXT NOT NULL,
+        device_label TEXT NOT NULL DEFAULT '',
+        host_name TEXT,
+        category TEXT NOT NULL DEFAULT 'question',
+        subject TEXT NOT NULL,
+        body TEXT NOT NULL,
+        context_url TEXT,
+        context_hostname TEXT,
+        status TEXT NOT NULL DEFAULT 'open',
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        read_at TIMESTAMPTZ,
+        replied_at TIMESTAMPTZ,
+        closed_at TIMESTAMPTZ,
+        admin_reply TEXT,
+        replied_by_admin_id TEXT,
+        replied_by_admin_label TEXT,
+        user_acked_at TIMESTAMPTZ
+      )`,
+      `ALTER TABLE user_inbox_messages ADD COLUMN IF NOT EXISTS user_acked_at TIMESTAMPTZ`
     ]
     for (const q of alters) {
       await this.pool.query(q)
@@ -522,6 +557,22 @@ export class PgStore implements OpsGateStore {
       .query(
         `CREATE INDEX IF NOT EXISTS recovery_codes_org_active_idx
          ON recovery_codes(org_id) WHERE active = TRUE AND consumed_at IS NULL`
+      )
+      .catch(() => {
+        /* ignore */
+      })
+    await this.pool
+      .query(
+        `CREATE INDEX IF NOT EXISTS user_inbox_org_created_idx
+         ON user_inbox_messages(org_id, created_at DESC)`
+      )
+      .catch(() => {
+        /* ignore */
+      })
+    await this.pool
+      .query(
+        `CREATE INDEX IF NOT EXISTS user_inbox_org_status_idx
+         ON user_inbox_messages(org_id, status)`
       )
       .catch(() => {
         /* ignore */
@@ -1768,6 +1819,73 @@ export class PgStore implements OpsGateStore {
     return rows.map(rowAdmin)
   }
 
+  async listAccessibleOrgsForEmail(email: string) {
+    const emailNorm = (email || "").trim().toLowerCase()
+    if (!emailNorm || !emailNorm.includes("@")) return []
+    const { rows } = await this.pool.query(
+      `SELECT o.id AS org_id, o.org_code, o.name,
+              a.id AS admin_id, a.is_principal
+       FROM org_admins a
+       INNER JOIN organizations o ON o.id = a.org_id
+       WHERE lower(a.email) = $1
+         AND a.active = TRUE
+         AND a.locked_at IS NULL
+         AND COALESCE(o.is_personal, FALSE) = FALSE
+         AND (
+           a.is_principal = TRUE
+           OR a.permissions @> '["console_access"]'::jsonb
+         )
+       ORDER BY o.name ASC`,
+      [emailNorm]
+    )
+    return rows.map((r) => ({
+      org_id: r.org_id as string,
+      org_code: (r.org_code as string) || (r.org_id as string),
+      name: (r.name as string) || (r.org_id as string),
+      is_principal: !!r.is_principal,
+      admin_id: r.admin_id as string
+    }))
+  }
+
+  async switchAdminOrg(opts: {
+    currentToken: string
+    targetOrgId: string
+    force?: boolean
+  }) {
+    const resolved = await this.resolveAdminSession(opts.currentToken)
+    if (!resolved) return { ok: false as const, error: "session_invalid" }
+    const targetOrgId = opts.targetOrgId.trim()
+    if (!targetOrgId) return { ok: false as const, error: "org_id_required" }
+    if (resolved.session.orgId === targetOrgId) {
+      return {
+        ok: true as const,
+        session: resolved.session,
+        admin: resolved.admin,
+        forced: false
+      }
+    }
+    const peers = await this.listAccessibleOrgsForEmail(resolved.admin.email)
+    const hit = peers.find((p) => p.org_id === targetOrgId)
+    if (!hit) return { ok: false as const, error: "org_not_accessible" }
+    const { rows } = await this.pool.query(
+      `SELECT * FROM org_admins WHERE org_id = $1 AND id = $2 AND active = TRUE`,
+      [targetOrgId, hit.admin_id]
+    )
+    if (!rows[0]) return { ok: false as const, error: "admin_not_found" }
+    const targetAdmin = rowAdmin(rows[0])
+    if (targetAdmin.lockedAt) {
+      return { ok: false as const, error: "account_locked" }
+    }
+    // Révoquer la session courante
+    await this.pool.query(
+      `DELETE FROM admin_sessions WHERE token_hash = $1`,
+      [hashToken(opts.currentToken)]
+    )
+    return this.issueAdminSession(targetAdmin, {
+      force: opts.force !== false
+    })
+  }
+
   async deleteAdmin(orgId: string, adminId: string) {
     const { rows } = await this.pool.query(
       `SELECT * FROM org_admins WHERE org_id = $1 AND id = $2`,
@@ -1832,6 +1950,7 @@ export class PgStore implements OpsGateStore {
     password: string,
     opts?: {
       force?: boolean
+      readOnly?: boolean
       totpCode?: string
       orgId?: string
       orgCode?: string
@@ -1907,12 +2026,15 @@ export class PgStore implements OpsGateStore {
         return { ok: false as const, error: "mfa_invalid" }
       }
     }
-    return this.issueAdminSession(admin, opts?.force)
+    return this.issueAdminSession(admin, {
+      force: opts?.force,
+      readOnly: opts?.readOnly
+    })
   }
 
   async createAdminSessionOidc(
     email: string,
-    opts?: { force?: boolean }
+    opts?: { force?: boolean; readOnly?: boolean }
   ) {
     const emailNorm = email.trim().toLowerCase()
     const { rows } = await this.pool.query(
@@ -1936,53 +2058,116 @@ export class PgStore implements OpsGateStore {
       return { ok: false as const, error: "no_console_access" }
     }
     // SSO : MFA local non exigé
-    return this.issueAdminSession(admin, opts?.force)
+    return this.issueAdminSession(admin, {
+      force: opts?.force,
+      readOnly: opts?.readOnly
+    })
   }
 
-  private async issueAdminSession(admin: OrgAdmin, force?: boolean) {
+  async issueAdminSessionDirect(opts: {
+    orgId: string
+    adminId: string
+    force?: boolean
+    readOnly?: boolean
+  }) {
+    const { rows } = await this.pool.query(
+      `SELECT * FROM org_admins WHERE id = $1 AND org_id = $2 AND active = TRUE`,
+      [opts.adminId, opts.orgId]
+    )
+    if (!rows[0]) return { ok: false as const, error: "admin_not_found" }
+    const admin = rowAdmin(rows[0])
+    if (admin.lockedAt) return { ok: false as const, error: "account_locked" }
+    return this.issueAdminSession(admin, {
+      force: opts.force,
+      readOnly: opts.readOnly
+    })
+  }
+
+  private async issueAdminSession(
+    admin: OrgAdmin,
+    opts?: { force?: boolean; readOnly?: boolean }
+  ) {
     await this.clearAdminLoginFailures(admin.id)
     const idleSec = Math.floor(PgStore.SESSION_IDLE_MS / 1000)
+    const readOnly = !!opts?.readOnly
+    const force = !!opts?.force
     await this.pool.query(
       `DELETE FROM admin_sessions
        WHERE expires_at < NOW()
           OR COALESCE(last_activity_at, created_at) < NOW() - ($1 || ' seconds')::interval`,
       [String(idleSec)]
     )
-    const { rows: active } = await this.pool.query(
-      `SELECT 1 FROM admin_sessions
-       WHERE admin_id = $1 AND expires_at > NOW()
-       LIMIT 1`,
-      [admin.id]
-    )
+    // Colonne read_only optionnelle (migration soft)
+    await this.pool.query(
+      `ALTER TABLE admin_sessions ADD COLUMN IF NOT EXISTS read_only BOOLEAN NOT NULL DEFAULT FALSE`
+    ).catch(() => {
+      /* ignore si pas de droits ALTER */
+    })
+
     let forced = false
-    if (active[0]) {
-      if (force) {
-        await this.pool.query(`DELETE FROM admin_sessions WHERE admin_id = $1`, [
-          admin.id
-        ])
-        forced = true
-      } else {
-        return { ok: false as const, error: "session_already_active" }
+    if (force) {
+      const del = await this.pool.query(
+        `DELETE FROM admin_sessions WHERE admin_id = $1`,
+        [admin.id]
+      )
+      forced = (del.rowCount || 0) > 0
+    } else if (!readOnly) {
+      // Session full : bloquer s’il existe déjà une full active
+      const { rows: activeFull } = await this.pool.query(
+        `SELECT 1 FROM admin_sessions
+         WHERE admin_id = $1 AND expires_at > NOW()
+           AND COALESCE(read_only, FALSE) = FALSE
+         LIMIT 1`,
+        [admin.id]
+      )
+      if (activeFull[0]) {
+        return {
+          ok: false as const,
+          error: "session_already_active",
+          orgId: admin.orgId,
+          adminId: admin.id,
+          adminEmail: admin.email
+        }
       }
     }
+    // readOnly : peut coexister ; on ne kick pas
+
     const token = `ogs_${newToken().replace(/^ogt_/, "")}`
     const tokenHash = hashToken(token)
     const now = Date.now()
     const expiresAt = now + 12 * 60 * 60 * 1000
-    await this.pool.query(
-      `INSERT INTO admin_sessions (token_hash, org_id, admin_id, expires_at, created_at, last_activity_at)
-       VALUES ($1,$2,$3,to_timestamp($4/1000.0),NOW(),NOW())`,
-      [tokenHash, admin.orgId, admin.id, expiresAt]
-    )
+    try {
+      await this.pool.query(
+        `INSERT INTO admin_sessions (token_hash, org_id, admin_id, expires_at, created_at, last_activity_at, read_only)
+         VALUES ($1,$2,$3,to_timestamp($4/1000.0),NOW(),NOW(),$5)`,
+        [tokenHash, admin.orgId, admin.id, expiresAt, readOnly]
+      )
+    } catch {
+      // Fallback sans colonne read_only
+      await this.pool.query(
+        `INSERT INTO admin_sessions (token_hash, org_id, admin_id, expires_at, created_at, last_activity_at)
+         VALUES ($1,$2,$3,to_timestamp($4/1000.0),NOW(),NOW())`,
+        [tokenHash, admin.orgId, admin.id, expiresAt]
+      )
+    }
     const session: AdminSession = {
       token,
       orgId: admin.orgId,
       adminId: admin.id,
       expiresAt,
       createdAt: now,
-      lastActivityAt: now
+      lastActivityAt: now,
+      readOnly: readOnly || undefined
     }
     return { ok: true as const, session, admin, forced }
+  }
+
+  async revokeAllAdminSessions(adminId: string) {
+    const r = await this.pool.query(
+      `DELETE FROM admin_sessions WHERE admin_id = $1`,
+      [adminId]
+    )
+    return r.rowCount || 0
   }
 
   async resolveAdminSession(token: string) {
@@ -2028,7 +2213,8 @@ export class PgStore implements OpsGateStore {
       adminId: rows[0].admin_id,
       expiresAt,
       createdAt: new Date(rows[0].created_at).getTime(),
-      lastActivityAt: now
+      lastActivityAt: now,
+      readOnly: rows[0].read_only === true ? true : undefined
     }
     return { session, admin }
   }
@@ -3591,6 +3777,241 @@ export class PgStore implements OpsGateStore {
     return { revoked: rowCount || 0 }
   }
 
+  private mapInboxRow(r: pg.QueryResultRow): import("./types").UserInboxMessage {
+    return {
+      id: r.id,
+      orgId: r.org_id,
+      agentId: r.agent_id,
+      deviceLabel: r.device_label || "",
+      hostName: r.host_name ?? null,
+      category: (r.category || "question") as import("./types").InboxMessageCategory,
+      subject: r.subject,
+      body: r.body,
+      contextUrl: r.context_url ?? null,
+      contextHostname: r.context_hostname ?? null,
+      status: (r.status || "open") as import("./types").InboxMessageStatus,
+      createdAt: new Date(r.created_at).toISOString(),
+      readAt: r.read_at ? new Date(r.read_at).toISOString() : null,
+      repliedAt: r.replied_at ? new Date(r.replied_at).toISOString() : null,
+      closedAt: r.closed_at ? new Date(r.closed_at).toISOString() : null,
+      adminReply: r.admin_reply ?? null,
+      repliedByAdminId: r.replied_by_admin_id ?? null,
+      repliedByAdminLabel: r.replied_by_admin_label ?? null,
+      userAckedAt: r.user_acked_at
+        ? new Date(r.user_acked_at).toISOString()
+        : null
+    }
+  }
+
+  async createInboxMessage(input: {
+    orgId: string
+    agentId: string
+    deviceLabel?: string
+    hostName?: string | null
+    category?: import("./types").InboxMessageCategory
+    subject: string
+    body: string
+    contextUrl?: string | null
+    contextHostname?: string | null
+  }) {
+    const subject = (input.subject || "").trim().slice(0, 120)
+    const body = (input.body || "").trim().slice(0, 4000)
+    if (subject.length < 3) {
+      return { ok: false as const, error: "subject_too_short" }
+    }
+    if (body.length < 5) {
+      return { ok: false as const, error: "body_too_short" }
+    }
+    const { rows: cntRows } = await this.pool.query(
+      `SELECT COUNT(*)::int AS n FROM user_inbox_messages
+       WHERE org_id = $1 AND agent_id = $2
+         AND created_at >= NOW() - interval '24 hours'`,
+      [input.orgId, input.agentId]
+    )
+    if ((cntRows[0]?.n as number) >= 15) {
+      return { ok: false as const, error: "rate_limited" }
+    }
+    const allowed: import("./types").InboxMessageCategory[] = [
+      "question",
+      "exception",
+      "block_appeal",
+      "other"
+    ]
+    const cat = input.category || "question"
+    const category = allowed.includes(cat) ? cat : "question"
+    const id = newId("inbox")
+    const now = new Date().toISOString()
+    await this.pool.query(
+      `INSERT INTO user_inbox_messages (
+         id, org_id, agent_id, device_label, host_name, category,
+         subject, body, context_url, context_hostname, status, created_at
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'open',$11)`,
+      [
+        id,
+        input.orgId,
+        input.agentId,
+        (input.deviceLabel || "").trim() || "agent",
+        input.hostName ?? null,
+        category,
+        subject,
+        body,
+        input.contextUrl?.trim() || null,
+        input.contextHostname?.trim() || null,
+        now
+      ]
+    )
+    const msg = await this.getInboxMessage(input.orgId, id)
+    if (!msg) return { ok: false as const, error: "create_failed" }
+    return { ok: true as const, message: msg }
+  }
+
+  async listInboxMessages(
+    orgId: string,
+    opts?: {
+      status?: import("./types").InboxMessageStatus | "all" | "unread"
+      limit?: number
+      agentId?: string
+    }
+  ) {
+    const limit = Math.min(200, Math.max(1, opts?.limit || 50))
+    const params: unknown[] = [orgId]
+    let where = `org_id = $1`
+    if (opts?.agentId) {
+      params.push(opts.agentId)
+      where += ` AND agent_id = $${params.length}`
+    }
+    const st = opts?.status || "all"
+    if (st === "unread") {
+      where += ` AND status = 'open'`
+    } else if (st !== "all") {
+      params.push(st)
+      where += ` AND status = $${params.length}`
+    }
+    params.push(limit)
+    const { rows } = await this.pool.query(
+      `SELECT * FROM user_inbox_messages
+       WHERE ${where}
+       ORDER BY created_at DESC
+       LIMIT $${params.length}`,
+      params
+    )
+    return rows.map((r) => this.mapInboxRow(r))
+  }
+
+  async getInboxMessage(orgId: string, messageId: string) {
+    const { rows } = await this.pool.query(
+      `SELECT * FROM user_inbox_messages WHERE org_id = $1 AND id = $2`,
+      [orgId, messageId]
+    )
+    return rows[0] ? this.mapInboxRow(rows[0]) : undefined
+  }
+
+  async markInboxRead(orgId: string, messageId: string) {
+    await this.pool.query(
+      `UPDATE user_inbox_messages
+       SET status = CASE WHEN status = 'open' THEN 'read' ELSE status END,
+           read_at = COALESCE(read_at, NOW())
+       WHERE org_id = $1 AND id = $2`,
+      [orgId, messageId]
+    )
+    return this.getInboxMessage(orgId, messageId)
+  }
+
+  async replyInboxMessage(
+    orgId: string,
+    messageId: string,
+    reply: string,
+    admin: { id: string; label: string }
+  ) {
+    const text = (reply || "").trim().slice(0, 4000)
+    if (text.length < 1) return undefined
+    const { rowCount } = await this.pool.query(
+      `UPDATE user_inbox_messages
+       SET status = 'replied',
+           admin_reply = $3,
+           replied_at = NOW(),
+           read_at = COALESCE(read_at, NOW()),
+           replied_by_admin_id = $4,
+           replied_by_admin_label = $5,
+           user_acked_at = NULL
+       WHERE org_id = $1 AND id = $2`,
+      [orgId, messageId, text, admin.id, admin.label]
+    )
+    if (!rowCount) return undefined
+    return this.getInboxMessage(orgId, messageId)
+  }
+
+  async ackInboxMessage(orgId: string, messageId: string, agentId: string) {
+    const { rowCount } = await this.pool.query(
+      `UPDATE user_inbox_messages
+       SET user_acked_at = NOW()
+       WHERE org_id = $1 AND id = $2 AND agent_id = $3
+         AND admin_reply IS NOT NULL AND admin_reply <> ''`,
+      [orgId, messageId, agentId]
+    )
+    if (!rowCount) {
+      return this.getInboxMessage(orgId, messageId)
+    }
+    return this.getInboxMessage(orgId, messageId)
+  }
+
+  async listPendingAdminReplies(orgId: string, agentId: string) {
+    const { rows } = await this.pool.query(
+      `SELECT * FROM user_inbox_messages
+       WHERE org_id = $1 AND agent_id = $2
+         AND admin_reply IS NOT NULL AND admin_reply <> ''
+         AND user_acked_at IS NULL
+       ORDER BY COALESCE(replied_at, created_at) DESC`,
+      [orgId, agentId]
+    )
+    return rows.map((r) => this.mapInboxRow(r))
+  }
+
+  async closeInboxMessage(orgId: string, messageId: string) {
+    const cur = await this.getInboxMessage(orgId, messageId)
+    if (!cur) return undefined
+    const systemClose =
+      "Votre demande a été clôturée par l'administrateur (sans message de réponse)."
+    const hadReply = !!(cur.adminReply && cur.adminReply.trim())
+    const { rowCount } = await this.pool.query(
+      `UPDATE user_inbox_messages
+       SET status = 'closed',
+           closed_at = NOW(),
+           read_at = COALESCE(read_at, NOW()),
+           admin_reply = CASE
+             WHEN admin_reply IS NULL OR trim(admin_reply) = '' THEN $3
+             ELSE admin_reply
+           END,
+           replied_at = CASE
+             WHEN admin_reply IS NULL OR trim(admin_reply) = '' THEN NOW()
+             ELSE replied_at
+           END,
+           replied_by_admin_label = CASE
+             WHEN admin_reply IS NULL OR trim(admin_reply) = ''
+               THEN COALESCE(replied_by_admin_label, 'Administrateur')
+             ELSE replied_by_admin_label
+           END,
+           user_acked_at = CASE
+             WHEN admin_reply IS NULL OR trim(admin_reply) = '' THEN NULL
+             ELSE user_acked_at
+           END
+       WHERE org_id = $1 AND id = $2`,
+      [orgId, messageId, systemClose]
+    )
+    if (!rowCount) return undefined
+    void hadReply
+    return this.getInboxMessage(orgId, messageId)
+  }
+
+  async countInboxUnread(orgId: string) {
+    const { rows } = await this.pool.query(
+      `SELECT COUNT(*)::int AS n FROM user_inbox_messages
+       WHERE org_id = $1 AND status = 'open'`,
+      [orgId]
+    )
+    return (rows[0]?.n as number) || 0
+  }
+
   private parseMovingConditions(
     r: pg.QueryResultRow
   ): import("./types").MovingCondition[] {
@@ -3669,18 +4090,22 @@ export class PgStore implements OpsGateStore {
         op: r.match_op,
         value: r.match_value
       }
+      const permanent = r.permanent === true
+      const logic = r.condition_logic === "or" ? "or" : "and"
       return {
         id: r.id,
         orgId: r.org_id,
         name: r.name,
         enabled: r.enabled !== false,
         conditions,
+        conditionLogic: logic as "and" | "or",
         matchField: first.field,
         matchOp: first.op,
         matchValue: first.value,
         targetGroupId: r.target_group_id,
         priority: r.priority ?? 100,
-        onlyIfUnassigned: r.only_if_unassigned === true,
+        onlyIfUnassigned: permanent ? false : r.only_if_unassigned === true,
+        permanent,
         createdAt: new Date(r.created_at).toISOString(),
         updatedAt: new Date(r.updated_at).toISOString()
       }
@@ -3700,6 +4125,8 @@ export class PgStore implements OpsGateStore {
       targetGroupId: string
       priority?: number
       onlyIfUnassigned?: boolean
+      conditionLogic?: import("./types").MovingConditionLogic
+      permanent?: boolean
     }
   ) {
     const org = await this.getOrg(orgId)
@@ -3709,13 +4136,29 @@ export class PgStore implements OpsGateStore {
     const first = conditions[0]
     const condJson = JSON.stringify(conditions)
     const now = new Date().toISOString()
-    const onlyUnassigned = input.onlyIfUnassigned === true
+    const permanent = input.permanent === true
+    const onlyUnassigned = permanent
+      ? false
+      : input.onlyIfUnassigned === true
+    const logic = input.conditionLogic === "or" ? "or" : "and"
+    // Soft columns
+    await this.pool
+      .query(
+        `ALTER TABLE moving_rules ADD COLUMN IF NOT EXISTS condition_logic TEXT NOT NULL DEFAULT 'and'`
+      )
+      .catch(() => undefined)
+    await this.pool
+      .query(
+        `ALTER TABLE moving_rules ADD COLUMN IF NOT EXISTS permanent BOOLEAN NOT NULL DEFAULT FALSE`
+      )
+      .catch(() => undefined)
     if (input.id) {
       const { rows } = await this.pool.query(
         `UPDATE moving_rules SET
           name=$3, enabled=$4, match_field=$5, match_op=$6, match_value=$7,
           conditions_json=$8, target_group_id=$9, priority=$10,
-          only_if_unassigned=$11, updated_at=$12
+          only_if_unassigned=$11, updated_at=$12,
+          condition_logic=$13, permanent=$14
          WHERE org_id=$1 AND id=$2 RETURNING *`,
         [
           orgId,
@@ -3729,31 +4172,56 @@ export class PgStore implements OpsGateStore {
           input.targetGroupId,
           input.priority ?? 100,
           onlyUnassigned,
-          now
+          now,
+          logic,
+          permanent
         ]
       )
       if (!rows[0]) return undefined
       return (await this.listMovingRules(orgId)).find((r) => r.id === input.id)
     }
     const id = newId("mvr")
-    await this.pool.query(
-      `INSERT INTO moving_rules (id, org_id, name, enabled, match_field, match_op, match_value, conditions_json, target_group_id, priority, only_if_unassigned, created_at, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$12)`,
-      [
-        id,
-        orgId,
-        input.name,
-        input.enabled !== false,
-        first.field,
-        first.op,
-        first.value,
-        condJson,
-        input.targetGroupId,
-        input.priority ?? 100,
-        onlyUnassigned,
-        now
-      ]
-    )
+    try {
+      await this.pool.query(
+        `INSERT INTO moving_rules (id, org_id, name, enabled, match_field, match_op, match_value, conditions_json, target_group_id, priority, only_if_unassigned, created_at, updated_at, condition_logic, permanent)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$12,$13,$14)`,
+        [
+          id,
+          orgId,
+          input.name,
+          input.enabled !== false,
+          first.field,
+          first.op,
+          first.value,
+          condJson,
+          input.targetGroupId,
+          input.priority ?? 100,
+          onlyUnassigned,
+          now,
+          logic,
+          permanent
+        ]
+      )
+    } catch {
+      await this.pool.query(
+        `INSERT INTO moving_rules (id, org_id, name, enabled, match_field, match_op, match_value, conditions_json, target_group_id, priority, only_if_unassigned, created_at, updated_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$12)`,
+        [
+          id,
+          orgId,
+          input.name,
+          input.enabled !== false,
+          first.field,
+          first.op,
+          first.value,
+          condJson,
+          input.targetGroupId,
+          input.priority ?? 100,
+          onlyUnassigned,
+          now
+        ]
+      )
+    }
     return (await this.listMovingRules(orgId)).find((r) => r.id === id)
   }
 
@@ -3804,7 +4272,7 @@ export class PgStore implements OpsGateStore {
               value: rule.matchValue
             }
           ]
-    return conds.every((c) => {
+    const matchOne = (c: import("./types").MovingCondition) => {
       const label = agent.deviceLabel || ""
       const host = agent.hostName || ""
       if (c.field === "host_name") {
@@ -3817,7 +4285,9 @@ export class PgStore implements OpsGateStore {
         this.matchMovingRule(label, c.op, c.value) ||
         this.matchMovingRule(host, c.op, c.value)
       )
-    })
+    }
+    if (rule.conditionLogic === "or") return conds.some(matchOne)
+    return conds.every(matchOne)
   }
 
   async applyMovingRules(orgId: string, agentId: string) {
@@ -3826,7 +4296,7 @@ export class PgStore implements OpsGateStore {
     if (!agent) return { applied: false as const }
     const rules = (await this.listMovingRules(orgId)).filter((r) => r.enabled)
     for (const rule of rules) {
-      if (rule.onlyIfUnassigned && agent.groupId) {
+      if (!rule.permanent && rule.onlyIfUnassigned && agent.groupId) {
         continue
       }
       if (!this.ruleMatchesAgent(rule, agent)) continue
@@ -3847,6 +4317,125 @@ export class PgStore implements OpsGateStore {
       }
     }
     return { applied: false as const }
+  }
+
+  async importAgentsCsv(
+    orgId: string,
+    rows: Array<{
+      agent_id?: string
+      device_label?: string
+      host_name?: string
+      group_name?: string
+      group_id?: string
+      profile_name?: string
+      profile_id?: string
+      license?: boolean | null
+    }>,
+    opts?: { dryRun?: boolean }
+  ) {
+    const dry = !!opts?.dryRun
+    const agents = await this.listAgents(orgId)
+    const groups = await this.listGroups(orgId)
+    const profiles = await this.listProfiles(orgId)
+    let matched = 0
+    let updated = 0
+    let skipped = 0
+    const errors: string[] = []
+    const preview: Array<{ agent_id: string; changes: string[] }> = []
+
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i]!
+      const line = i + 2
+      let agent =
+        (row.agent_id && agents.find((a) => a.id === row.agent_id)) ||
+        undefined
+      if (!agent && row.device_label?.trim()) {
+        const lab = row.device_label.trim().toLowerCase()
+        agent = agents.find(
+          (a) => (a.deviceLabel || "").toLowerCase() === lab
+        )
+      }
+      if (!agent && row.host_name?.trim()) {
+        const h = row.host_name.trim().toLowerCase()
+        agent = agents.find((a) => (a.hostName || "").toLowerCase() === h)
+      }
+      if (!agent) {
+        skipped++
+        errors.push(`L${line}: agent introuvable`)
+        continue
+      }
+      matched++
+      const changes: string[] = []
+      let groupId: string | null | undefined =
+        row.group_id !== undefined ? row.group_id.trim() || null : undefined
+      if (groupId === undefined && row.group_name?.trim()) {
+        const g = groups.find(
+          (x) => x.name.toLowerCase() === row.group_name!.trim().toLowerCase()
+        )
+        if (!g) errors.push(`L${line}: groupe « ${row.group_name} » inconnu`)
+        else groupId = g.id
+      }
+      let profileId: string | null | undefined =
+        row.profile_id !== undefined
+          ? row.profile_id.trim() || null
+          : undefined
+      if (profileId === undefined && row.profile_name?.trim()) {
+        const p = profiles.find(
+          (x) =>
+            x.name.toLowerCase() === row.profile_name!.trim().toLowerCase()
+        )
+        if (!p) errors.push(`L${line}: profil « ${row.profile_name} » inconnu`)
+        else profileId = p.id
+      }
+      if (groupId !== undefined) {
+        changes.push(`group=${groupId ?? "null"}`)
+        if (!dry) {
+          const g = groups.find((x) => x.id === groupId)
+          const autoProfile =
+            profileId === undefined ? g?.policyProfileId || null : profileId
+          await this.pool.query(
+            `UPDATE agents SET group_id = $3,
+               policy_profile_id = COALESCE($4, policy_profile_id),
+               last_seen_at = NOW()
+             WHERE org_id = $1 AND id = $2`,
+            [orgId, agent.id, groupId, autoProfile]
+          )
+          if (groupId) await this.tryAssignLicenseForGroup(orgId, agent.id)
+        }
+      }
+      if (profileId !== undefined) {
+        changes.push(`profile=${profileId ?? "null"}`)
+        if (!dry) {
+          await this.pool.query(
+            `UPDATE agents SET policy_profile_id = $3, last_seen_at = NOW()
+             WHERE org_id = $1 AND id = $2`,
+            [orgId, agent.id, profileId]
+          )
+        }
+      }
+      if (row.license === true || row.license === false) {
+        changes.push(`license=${row.license}`)
+        if (!dry) {
+          await this.pool.query(
+            `UPDATE agents SET license_assigned = $3,
+               unlicensed_since = CASE WHEN $3 THEN NULL ELSE NOW() END
+             WHERE org_id = $1 AND id = $2`,
+            [orgId, agent.id, row.license]
+          )
+        }
+      }
+      if (changes.length) {
+        updated++
+        preview.push({ agent_id: agent.id, changes })
+      } else skipped++
+    }
+    return {
+      matched,
+      updated,
+      skipped,
+      errors: errors.slice(0, 50),
+      preview: dry ? preview.slice(0, 40) : undefined
+    }
   }
 
   async bulkAssignAgents(
@@ -3899,6 +4488,23 @@ export class PgStore implements OpsGateStore {
     return { updated }
   }
 
+  private async ensureAuditWormColumns() {
+    try {
+      await this.pool.query(`
+        ALTER TABLE admin_audit_events
+          ADD COLUMN IF NOT EXISTS seq BIGINT,
+          ADD COLUMN IF NOT EXISTS entry_hash TEXT,
+          ADD COLUMN IF NOT EXISTS prev_hash TEXT
+      `)
+      await this.pool.query(`
+        CREATE INDEX IF NOT EXISTS admin_audit_org_seq_idx
+          ON admin_audit_events(org_id, seq DESC)
+      `)
+    } catch {
+      /* ignore si pas de droits ALTER */
+    }
+  }
+
   async appendAdminAudit(input: {
     orgId: string
     adminId?: string
@@ -3908,20 +4514,71 @@ export class PgStore implements OpsGateStore {
     detail?: string
     meta?: Record<string, unknown>
   }) {
-    await this.pool.query(
-      `INSERT INTO admin_audit_events (id, org_id, admin_id, admin_email, admin_label, action, detail, meta, created_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,NOW())`,
-      [
-        newId("aud"),
-        input.orgId,
-        input.adminId ?? null,
-        input.adminEmail ?? null,
-        input.adminLabel ?? null,
-        input.action,
-        input.detail ?? null,
-        JSON.stringify(input.meta || {})
-      ]
+    await this.ensureAuditWormColumns()
+    const {
+      AUDIT_GENESIS,
+      computeAuditEntryHash
+    } = await import("./audit-worm")
+    const id = newId("aud")
+    const createdAt = new Date().toISOString()
+    // Dernière entrée WORM de l’org (seq max)
+    const { rows: lastRows } = await this.pool.query(
+      `SELECT seq, entry_hash FROM admin_audit_events
+       WHERE org_id = $1 AND entry_hash IS NOT NULL
+       ORDER BY seq DESC NULLS LAST, created_at DESC
+       LIMIT 1`,
+      [input.orgId]
     )
+    const lastSeq = lastRows[0]?.seq != null ? Number(lastRows[0].seq) : 0
+    const seq = lastSeq + 1
+    const prevHash = lastRows[0]?.entry_hash || AUDIT_GENESIS
+    const entryHash = computeAuditEntryHash({
+      prevHash,
+      seq,
+      id,
+      orgId: input.orgId,
+      action: input.action,
+      detail: input.detail,
+      adminId: input.adminId,
+      createdAt
+    })
+    try {
+      await this.pool.query(
+        `INSERT INTO admin_audit_events
+           (id, org_id, admin_id, admin_email, admin_label, action, detail, meta, created_at, seq, entry_hash, prev_hash)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,to_timestamp($9/1000.0),$10,$11,$12)`,
+        [
+          id,
+          input.orgId,
+          input.adminId ?? null,
+          input.adminEmail ?? null,
+          input.adminLabel ?? null,
+          input.action,
+          input.detail ?? null,
+          JSON.stringify(input.meta || {}),
+          Date.parse(createdAt),
+          seq,
+          entryHash,
+          prevHash
+        ]
+      )
+    } catch {
+      // Fallback sans colonnes WORM
+      await this.pool.query(
+        `INSERT INTO admin_audit_events (id, org_id, admin_id, admin_email, admin_label, action, detail, meta, created_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,NOW())`,
+        [
+          id,
+          input.orgId,
+          input.adminId ?? null,
+          input.adminEmail ?? null,
+          input.adminLabel ?? null,
+          input.action,
+          input.detail ?? null,
+          JSON.stringify(input.meta || {})
+        ]
+      )
+    }
   }
 
   async listAdminAudit(
@@ -3947,7 +4604,34 @@ export class PgStore implements OpsGateStore {
       action: r.action,
       detail: r.detail ?? undefined,
       meta: r.meta || {},
-      createdAt: new Date(r.created_at).toISOString()
+      createdAt: new Date(r.created_at).toISOString(),
+      seq: r.seq != null ? Number(r.seq) : undefined,
+      entryHash: r.entry_hash ?? undefined,
+      prevHash: r.prev_hash ?? undefined
+    }))
+  }
+
+  async listAdminAuditAsc(orgId: string, limit = 5000) {
+    const { rows } = await this.pool.query(
+      `SELECT * FROM admin_audit_events
+       WHERE org_id = $1
+       ORDER BY COALESCE(seq, 0) ASC, created_at ASC
+       LIMIT $2`,
+      [orgId, limit]
+    )
+    return rows.map((r) => ({
+      id: r.id,
+      orgId: r.org_id,
+      adminId: r.admin_id ?? undefined,
+      adminEmail: r.admin_email ?? undefined,
+      adminLabel: r.admin_label ?? undefined,
+      action: r.action as import("./types").AdminAuditAction,
+      detail: r.detail ?? undefined,
+      meta: r.meta || {},
+      createdAt: new Date(r.created_at).toISOString(),
+      seq: r.seq != null ? Number(r.seq) : undefined,
+      entryHash: r.entry_hash ?? undefined,
+      prevHash: r.prev_hash ?? undefined
     }))
   }
 
@@ -4064,12 +4748,30 @@ export class PgStore implements OpsGateStore {
       if (dayMap.has(r.day)) dayMap.set(r.day, r.n)
     }
 
+    const { rows: inboxTopRows } = await this.pool.query(
+      `SELECT agent_id,
+              COALESCE(NULLIF(trim(max(device_label)), ''), left(agent_id, 10)) AS device_label,
+              COUNT(*)::int AS n
+       FROM user_inbox_messages
+       WHERE org_id = $1
+       GROUP BY agent_id
+       ORDER BY n DESC
+       LIMIT 8`,
+      [orgId]
+    ).catch(() => ({ rows: [] as Array<{ agent_id: string; device_label: string; n: number }> }))
+    const top_inbox_requesters = inboxTopRows.map((r) => ({
+      agent_id: r.agent_id as string,
+      device_label: (r.device_label as string) || String(r.agent_id).slice(0, 10),
+      count: (r.n as number) || 0
+    }))
+
     return {
       org_id: orgId,
       agents: agents.length,
       events_total: countRows[0]?.n || 0,
       by_decision: byDecision,
       top_rules: topRules,
+      top_inbox_requesters,
       active_rules_pack: activePack
         ? {
             version: activePack.version,

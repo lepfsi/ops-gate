@@ -59,6 +59,14 @@ async function request<T>(
         details?: string[]
         remaining_attempts?: number
         orgs?: Array<{ org_id: string; org_code: string; name: string }>
+        challenge_id?: string
+        expires_in?: number
+        challenge?: {
+          challenge_id: string
+          status: string
+          seconds_left: number
+          deadline_at: number
+        }
       }) || {}
     // Préférer le message humain (ex. e-mail déjà inscrit)
     const msg = err.message
@@ -70,12 +78,23 @@ async function request<T>(
       code?: string
       remaining_attempts?: number
       orgs?: Array<{ org_id: string; org_code: string; name: string }>
+      challenge_id?: string
+      expires_in?: number
+      challenge?: {
+        challenge_id: string
+        status: string
+        seconds_left: number
+        deadline_at: number
+      }
     }
     e.code = err.error
     if (typeof err.remaining_attempts === "number") {
       e.remaining_attempts = err.remaining_attempts
     }
     if (err.orgs) e.orgs = err.orgs
+    if (err.challenge_id) e.challenge_id = err.challenge_id
+    if (typeof err.expires_in === "number") e.expires_in = err.expires_in
+    if (err.challenge) e.challenge = err.challenge
     throw e
   }
   return data as T
@@ -99,6 +118,11 @@ export type Summary = {
   events_total: number
   by_decision: Record<string, number>
   top_rules: { rule_id: string; count: number }[]
+  top_inbox_requesters?: Array<{
+    agent_id: string
+    device_label: string
+    count: number
+  }>
   active_rules_pack: {
     version: string
     rules_count: number
@@ -151,6 +175,28 @@ export type LogCategories = {
   proxyEvents?: boolean
 }
 
+/** Message inbox user → admin */
+export type InboxMessage = {
+  id: string
+  org_id: string
+  agent_id: string
+  device_label: string
+  host_name?: string | null
+  category: "question" | "exception" | "block_appeal" | "other"
+  subject: string
+  body: string
+  context_url?: string | null
+  context_hostname?: string | null
+  status: "open" | "read" | "replied" | "closed"
+  created_at: string
+  read_at?: string | null
+  replied_at?: string | null
+  closed_at?: string | null
+  admin_reply?: string | null
+  replied_by_admin_id?: string | null
+  replied_by_admin_label?: string | null
+}
+
 /** Rapport sécurité (dashboard compile) */
 export type SecurityReport = {
   schema_version: 1
@@ -196,11 +242,35 @@ export type SecurityReport = {
   }
 }
 
+export type NotificationChannelKind =
+  | "email"
+  | "telegram"
+  | "slack"
+  | "webhook"
+
+export type NotificationChannel = {
+  id: string
+  kind: NotificationChannelKind
+  enabled: boolean
+  label?: string
+  emails?: string[]
+  botToken?: string
+  chatId?: string
+  webhookUrl?: string
+}
+
 export type NotificationSettings = {
   licenseExpiring: boolean
   licenseExpiringDays: number
   loginBruteForce: boolean
   loginBruteForceThreshold: number
+  accountLockoutEmail?: boolean
+  recoveryLowStock?: boolean
+  recoveryLowStockThreshold?: number
+  /** Destinataires e-mail (canal historique) */
+  alertEmails?: string[]
+  /** Canaux externes (Telegram, Slack, webhook…) */
+  channels?: NotificationChannel[]
 }
 
 export type LicenseDisplay = {
@@ -237,7 +307,23 @@ export type MonitoringSettings = {
   }
   /** Rétention detection events (jours)  -  définie par l’entreprise */
   logRetentionDays?: number
+  /** Rétention légale journal audit admin (min 90) */
+  auditLegalRetentionDays?: number
+  /** WORM audit toujours actif */
+  auditWormEnabled?: boolean
   weeklyExportEnabled?: boolean
+  weeklyExportFormats?: Array<"csv" | "json">
+  weeklyExportNotifyEmail?: boolean
+  /** Export auto logs — destinataires, jour, heure, formats (client) */
+  scheduledLogExport?: {
+    enabled: boolean
+    recipientEmails: string[]
+    dayOfWeek: number
+    timeLocal: string
+    timezone: string
+    formats: Array<"csv" | "json">
+    attachFiles: boolean
+  }
   lastWeeklyExportAt?: string | null
   logCategories?: LogCategories
   notifications?: NotificationSettings
@@ -465,12 +551,14 @@ export type MovingRuleRow = {
   name: string
   enabled: boolean
   conditions?: MovingCondition[]
+  conditionLogic?: "and" | "or"
   matchField: "device_label" | "host_name"
   matchOp: "starts_with" | "contains" | "equals" | "regex"
   matchValue: string
   targetGroupId: string
   priority: number
   onlyIfUnassigned: boolean
+  permanent?: boolean
 }
 
 export const api = {
@@ -488,9 +576,13 @@ export const api = {
   login: (
     email: string,
     password: string,
-    force?: boolean,
-    totpCode?: string,
-    org?: { org_id?: string; org_code?: string }
+    opts?: {
+      force?: boolean
+      read_only?: boolean
+      totpCode?: string
+      org_id?: string
+      org_code?: string
+    }
   ) =>
     request<{
       ok: boolean
@@ -499,6 +591,7 @@ export const api = {
       admin: AdminRow
       hint?: string
       forced?: boolean
+      read_only?: boolean
       mfa_enabled?: boolean
     }>("/v1/auth/login", {
       method: "POST",
@@ -506,11 +599,67 @@ export const api = {
       body: JSON.stringify({
         email,
         password,
-        force: !!force,
-        totp_code: totpCode || undefined,
-        org_id: org?.org_id,
-        org_code: org?.org_code
+        force: !!opts?.force,
+        read_only: !!opts?.read_only,
+        totp_code: opts?.totpCode || undefined,
+        org_id: opts?.org_id,
+        org_code: opts?.org_code
       })
+    }),
+
+  challengeStatus: (id: string) =>
+    request<{
+      ok: boolean
+      challenge: {
+        challenge_id: string
+        status: string
+        admin_email: string
+        requester_hint: string
+        seconds_left: number
+        deadline_at: number
+      }
+    }>(`/v1/auth/challenge/${encodeURIComponent(id)}`, { auth: false }),
+
+  challengeClaim: (id: string) =>
+    request<{
+      ok: boolean
+      token: string
+      expires_at: number
+      admin: AdminRow
+      hint?: string
+      forced?: boolean
+      read_only?: boolean
+    }>(`/v1/auth/challenge/${encodeURIComponent(id)}/claim`, {
+      method: "POST",
+      auth: false,
+      body: "{}"
+    }),
+
+  pendingSessionChallenge: () =>
+    request<{
+      ok: boolean
+      challenge: {
+        challenge_id: string
+        status: string
+        admin_email: string
+        requester_hint: string
+        seconds_left: number
+        deadline_at: number
+      } | null
+    }>("/v1/auth/session/pending-challenge"),
+
+  respondSessionChallenge: (id: string, action: "accept" | "refuse") =>
+    request<{
+      ok: boolean
+      challenge: {
+        challenge_id: string
+        status: string
+        seconds_left: number
+      }
+      should_logout?: boolean
+    }>(`/v1/auth/session/challenge/${encodeURIComponent(id)}/respond`, {
+      method: "POST",
+      body: JSON.stringify({ action })
     }),
 
   mfaSetup: () =>
@@ -571,6 +720,8 @@ export const api = {
   audit: (action?: string) =>
     request<{
       org_id: string
+      worm?: boolean
+      legal_retention_days?: number
       events: Array<{
         id: string
         adminEmail?: string
@@ -578,10 +729,56 @@ export const api = {
         action: string
         detail?: string
         createdAt: string
+        seq?: number
+        entry_hash?: string
+        prev_hash?: string
       }>
     }>(
       `/v1/org/audit${action ? `?action=${encodeURIComponent(action)}` : ""}`
     ),
+
+  auditIntegrity: () =>
+    request<{
+      org_id: string
+      worm: boolean
+      ok: boolean
+      checked: number
+      with_hash: number
+      without_hash: number
+      broken_at_id?: string
+      broken_reason?: string
+      tip?: string
+    }>("/v1/org/audit/integrity"),
+
+  mspOverview: () =>
+    request<{
+      multi_org: boolean
+      org_count: number
+      current_org_id?: string
+      orgs: Array<{
+        org_id: string
+        org_code: string
+        name: string
+        is_principal: boolean
+        current: boolean
+        agents: number
+        online: number
+        offline_long: number
+        seats: number
+        seats_used: number
+        license_mode: string
+        license_expires_at: string | null
+        license_days_left: number | null
+        company_name: string
+      }>
+      totals: {
+        agents: number
+        online: number
+        seats: number
+        seats_used: number
+        expiring_licenses: number
+      }
+    }>("/v1/auth/msp-overview"),
 
   movingRules: () =>
     request<{ org_id: string; rules: MovingRuleRow[] }>(
@@ -597,6 +794,8 @@ export const api = {
     target_group_id: string
     priority?: number
     only_if_unassigned?: boolean
+    condition_logic?: "and" | "or"
+    permanent?: boolean
     enabled?: boolean
   }) =>
     request<{ ok: boolean; rule: MovingRuleRow; agents_applied?: number }>(
@@ -618,6 +817,8 @@ export const api = {
       target_group_id?: string
       priority?: number
       only_if_unassigned?: boolean
+      condition_logic?: "and" | "or"
+      permanent?: boolean
       enabled?: boolean
     }
   ) =>
@@ -625,6 +826,20 @@ export const api = {
       `/v1/org/moving-rules/${encodeURIComponent(id)}`,
       { method: "PATCH", body: JSON.stringify(body) }
     ),
+
+  importAgentsCsv: (csv: string, dry_run?: boolean) =>
+    request<{
+      ok: boolean
+      dry_run?: boolean
+      matched: number
+      updated: number
+      skipped: number
+      errors: string[]
+      preview?: Array<{ agent_id: string; changes: string[] }>
+    }>("/v1/org/agents/import-csv", {
+      method: "POST",
+      body: JSON.stringify({ csv, dry_run: !!dry_run })
+    }),
 
   deleteMovingRule: (id: string) =>
     request<{ ok: boolean }>(
@@ -658,7 +873,60 @@ export const api = {
         org_code: string
         primary_email: string
       } | null
+      multi_org?: boolean
+      mfa_required_multi_org?: boolean
+      mfa_enabled?: boolean
+      read_only?: boolean
+      accessible_orgs?: Array<{
+        org_id: string
+        org_code: string
+        name: string
+        is_principal: boolean
+        current: boolean
+      }>
     }>("/v1/auth/me"),
+
+  accessibleOrgs: () =>
+    request<{
+      org_id: string
+      multi_org: boolean
+      orgs: Array<{
+        org_id: string
+        org_code: string
+        name: string
+        is_principal: boolean
+        current: boolean
+      }>
+    }>("/v1/auth/accessible-orgs"),
+
+  /** Bascule de tenant (multi-org : totp_code obligatoire) */
+  switchOrg: (org_id: string, opts?: { force?: boolean; totp_code?: string }) =>
+    request<{
+      ok: boolean
+      token: string
+      admin: AdminRow
+      org: {
+        id: string
+        name: string
+        org_code: string
+        primary_email: string
+      } | null
+      multi_org?: boolean
+      accessible_orgs?: Array<{
+        org_id: string
+        org_code: string
+        name: string
+        is_principal: boolean
+        current: boolean
+      }>
+    }>("/v1/auth/switch-org", {
+      method: "POST",
+      body: JSON.stringify({
+        org_id,
+        force: opts?.force !== false,
+        totp_code: opts?.totp_code || undefined
+      })
+    }),
 
   changePassword: (
     current_password: string,
@@ -1106,6 +1374,123 @@ export const api = {
       }>
     }>("/v1/org/events/exports"),
 
+  runExportNow: () =>
+    request<{
+      ok: boolean
+      generated?: number
+      weekKey?: string
+      reason?: string
+      mails_ok?: number
+      mails_fail?: number
+      recipients?: number
+      smtp_configured?: boolean
+      hint?: string
+    }>("/v1/org/exports/run-now", { method: "POST", body: "{}" }),
+
+  exportStatus: () =>
+    request<{
+      enabled: boolean
+      recipient_count: number
+      recipients_masked: string[]
+      day_of_week: number
+      time_local: string
+      timezone: string
+      formats: string[]
+      last_weekly_export_at: string | null
+      due_now: boolean
+      smtp_enabled: boolean
+      smtp_host: string | null
+      cron_env: string
+    }>("/v1/org/exports/status"),
+
+  orgBackupExport: () =>
+    request<{ ok: boolean; backup: unknown }>("/v1/org/backup"),
+
+  orgBackupImport: (backup: unknown) =>
+    request<{ ok: boolean; applied: string[] }>("/v1/org/backup/import", {
+      method: "POST",
+      body: JSON.stringify({ backup })
+    }),
+
+  webauthnStatus: () =>
+    request<{ enabled: boolean; rp_id: string; origin: string }>(
+      "/v1/auth/webauthn/status",
+      { auth: false }
+    ),
+
+  webauthnRegisterOptions: () =>
+    request<{
+      ok: boolean
+      challenge_id: string
+      publicKey: Record<string, unknown>
+    }>("/v1/org/admins/me/webauthn/register/options", {
+      method: "POST",
+      body: "{}"
+    }),
+
+  webauthnRegister: (body: {
+    challenge_id: string
+    credentialId: string
+    publicKeyJwk: Record<string, unknown>
+    transports?: string[]
+    label?: string
+  }) =>
+    request<{
+      ok: boolean
+      credentials: Array<{
+        credential_id: string
+        label?: string
+        created_at?: string
+      }>
+    }>("/v1/org/admins/me/webauthn/register", {
+      method: "POST",
+      body: JSON.stringify(body)
+    }),
+
+  webauthnCredentials: () =>
+    request<{
+      credentials: Array<{
+        credential_id: string
+        label?: string
+        created_at?: string
+      }>
+    }>("/v1/org/admins/me/webauthn/credentials"),
+
+  webauthnDelete: (id: string) =>
+    request<{ ok: boolean }>(
+      `/v1/org/admins/me/webauthn/credentials/${encodeURIComponent(id)}`,
+      { method: "DELETE" }
+    ),
+
+  webauthnLoginOptions: (email?: string) =>
+    request<{
+      ok: boolean
+      challenge_id: string
+      publicKey: Record<string, unknown>
+    }>("/v1/auth/webauthn/login/options", {
+      method: "POST",
+      auth: false,
+      body: JSON.stringify({ email: email || undefined })
+    }),
+
+  webauthnLogin: (body: {
+    challenge_id: string
+    credentialId: string
+    clientDataJSON: string
+    authenticatorData: string
+    signature: string
+  }) =>
+    request<{
+      ok: boolean
+      token: string
+      admin: AdminRow
+      hint?: string
+    }>("/v1/auth/webauthn/login", {
+      method: "POST",
+      auth: false,
+      body: JSON.stringify(body)
+    }),
+
   downloadEventExport: (id: string) =>
     request<{
       ok: boolean
@@ -1287,6 +1672,43 @@ export const api = {
     request<{ ok: boolean }>(`/v1/org/agents/${encodeURIComponent(agentId)}`, {
       method: "DELETE"
     }),
+
+  /** Inbox user → admin */
+  inboxList: (opts?: {
+    status?: "all" | "unread" | "open" | "read" | "replied" | "closed"
+    limit?: number
+  }) => {
+    const q = new URLSearchParams()
+    if (opts?.status) q.set("status", opts.status)
+    if (opts?.limit) q.set("limit", String(opts.limit))
+    const qs = q.toString()
+    return request<{
+      org_id: string
+      unread: number
+      messages: InboxMessage[]
+    }>(`/v1/org/inbox${qs ? `?${qs}` : ""}`)
+  },
+
+  inboxUnreadCount: () =>
+    request<{ org_id: string; unread: number }>("/v1/org/inbox/unread-count"),
+
+  inboxMarkRead: (id: string) =>
+    request<{ ok: boolean; message: InboxMessage }>(
+      `/v1/org/inbox/${encodeURIComponent(id)}/read`,
+      { method: "POST" }
+    ),
+
+  inboxReply: (id: string, reply: string) =>
+    request<{ ok: boolean; message: InboxMessage }>(
+      `/v1/org/inbox/${encodeURIComponent(id)}/reply`,
+      { method: "POST", body: JSON.stringify({ reply }) }
+    ),
+
+  inboxClose: (id: string) =>
+    request<{ ok: boolean; message: InboxMessage }>(
+      `/v1/org/inbox/${encodeURIComponent(id)}/close`,
+      { method: "POST" }
+    ),
 
   recoveryInfo: () =>
     request<{

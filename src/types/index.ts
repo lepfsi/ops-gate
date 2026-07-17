@@ -272,3 +272,21 @@ export type OpsGateMessage =
       adminPassword?: string
     }
   | { type: "GET_CLOUD_STATUS" }
+  | {
+      type: "CONTACT_ADMIN"
+      subject: string
+      body: string
+      category?: "question" | "exception" | "block_appeal" | "other"
+      contextUrl?: string
+      contextHostname?: string
+    }
+  | { type: "LIST_ADMIN_MESSAGES" }
+  | { type: "LIST_PENDING_ADMIN_REPLIES" }
+  | { type: "ACK_ADMIN_REPLY"; messageId: string }
+  /** OCR bitmap (Tesseract) — base64 sans préfixe data: */
+  | {
+      type: "OCR_BITMAP"
+      base64: string
+      mime?: string
+      fileName?: string
+    }

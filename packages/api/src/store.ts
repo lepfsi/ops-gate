@@ -34,7 +34,23 @@ export async function initStore(): Promise<OpsGateStore> {
   const url = process.env.DATABASE_URL?.trim()
   if (url) {
     console.log("[store] Using Postgres")
-    _store = await PgStore.create(url)
+    const pg = await PgStore.create(url)
+    _store = pg
+    // Passkeys multi-instance
+    try {
+      const { attachWebAuthnPool, webauthnProdChecks } = await import(
+        "./webauthn"
+      )
+      attachWebAuthnPool(pg.getPgPool())
+      const chk = webauthnProdChecks()
+      if (!chk.ok) {
+        for (const w of chk.warnings) {
+          console.warn(`[webauthn] ${w}`)
+        }
+      }
+    } catch {
+      /* ignore */
+    }
   } else {
     console.log("[store] DATABASE_URL not set — using memory store")
     _store = new MemoryStore()

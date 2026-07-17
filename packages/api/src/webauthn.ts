@@ -212,12 +212,83 @@ export function parseRegistrationPayload(body: {
   }
 }
 
-/** Store process-local des passkeys (persistance DB = roadmap ; OK pilote mono-instance). */
+/**
+ * Store passkeys : mémoire process + persistance Postgres optionnelle (DATABASE_URL).
+ * Prod multi-instance : table webauthn_credentials (schema.sql).
+ */
 const credsByAdmin = new Map<string, StoredWebAuthnCredential[]>()
 const credIndex = new Map<
   string,
   { adminId: string; orgId: string }
 >()
+
+type PgPoolLike = {
+  query: (
+    sql: string,
+    params?: unknown[]
+  ) => Promise<{ rows: Record<string, unknown>[] }>
+}
+
+let pgPool: PgPoolLike | null = null
+let pgReady: Promise<void> | null = null
+
+/** Branche un pool Postgres (appelé depuis initStore si dispo). */
+export function attachWebAuthnPool(pool: PgPoolLike | null): void {
+  pgPool = pool
+  if (!pool) return
+  pgReady = (async () => {
+    try {
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS webauthn_credentials (
+          credential_id TEXT PRIMARY KEY,
+          admin_id TEXT NOT NULL,
+          org_id TEXT NOT NULL,
+          public_key_jwk JSONB NOT NULL,
+          counter BIGINT NOT NULL DEFAULT 0,
+          transports JSONB NOT NULL DEFAULT '[]',
+          label TEXT,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `)
+      const { rows } = await pool.query(
+        `SELECT credential_id, admin_id, org_id, public_key_jwk, counter, transports, label, created_at
+         FROM webauthn_credentials`
+      )
+      for (const r of rows) {
+        const cred: StoredWebAuthnCredential = {
+          credentialId: String(r.credential_id),
+          publicKeyJwk: r.public_key_jwk as StoredWebAuthnCredential["publicKeyJwk"],
+          counter: Number(r.counter) || 0,
+          transports: Array.isArray(r.transports)
+            ? (r.transports as string[])
+            : undefined,
+          createdAt: r.created_at
+            ? new Date(String(r.created_at)).toISOString()
+            : new Date().toISOString(),
+          label: r.label ? String(r.label) : "Passkey"
+        }
+        const adminId = String(r.admin_id)
+        const orgId = String(r.org_id)
+        const list = credsByAdmin.get(adminId) || []
+        if (!list.some((c) => c.credentialId === cred.credentialId)) {
+          list.push(cred)
+          credsByAdmin.set(adminId, list)
+        }
+        credIndex.set(cred.credentialId, { adminId, orgId })
+      }
+      if (rows.length) {
+        console.log(
+          `[opsgate-api] WebAuthn: ${rows.length} passkey(s) chargée(s) depuis Postgres`
+        )
+      }
+    } catch (e) {
+      console.warn(
+        "[opsgate-api] WebAuthn PG load skipped:",
+        e instanceof Error ? e.message : e
+      )
+    }
+  })()
+}
 
 export function listWebAuthnCredentials(
   adminId: string
@@ -235,6 +306,34 @@ export function addWebAuthnCredential(
   next.push(cred)
   credsByAdmin.set(adminId, next)
   credIndex.set(cred.credentialId, { adminId, orgId })
+  if (pgPool) {
+    void pgPool
+      .query(
+        `INSERT INTO webauthn_credentials
+           (credential_id, admin_id, org_id, public_key_jwk, counter, transports, label, created_at)
+         VALUES ($1,$2,$3,$4::jsonb,$5,$6::jsonb,$7,NOW())
+         ON CONFLICT (credential_id) DO UPDATE SET
+           public_key_jwk = EXCLUDED.public_key_jwk,
+           counter = EXCLUDED.counter,
+           transports = EXCLUDED.transports,
+           label = EXCLUDED.label`,
+        [
+          cred.credentialId,
+          adminId,
+          orgId,
+          JSON.stringify(cred.publicKeyJwk),
+          cred.counter || 0,
+          JSON.stringify(cred.transports || []),
+          cred.label || "Passkey"
+        ]
+      )
+      .catch((e) =>
+        console.warn(
+          "[webauthn] persist failed:",
+          e instanceof Error ? e.message : e
+        )
+      )
+  }
 }
 
 export function findWebAuthnCredential(credentialId: string): {
@@ -261,6 +360,16 @@ export function updateWebAuthnCounter(
   if (i < 0) return
   list[i] = { ...list[i]!, counter }
   credsByAdmin.set(adminId, list)
+  if (pgPool) {
+    void pgPool
+      .query(
+        `UPDATE webauthn_credentials SET counter = $1 WHERE credential_id = $2 AND admin_id = $3`,
+        [counter, credentialId, adminId]
+      )
+      .catch(() => {
+        /* ignore */
+      })
+  }
 }
 
 export function removeWebAuthnCredential(
@@ -272,5 +381,38 @@ export function removeWebAuthnCredential(
   if (next.length === list.length) return false
   credsByAdmin.set(adminId, next)
   credIndex.delete(credentialId)
+  if (pgPool) {
+    void pgPool
+      .query(
+        `DELETE FROM webauthn_credentials WHERE credential_id = $1 AND admin_id = $2`,
+        [credentialId, adminId]
+      )
+      .catch(() => {
+        /* ignore */
+      })
+  }
   return true
+}
+
+/** Prod-hardened checks (RP ID, origin HTTPS hors localhost). */
+export function webauthnProdChecks(
+  env: NodeJS.ProcessEnv = process.env
+): { ok: boolean; warnings: string[] } {
+  const warnings: string[] = []
+  const origin = webauthnOrigin(env)
+  const rpId = webauthnRpId(env)
+  if (
+    process.env.NODE_ENV === "production" &&
+    origin.startsWith("http://") &&
+    !/localhost|127\.0\.0\.1/.test(origin)
+  ) {
+    warnings.push("OPSGATE_CONSOLE_URL should be HTTPS in production for WebAuthn")
+  }
+  if (!env.OPSGATE_WEBAUTHN_RP_ID?.trim() && process.env.NODE_ENV === "production") {
+    warnings.push("Set OPSGATE_WEBAUTHN_RP_ID explicitly in production")
+  }
+  if (rpId === "localhost" && process.env.NODE_ENV === "production") {
+    warnings.push("WebAuthn RP ID is localhost in production")
+  }
+  return { ok: warnings.length === 0, warnings }
 }

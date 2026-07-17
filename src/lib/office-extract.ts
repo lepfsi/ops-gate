@@ -1,11 +1,12 @@
 /**
- * Extraction de texte PDF / DOCX côté extension (content script).
- * PDF : pdfjs-dist · DOCX : mammoth
+ * Extraction de texte bureautique côté extension (content script).
+ * PDF : pdfjs-dist · DOCX : mammoth · PPTX/XLSX : ZIP OOXML minimal
  * Échec → null (le scanner bascule en warn).
  */
 
 const MAX_PDF_PAGES = 40
 const MAX_EXTRACT_CHARS = 500_000
+const MAX_OOXML_FILES = 120
 
 function readAsArrayBuffer(file: File, maxBytes: number): Promise<ArrayBuffer> {
   return new Promise((resolve, reject) => {
@@ -98,7 +99,12 @@ export async function extractPdfText(
   }
 }
 
-export type OfficeExtractKind = "pdf" | "docx" | "unsupported"
+export type OfficeExtractKind =
+  | "pdf"
+  | "docx"
+  | "pptx"
+  | "xlsx"
+  | "unsupported"
 
 export function officeExtractKind(
   fileName: string,
@@ -113,7 +119,145 @@ export function officeExtractKind(
   ) {
     return "docx"
   }
+  if (
+    lower.endsWith(".pptx") ||
+    mime?.includes("presentationml") ||
+    mime?.includes("officedocument.presentationml")
+  ) {
+    return "pptx"
+  }
+  if (
+    lower.endsWith(".xlsx") ||
+    lower.endsWith(".xlsm") ||
+    mime?.includes("spreadsheetml") ||
+    mime?.includes("officedocument.spreadsheetml")
+  ) {
+    return "xlsx"
+  }
   return "unsupported"
+}
+
+/** PPTX / XLSX : OOXML (ZIP + XML) */
+export async function extractOoxmlZipText(
+  file: File,
+  maxBytes: number,
+  kind: "pptx" | "xlsx"
+): Promise<{ text: string; truncated: boolean }> {
+  const sizeTruncated = file.size > maxBytes
+  const buf = await readAsArrayBuffer(file, maxBytes)
+  const { unzipAll, entryText, stripXmlText } = await import("./zip-min")
+  const entries = await unzipAll(buf, {
+    maxFiles: MAX_OOXML_FILES,
+    maxTotalBytes: maxBytes
+  })
+  const parts: string[] = []
+  let total = 0
+  let charTruncated = false
+
+  const want = (name: string) => {
+    const n = name.replace(/\\/g, "/")
+    if (kind === "pptx") {
+      return (
+        /^ppt\/slides\/slide\d+\.xml$/i.test(n) ||
+        /^ppt\/notesSlides\/notesSlide\d+\.xml$/i.test(n) ||
+        n === "ppt/presentation.xml"
+      )
+    }
+    // xlsx : shared strings + feuilles
+    return (
+      n === "xl/sharedStrings.xml" ||
+      /^xl\/worksheets\/sheet\d+\.xml$/i.test(n) ||
+      n === "xl/workbook.xml"
+    )
+  }
+
+  // sharedStrings d’abord pour XLSX
+  const ordered =
+    kind === "xlsx"
+      ? [
+          ...entries.filter((e) => e.name.replace(/\\/g, "/") === "xl/sharedStrings.xml"),
+          ...entries.filter((e) => e.name.replace(/\\/g, "/") !== "xl/sharedStrings.xml")
+        ]
+      : entries
+
+  let shared: string[] = []
+  for (const e of ordered) {
+    const path = e.name.replace(/\\/g, "/")
+    if (!want(path)) continue
+    const xml = entryText(e.data)
+    if (path === "xl/sharedStrings.xml") {
+      // <si><t>…</t></si>
+      const re = /<t[^>]*>([^<]*)<\/t>/g
+      let m: RegExpExecArray | null
+      while ((m = re.exec(xml)) !== null) {
+        shared.push(
+          (m[1] || "")
+            .replace(/&lt;/g, "<")
+            .replace(/&gt;/g, ">")
+            .replace(/&amp;/g, "&")
+        )
+      }
+      if (shared.length) {
+        const joined = shared.join(" ")
+        parts.push(joined)
+        total += joined.length
+      }
+      continue
+    }
+    // Cellules XLSX avec index shared string
+    if (kind === "xlsx" && /^xl\/worksheets\//i.test(path) && shared.length) {
+      const cellRe = /<c\b([^>]*)>(?:[\s\S]*?<v>([^<]*)<\/v>)?/g
+      let cm: RegExpExecArray | null
+      const cellTexts: string[] = []
+      while ((cm = cellRe.exec(xml)) !== null) {
+        const attrs = cm[1] || ""
+        const v = cm[2]
+        if (/\bt="s"/.test(attrs) && v != null) {
+          const idx = Number(v)
+          if (Number.isFinite(idx) && shared[idx]) cellTexts.push(shared[idx]!)
+        } else if (v != null && v.trim()) {
+          cellTexts.push(v.trim())
+        }
+      }
+      // Aussi inline strings
+      const isRe = /<is>[\s\S]*?<t[^>]*>([^<]*)<\/t>/g
+      let im: RegExpExecArray | null
+      while ((im = isRe.exec(xml)) !== null) {
+        if (im[1]?.trim()) cellTexts.push(im[1].trim())
+      }
+      if (cellTexts.length) {
+        const j = cellTexts.join(" ")
+        parts.push(j)
+        total += j.length
+      } else {
+        const t = stripXmlText(xml)
+        if (t) {
+          parts.push(t)
+          total += t.length
+        }
+      }
+    } else {
+      const t = stripXmlText(xml)
+      if (t) {
+        parts.push(t)
+        total += t.length
+      }
+    }
+    if (total >= MAX_EXTRACT_CHARS) {
+      charTruncated = true
+      break
+    }
+  }
+
+  let text = parts.join("\n").trim()
+  if (text.length > MAX_EXTRACT_CHARS) {
+    text = text.slice(0, MAX_EXTRACT_CHARS)
+    charTruncated = true
+  }
+  return {
+    text,
+    truncated: sizeTruncated || charTruncated || entries.length >= MAX_OOXML_FILES
+  }
 }
 
 export async function extractOfficeText(
@@ -127,8 +271,15 @@ export async function extractOfficeText(
       const r = await extractPdfText(file, maxBytes)
       return { ...r, kind }
     }
-    const r = await extractDocxText(file, maxBytes)
-    return { ...r, kind }
+    if (kind === "docx") {
+      const r = await extractDocxText(file, maxBytes)
+      return { ...r, kind }
+    }
+    if (kind === "pptx" || kind === "xlsx") {
+      const r = await extractOoxmlZipText(file, maxBytes, kind)
+      return { ...r, kind }
+    }
+    return null
   } catch (e) {
     console.warn("[OpsGate] office extract failed", file.name, e)
     return null

@@ -41,6 +41,28 @@ function IndexPopup() {
   const [settings, setSettings] = useState<OpsGateSettings>(DEFAULT_SETTINGS)
   const [journal, setJournal] = useState<JournalEntry[]>([])
   const [loading, setLoading] = useState(true)
+  const [contactOpen, setContactOpen] = useState(false)
+  const [subject, setSubject] = useState("")
+  const [body, setBody] = useState("")
+  const [category, setCategory] = useState<
+    "question" | "exception" | "block_appeal" | "other"
+  >("question")
+  const [contactBusy, setContactBusy] = useState(false)
+  const [contactMsg, setContactMsg] = useState<string | null>(null)
+  const [contactErr, setContactErr] = useState<string | null>(null)
+  const [myMessages, setMyMessages] = useState<
+    Array<{
+      id: string
+      subject: string
+      status: string
+      created_at: string
+      body?: string
+      admin_reply?: string | null
+      needs_user_ack?: boolean
+      replied_by_admin_label?: string | null
+    }>
+  >([])
+  const [ackBusy, setAckBusy] = useState(false)
 
   const refresh = async () => {
     try {
@@ -50,12 +72,20 @@ function IndexPopup() {
       ])
       if (s?.settings) setSettings(s.settings)
       if (j?.journal) setJournal(j.journal)
+      if (s?.settings?.agentToken && s?.settings?.orgId) {
+        const m = await ext.runtime.sendMessage({ type: "LIST_ADMIN_MESSAGES" })
+        if (m?.ok && m.messages) setMyMessages(m.messages)
+      }
     } catch (e) {
       console.error(e)
     } finally {
       setLoading(false)
     }
   }
+
+  const pendingAcks = myMessages.filter(
+    (m) => !!m.admin_reply && m.needs_user_ack === true
+  )
 
   useEffect(() => {
     void refresh()
@@ -186,6 +216,74 @@ function IndexPopup() {
         </div>
       </header>
 
+      {pendingAcks.length > 0 && (
+        <section style={{ padding: "12px 16px 0" }}>
+          {pendingAcks.slice(0, 2).map((m) => (
+            <div
+              key={m.id}
+              style={{
+                padding: 12,
+                marginBottom: 10,
+                borderRadius: 10,
+                border: "1px solid #99f6e4",
+                background: "#f0fdfa"
+              }}>
+              <div
+                style={{
+                  fontSize: 11,
+                  fontWeight: 700,
+                  color: "#0f766e",
+                  marginBottom: 4
+                }}>
+                Réponse admin
+                {m.replied_by_admin_label ? ` · ${m.replied_by_admin_label}` : ""}
+              </div>
+              <div style={{ fontWeight: 650, fontSize: 13, marginBottom: 6 }}>
+                {m.subject}
+              </div>
+              <div
+                style={{
+                  fontSize: 12,
+                  lineHeight: 1.45,
+                  color: "#0f172a",
+                  whiteSpace: "pre-wrap",
+                  marginBottom: 10
+                }}>
+                {m.admin_reply}
+              </div>
+              <button
+                type="button"
+                disabled={ackBusy}
+                onClick={async () => {
+                  setAckBusy(true)
+                  try {
+                    await ext.runtime.sendMessage({
+                      type: "ACK_ADMIN_REPLY",
+                      messageId: m.id
+                    })
+                    await refresh()
+                  } finally {
+                    setAckBusy(false)
+                  }
+                }}
+                style={{
+                  border: "none",
+                  borderRadius: 8,
+                  padding: "8px 12px",
+                  fontSize: 12,
+                  fontWeight: 700,
+                  cursor: "pointer",
+                  background: "#0a1128",
+                  color: "#fff",
+                  width: "100%"
+                }}>
+                OK, j'ai compris
+              </button>
+            </div>
+          ))}
+        </section>
+      )}
+
       <section style={{ padding: "12px 16px" }}>
         <div
           style={{
@@ -283,6 +381,235 @@ function IndexPopup() {
           ))}
         </div>
       </section>
+
+      {enrolled && (
+        <section
+          style={{
+            padding: "0 16px 12px",
+            borderTop: "1px solid #f1f5f9"
+          }}>
+          <button
+            type="button"
+            onClick={() => {
+              setContactOpen((v) => !v)
+              setContactMsg(null)
+              setContactErr(null)
+            }}
+            style={{
+              width: "100%",
+              marginTop: 10,
+              border: "1px solid #99f6e4",
+              background: contactOpen ? "#f0fdfa" : "#fff",
+              borderRadius: 8,
+              padding: "8px 10px",
+              fontSize: 12,
+              fontWeight: 650,
+              cursor: "pointer",
+              color: "#0f766e",
+              textAlign: "left"
+            }}>
+            {contactOpen ? "▼ " : "▶ "}Contacter l’administrateur
+          </button>
+          {contactOpen && (
+            <div style={{ marginTop: 10 }}>
+              <label
+                style={{
+                  display: "block",
+                  fontSize: 11,
+                  fontWeight: 600,
+                  color: "#64748b",
+                  marginBottom: 4
+                }}>
+                Type
+              </label>
+              <select
+                value={category}
+                onChange={(e) =>
+                  setCategory(
+                    e.target.value as
+                      | "question"
+                      | "exception"
+                      | "block_appeal"
+                      | "other"
+                  )
+                }
+                style={{
+                  width: "100%",
+                  marginBottom: 8,
+                  padding: "6px 8px",
+                  borderRadius: 6,
+                  border: "1px solid #e2e8f0",
+                  fontSize: 12
+                }}>
+                <option value="question">Question</option>
+                <option value="exception">Demande d’exception</option>
+                <option value="block_appeal">Contestation de blocage</option>
+                <option value="other">Autre</option>
+              </select>
+              <label
+                style={{
+                  display: "block",
+                  fontSize: 11,
+                  fontWeight: 600,
+                  color: "#64748b",
+                  marginBottom: 4
+                }}>
+                Objet
+              </label>
+              <input
+                value={subject}
+                onChange={(e) => setSubject(e.target.value)}
+                placeholder="Ex. Besoin d’accès temporaire"
+                style={{
+                  width: "100%",
+                  boxSizing: "border-box",
+                  marginBottom: 8,
+                  padding: "6px 8px",
+                  borderRadius: 6,
+                  border: "1px solid #e2e8f0",
+                  fontSize: 12
+                }}
+              />
+              <label
+                style={{
+                  display: "block",
+                  fontSize: 11,
+                  fontWeight: 600,
+                  color: "#64748b",
+                  marginBottom: 4
+                }}>
+                Message
+              </label>
+              <textarea
+                value={body}
+                onChange={(e) => setBody(e.target.value)}
+                rows={3}
+                placeholder="Décrivez votre besoin pour l’admin…"
+                style={{
+                  width: "100%",
+                  boxSizing: "border-box",
+                  marginBottom: 8,
+                  padding: "6px 8px",
+                  borderRadius: 6,
+                  border: "1px solid #e2e8f0",
+                  fontSize: 12,
+                  resize: "vertical"
+                }}
+              />
+              {contactErr && (
+                <p style={{ fontSize: 12, color: "#dc2626", margin: "0 0 6px" }}>
+                  {contactErr}
+                </p>
+              )}
+              {contactMsg && (
+                <p style={{ fontSize: 12, color: "#166534", margin: "0 0 6px" }}>
+                  {contactMsg}
+                </p>
+              )}
+              <button
+                type="button"
+                disabled={
+                  contactBusy ||
+                  subject.trim().length < 3 ||
+                  body.trim().length < 5
+                }
+                onClick={async () => {
+                  setContactBusy(true)
+                  setContactErr(null)
+                  setContactMsg(null)
+                  try {
+                    const r = await ext.runtime.sendMessage({
+                      type: "CONTACT_ADMIN",
+                      subject: subject.trim(),
+                      body: body.trim(),
+                      category
+                    })
+                    if (r?.ok) {
+                      setContactMsg("Message envoyé à l’administrateur.")
+                      setSubject("")
+                      setBody("")
+                      const m = await ext.runtime.sendMessage({
+                        type: "LIST_ADMIN_MESSAGES"
+                      })
+                      if (m?.ok && m.messages) setMyMessages(m.messages)
+                    } else {
+                      setContactErr(r?.error || "Échec d’envoi")
+                    }
+                  } catch (e) {
+                    setContactErr(String(e))
+                  } finally {
+                    setContactBusy(false)
+                  }
+                }}
+                style={{
+                  width: "100%",
+                  border: "none",
+                  borderRadius: 8,
+                  padding: "8px 10px",
+                  fontSize: 12,
+                  fontWeight: 700,
+                  cursor:
+                    contactBusy || subject.trim().length < 3
+                      ? "not-allowed"
+                      : "pointer",
+                  background: "#0f766e",
+                  color: "#fff",
+                  opacity:
+                    contactBusy ||
+                    subject.trim().length < 3 ||
+                    body.trim().length < 5
+                      ? 0.6
+                      : 1
+                }}>
+                {contactBusy ? "Envoi…" : "Envoyer à l’admin"}
+              </button>
+              {myMessages.length > 0 && (
+                <div style={{ marginTop: 12 }}>
+                  <div
+                    style={{
+                      fontSize: 11,
+                      fontWeight: 650,
+                      color: "#64748b",
+                      marginBottom: 6
+                    }}>
+                    Vos derniers messages
+                  </div>
+                  {myMessages.slice(0, 5).map((m) => (
+                    <div
+                      key={m.id}
+                      style={{
+                        padding: "8px 10px",
+                        border: "1px solid #e2e8f0",
+                        borderRadius: 8,
+                        marginBottom: 6,
+                        fontSize: 11,
+                        background: "#fff"
+                      }}>
+                      <div style={{ fontWeight: 650 }}>{m.subject}</div>
+                      <div style={{ color: "#94a3b8", marginTop: 2 }}>
+                        {String(m.created_at).slice(0, 16).replace("T", " ")} ·{" "}
+                        {m.status}
+                      </div>
+                      {m.admin_reply && (
+                        <div
+                          style={{
+                            marginTop: 6,
+                            padding: 6,
+                            background: "#f0fdfa",
+                            borderRadius: 6,
+                            color: "#0f766e"
+                          }}>
+                          Admin : {m.admin_reply}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </section>
+      )}
 
       <footer
         style={{

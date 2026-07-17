@@ -109,18 +109,26 @@ body {
 /* ========== Topbar (enterprise) ========== */
 .topbar {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   justify-content: space-between;
-  gap: var(--space);
+  gap: 10px;
   margin-bottom: 8px;
-  padding: 12px 18px;
+  padding: 8px 14px;
+  min-height: 52px;
   background: linear-gradient(180deg, #0a1128 0%, #111c44 100%);
   border: 1px solid rgba(255, 255, 255, 0.06);
   border-radius: var(--radius);
   box-shadow: var(--shadow-lg);
   color: #e2e8f0;
   flex-shrink: 0;
+  overflow: hidden;
+}
+
+@media (max-width: 960px) {
+  .topbar {
+    flex-wrap: wrap;
+  }
 }
 
 .brand {
@@ -161,6 +169,7 @@ body {
   font-weight: 700;
   letter-spacing: -0.02em;
   color: #f8fafc;
+  line-height: 1.15;
 }
 
 .brand p {
@@ -173,6 +182,57 @@ body {
   max-width: min(360px, 50vw);
 }
 
+.topbar-org-static {
+  display: inline-block;
+  margin-top: 2px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #94a3b8;
+  letter-spacing: 0.02em;
+  max-width: min(200px, 28vw);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+.topbar .api-status {
+  margin-right: 0;
+  flex-shrink: 0;
+}
+
+.hero-card--compact {
+  padding: 14px 18px;
+  margin-bottom: 10px;
+}
+.hero-card--compact .hero-copy h2 {
+  margin: 0;
+  font-size: 1.15rem;
+}
+.hero-card--compact .hero-kicker {
+  margin-bottom: 2px;
+}
+
+/* Horloge discrète — à droite (topbar-actions) */
+.topbar-actions .topbar-clock,
+.topbar-clock {
+  user-select: none;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  color: rgba(148, 163, 184, 0.9);
+  opacity: 0.9;
+  margin: 0 2px 0 0;
+  padding: 0;
+  background: none;
+  border: none;
+  flex-shrink: 0;
+}
+.topbar-actions .topbar-clock:hover {
+  color: rgba(226, 232, 240, 0.95);
+  opacity: 1;
+}
+
 .topbar-actions {
   display: flex;
   flex-wrap: wrap;
@@ -182,14 +242,74 @@ body {
   justify-content: flex-end;
 }
 
-.topbar-actions .input {
+.topbar-org-line {
+  margin-top: 2px;
+  max-width: min(220px, 30vw);
+  line-height: 1.2;
+}
+.topbar-org-select {
+  width: auto !important;
+  min-width: 100px;
+  max-width: min(200px, 28vw);
+  flex: 0 1 auto !important;
+  font-size: 11px !important;
+  padding: 2px 6px !important;
+  height: auto;
+  background: rgba(255, 255, 255, 0.08) !important;
+  border-color: rgba(255, 255, 255, 0.14) !important;
+  color: #e2e8f0 !important;
+}
+
+/* Pastille API collée au champ host:port */
+.topbar-api-group {
+  display: inline-flex;
+  align-items: stretch;
+  flex-shrink: 0;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.06);
+}
+.topbar-api-group .api-status {
+  margin: 0 !important;
+  border-radius: 0 !important;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 8px;
+  font-size: 0.65rem;
+}
+.topbar-api-group .topbar-api-input {
+  width: 128px !important;
+  max-width: 160px !important;
+  flex: 0 1 128px !important;
+  font-size: 12px;
+  padding: 5px 8px;
+  border: none !important;
+  border-left: 1px solid rgba(255, 255, 255, 0.12) !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  color: #f1f5f9;
   min-width: 0;
-  width: 200px;
-  max-width: 100%;
-  flex: 1 1 160px;
+}
+.topbar-api-group .topbar-api-input:focus {
+  width: 170px !important;
+  max-width: min(220px, 40vw) !important;
+  outline: none;
+  background: rgba(255, 255, 255, 0.06) !important;
+}
+
+.topbar-actions .input:not(.topbar-api-input) {
+  min-width: 0;
+  font-size: 12px;
+  padding: 6px 8px;
   background: rgba(255, 255, 255, 0.08);
   border-color: rgba(255, 255, 255, 0.12);
   color: #f1f5f9;
+}
+
+.topbar-actions .topbar-api-input:focus {
+  width: 180px;
+  max-width: min(220px, 40vw);
 }
 
 .topbar-actions .input::placeholder {
@@ -1365,6 +1485,98 @@ html[data-theme="dark"] .dash-context-panel {
   box-shadow: var(--shadow-lg);
 }
 
+/* Bannière MFA obligatoire multi-tenant */
+.mfa-multi-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 16px;
+  margin: 0 16px 8px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, #f59e0b 45%, var(--line));
+  background: color-mix(in srgb, #f59e0b 12%, var(--card));
+  color: var(--ink);
+  font-size: 0.85rem;
+  line-height: 1.4;
+}
+
+.mfa-multi-notice {
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, #f59e0b 40%, var(--line));
+  background: color-mix(in srgb, #f59e0b 10%, var(--card));
+  color: var(--ink-2);
+  line-height: 1.4;
+}
+
+.readonly-banner {
+  margin: 0 16px 8px;
+  padding: 8px 14px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, #3b82f6 40%, var(--line));
+  background: color-mix(in srgb, #3b82f6 12%, var(--card));
+  font-size: 0.85rem;
+  color: var(--ink);
+}
+
+.notif-channel-card {
+  padding: 12px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--card) 92%, var(--ink));
+  margin-top: 8px;
+}
+
+.login-challenge-box {
+  padding: 12px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, #f59e0b 40%, var(--line));
+  background: color-mix(in srgb, #f59e0b 10%, var(--card));
+}
+
+/* MSP portfolio */
+.msp-totals {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px 24px;
+  margin: 12px 0 14px;
+}
+.msp-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 100px;
+}
+.msp-stat strong {
+  font-size: 1.25rem;
+}
+.msp-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 12px;
+}
+.msp-org-card--current {
+  border-color: color-mix(in srgb, var(--teal, #0f766e) 50%, var(--line));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--teal, #0f766e) 25%, transparent);
+}
+.msp-org-meta {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px 12px;
+  margin: 10px 0 0;
+  font-size: 12px;
+}
+.msp-org-meta dt {
+  color: var(--muted);
+  margin: 0;
+}
+.msp-org-meta dd {
+  margin: 0;
+  font-weight: 600;
+}
+
 /* ========== Footer ========== */
 .console-footer {
   margin-top: 24px;
@@ -1404,33 +1616,95 @@ html[data-theme="dark"] .dash-context-panel {
 }
 
 /* ========== Dashboard widgets (inspiration Kaspersky SOC, charte DailyOps) ========== */
-.dash-grid {
+/* Grille libre 3 colonnes — widgets déplaçables / redimensionnables */
+.dash-board {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  gap: 16px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
   margin-bottom: var(--space);
+  align-items: start;
 }
 
-/* Activité décisions + timeline 14j : deux colonnes équilibrées */
-.dash-grid--equal2 {
-  grid-template-columns: 1fr 1fr;
-  align-items: stretch;
+@media (max-width: 1100px) {
+  .dash-board {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
-
-@media (max-width: 960px) {
-  .dash-grid--equal2 {
+@media (max-width: 720px) {
+  .dash-board {
     grid-template-columns: 1fr;
   }
 }
 
+.dash-board-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
 .dash-widget {
   margin-bottom: 0;
-  min-height: 220px;
+  min-height: 140px;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.dash-widget.is-dragging {
+  opacity: 0.55;
+  outline: 2px dashed var(--accent, #2bd9c5);
+}
+
+.dash-widget.is-drag-over {
+  box-shadow: 0 0 0 2px var(--accent, #2bd9c5);
+}
+
+.dash-widget-head {
+  cursor: grab;
+  user-select: none;
+}
+.dash-widget-head:active {
+  cursor: grabbing;
+}
+
+.dash-widget-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+
+.dash-widget-resize {
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  width: 14px;
+  height: 14px;
+  cursor: nwse-resize;
+  border-right: 2px solid var(--muted, #94a3b8);
+  border-bottom: 2px solid var(--muted, #94a3b8);
+  opacity: 0.45;
+  border-radius: 1px;
+}
+.dash-widget-resize:hover {
+  opacity: 0.9;
+  border-color: var(--accent, #2bd9c5);
+}
+
+.dash-widget-wbtn {
+  font-size: 10px;
+  padding: 2px 6px;
+  line-height: 1.2;
+  opacity: 0.75;
+}
+.dash-widget-wbtn:hover {
+  opacity: 1;
 }
 
 .dash-widget--activity,
 .dash-widget--timeline {
-  min-height: 280px;
+  min-height: 0;
   display: flex;
   flex-direction: column;
 }
@@ -1438,11 +1712,11 @@ html[data-theme="dark"] .dash-context-panel {
 .dash-widget--activity .dash-bars,
 .dash-widget--timeline .dash-timeline {
   flex: 1;
-  min-height: 180px;
+  min-height: 100px;
 }
 
 .dash-bars--compact {
-  gap: 6px;
+  gap: 4px;
 }
 
 .dash-bars--compact .dash-bar-row {
@@ -1456,15 +1730,23 @@ html[data-theme="dark"] .dash-context-panel {
 
 .dash-widget-head {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
   gap: 8px;
-  margin-bottom: 12px;
+  margin-bottom: 10px;
+  flex-shrink: 0;
 }
 
 .dash-widget-head h2 {
   margin: 0;
-  font-size: 0.9rem;
+  font-size: 0.88rem;
+}
+
+.dash-widget-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
 }
 
 .dash-status-row {
@@ -1687,8 +1969,8 @@ html[data-theme="dark"] .dash-context-panel {
 /* Shell navigation latérale (tous les modules) */
 .shell-body {
   display: grid;
-  grid-template-columns: 220px minmax(0, 1fr);
-  gap: 16px;
+  grid-template-columns: 200px minmax(0, 1fr);
+  gap: 12px;
   align-items: stretch;
   margin-top: 4px;
   flex: 1 1 auto;
@@ -1714,14 +1996,14 @@ html[data-theme="dark"] .dash-context-panel {
 .shell-nav {
   background: var(--navy);
   border-radius: var(--radius);
-  padding: 10px 8px 16px;
+  padding: 8px 6px 10px;
   position: relative;
   top: auto;
   height: 100%;
   max-height: 100%;
   min-height: 0;
-  overflow-y: auto;
-  overflow-x: hidden;
+  /* Pas de scrollbar latérale : contenu compact + foot en bas */
+  overflow: hidden;
   box-shadow: var(--shadow);
   display: flex;
   flex-direction: column;
@@ -1733,10 +2015,11 @@ html[data-theme="dark"] .dash-context-panel {
   display: flex;
   flex-direction: row;
   align-items: center;
-  gap: 10px;
-  padding: 10px 12px 14px;
-  margin-bottom: 6px;
+  gap: 8px;
+  padding: 6px 10px 8px;
+  margin-bottom: 4px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  flex-shrink: 0;
 }
 
 .shell-nav-brand .shell-nav-brand-text {
@@ -1768,23 +2051,24 @@ html[data-theme="dark"] .dash-context-panel {
   border: none;
   background: transparent;
   color: #cbd5e1;
-  padding: 10px 12px;
-  border-radius: 8px;
-  font-size: 0.82rem;
+  padding: 7px 10px;
+  border-radius: 7px;
+  font-size: 0.8rem;
   font-weight: 600;
   cursor: pointer;
-  margin-bottom: 2px;
+  margin-bottom: 1px;
   transition: background 0.12s ease, color 0.12s ease;
+  flex-shrink: 0;
 }
 
 .shell-nav-sub {
-  padding: 7px 12px 7px 22px;
-  font-size: 0.76rem;
+  padding: 5px 10px 5px 18px;
+  font-size: 0.74rem;
   font-weight: 550;
   color: #94a3b8;
   border-left: 2px solid transparent;
-  margin-left: 10px;
-  width: calc(100% - 10px);
+  margin-left: 8px;
+  width: calc(100% - 8px);
 }
 
 .shell-nav-item:hover,
@@ -2430,11 +2714,12 @@ body.dash-fs-active {
 
 .shell-nav-foot {
   margin-top: auto;
-  padding-top: 16px;
+  padding-top: 8px;
   border-top: 1px solid rgba(148, 163, 184, 0.2);
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 0;
+  flex-shrink: 0;
 }
 
 .shell-nav-link {

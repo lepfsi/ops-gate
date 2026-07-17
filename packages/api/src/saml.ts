@@ -140,12 +140,22 @@ export function parseSamlResponse(
       return { ok: false, error: "saml_status_not_success" }
     }
   }
-  // Optional signature verify (first SignatureValue + SignedInfo)
+  // Signature IdP : obligatoire en prod (ou OPSGATE_SAML_REQUIRE_SIGNATURE=1)
+  // si un certificat est fourni. Soft en lab sans cert.
+  const requireSig =
+    process.env.OPSGATE_SAML_REQUIRE_SIGNATURE === "1" ||
+    process.env.OPSGATE_SAML_REQUIRE_SIGNATURE === "true" ||
+    (process.env.NODE_ENV === "production" && !!cfg.idpCertPem)
   if (cfg.idpCertPem) {
     const sigOk = verifyXmlSignatureSoft(xml, cfg.idpCertPem)
     if (sigOk === false) {
       return { ok: false, error: "saml_sig_invalid" }
     }
+    if (requireSig && sigOk == null) {
+      return { ok: false, error: "saml_sig_required" }
+    }
+  } else if (requireSig) {
+    return { ok: false, error: "saml_idp_cert_required" }
   }
   const nameId =
     xml.match(/<saml:NameID[^>]*>([^<]+)<\/saml:NameID>/i)?.[1] ||

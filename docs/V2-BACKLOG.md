@@ -1,6 +1,16 @@
 # Backlog V2 — ne pas oublier
 
-Mis à jour : 16 juillet 2026
+Mis à jour : 17 juillet 2026
+
+## Lots livrés (17/07) — suite backlog console
+
+| Item | Statut |
+|------|--------|
+| **Console MSP multi-org** | Portfolio `#/msp` : KPI cross-tenants, ouverture avec MFA |
+| **Audit WORM / rétention légale** | Chaîne SHA-256, vérif intégrité, rétention légale (min 90 j) |
+| **Rotation secrets** | Dual-key `*_PREVIOUS` vendor + doc `SECRET-ROTATION.md` |
+| **SAML/WebAuthn prod** | Signature SAML exigée en prod ; passkeys Postgres |
+| **Polish VendorDesk** | Stats, recherche licences |
 
 ## Où on en est (jalon)
 
