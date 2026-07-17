@@ -70,6 +70,7 @@ export class MemoryStore implements OpsGateStore {
   private movingRules = new Map<string, import("./types").MovingRule[]>()
   private logExports = new Map<string, import("./types").LogExportRecord[]>()
   private recoveryCodes = new Map<string, import("./types").RecoveryCode[]>()
+  private inboxMessages: import("./types").UserInboxMessage[] = []
 
   constructor() {
     this.seed()
@@ -866,6 +867,80 @@ export class MemoryStore implements OpsGateStore {
     return out
   }
 
+  async listAccessibleOrgsForEmail(email: string) {
+    const emailNorm = (email || "").trim().toLowerCase()
+    if (!emailNorm || !emailNorm.includes("@")) return []
+    const out: Array<{
+      org_id: string
+      org_code: string
+      name: string
+      is_principal: boolean
+      admin_id: string
+    }> = []
+    for (const [orgId, list] of this.admins) {
+      const org = this.orgs.get(orgId)
+      if (!org || org.isPersonal) continue
+      // Uniquement un compte actif, non verrouillé, avec accès console
+      const admin = list.find(
+        (a) =>
+          a.active &&
+          !a.lockedAt &&
+          a.email === emailNorm &&
+          (a.isPrincipal ||
+            (Array.isArray(a.permissions) &&
+              a.permissions.includes("console_access")))
+      )
+      if (!admin) continue
+      out.push({
+        org_id: orgId,
+        org_code: org.orgCode || orgId,
+        name: org.name || orgId,
+        is_principal: !!admin.isPrincipal,
+        admin_id: admin.id
+      })
+    }
+    out.sort((a, b) => a.name.localeCompare(b.name, "fr"))
+    return out
+  }
+
+  async switchAdminOrg(opts: {
+    currentToken: string
+    targetOrgId: string
+    force?: boolean
+  }) {
+    const resolved = await this.resolveAdminSession(opts.currentToken)
+    if (!resolved) return { ok: false as const, error: "session_invalid" }
+    const targetOrgId = opts.targetOrgId.trim()
+    if (!targetOrgId) return { ok: false as const, error: "org_id_required" }
+    if (resolved.session.orgId === targetOrgId) {
+      return {
+        ok: true as const,
+        session: resolved.session,
+        admin: resolved.admin,
+        forced: false
+      }
+    }
+    const email = resolved.admin.email
+    const peers = await this.listAccessibleOrgsForEmail(email)
+    const hit = peers.find((p) => p.org_id === targetOrgId)
+    if (!hit) return { ok: false as const, error: "org_not_accessible" }
+    const list = this.admins.get(targetOrgId) || []
+    const targetAdmin = list.find((a) => a.id === hit.admin_id)
+    if (!targetAdmin || !targetAdmin.active) {
+      return { ok: false as const, error: "admin_not_found" }
+    }
+    if (targetAdmin.lockedAt) {
+      return { ok: false as const, error: "account_locked" }
+    }
+    // Révoquer la session courante
+    this.sessions.delete(opts.currentToken)
+    const issued = await this.issueAdminSession(targetOrgId, targetAdmin, {
+      force: opts.force !== false // défaut force pour bascule fluide
+    })
+    if (!issued.ok) return issued
+    return issued
+  }
+
   async deleteAdmin(orgId: string, adminId: string) {
     const list = this.admins.get(orgId) || []
     const target = list.find((a) => a.id === adminId)
@@ -931,6 +1006,7 @@ export class MemoryStore implements OpsGateStore {
     password: string,
     opts?: {
       force?: boolean
+      readOnly?: boolean
       totpCode?: string
       orgId?: string
       orgCode?: string
@@ -1004,12 +1080,15 @@ export class MemoryStore implements OpsGateStore {
         return { ok: false as const, error: "mfa_invalid" }
       }
     }
-    return this.issueAdminSession(hit.orgId, hit.admin, opts?.force)
+    return this.issueAdminSession(hit.orgId, hit.admin, {
+      force: opts?.force,
+      readOnly: opts?.readOnly
+    })
   }
 
   async createAdminSessionOidc(
     email: string,
-    opts?: { force?: boolean }
+    opts?: { force?: boolean; readOnly?: boolean }
   ) {
     const emailNorm = email.trim().toLowerCase()
     type Cand = { orgId: string; admin: OrgAdmin; personal: boolean }
@@ -1033,18 +1112,41 @@ export class MemoryStore implements OpsGateStore {
       return { ok: false as const, error: "account_locked" }
     }
     // SSO : MFA local non exigé (IdP a authentifié)
-    return this.issueAdminSession(hit.orgId, hit.admin, opts?.force)
+    return this.issueAdminSession(hit.orgId, hit.admin, {
+      force: opts?.force,
+      readOnly: opts?.readOnly
+    })
+  }
+
+  async issueAdminSessionDirect(opts: {
+    orgId: string
+    adminId: string
+    force?: boolean
+    readOnly?: boolean
+  }) {
+    const admin = (this.admins.get(opts.orgId) || []).find(
+      (a) => a.id === opts.adminId && a.active
+    )
+    if (!admin) return { ok: false as const, error: "admin_not_found" }
+    if (admin.lockedAt) return { ok: false as const, error: "account_locked" }
+    return this.issueAdminSession(opts.orgId, admin, {
+      force: opts.force,
+      readOnly: opts.readOnly
+    })
   }
 
   private async issueAdminSession(
     orgId: string,
     admin: OrgAdmin,
-    force?: boolean
+    opts?: { force?: boolean; readOnly?: boolean }
   ) {
     await this.clearAdminLoginFailures(admin.id)
     const now = Date.now()
     const idleMs = MemoryStore.SESSION_IDLE_MS
+    const readOnly = !!opts?.readOnly
+    const force = !!opts?.force
     let forced = false
+    let hasActiveFull = false
     for (const [tok, sess] of this.sessions) {
       if (sess.adminId !== admin.id) continue
       const last = sess.lastActivityAt || sess.createdAt
@@ -1057,7 +1159,21 @@ export class MemoryStore implements OpsGateStore {
         forced = true
         continue
       }
-      return { ok: false as const, error: "session_already_active" }
+      // Lecture seule : coexiste avec une session full (pas de kick)
+      if (readOnly) continue
+      // Session full demandée alors qu’une full active existe
+      if (!sess.readOnly) {
+        hasActiveFull = true
+      }
+    }
+    if (hasActiveFull && !force && !readOnly) {
+      return {
+        ok: false as const,
+        error: "session_already_active",
+        orgId,
+        adminId: admin.id,
+        adminEmail: admin.email
+      }
     }
     const token = `ogs_${newToken().replace(/^ogt_/, "")}`
     const session: AdminSession = {
@@ -1066,7 +1182,8 @@ export class MemoryStore implements OpsGateStore {
       adminId: admin.id,
       expiresAt: now + 12 * 60 * 60 * 1000,
       createdAt: now,
-      lastActivityAt: now
+      lastActivityAt: now,
+      readOnly: readOnly || undefined
     }
     this.sessions.set(token, session)
     return { ok: true as const, session, admin, forced }
@@ -1097,6 +1214,17 @@ export class MemoryStore implements OpsGateStore {
 
   async revokeAdminSession(token: string) {
     return this.sessions.delete(token)
+  }
+
+  async revokeAllAdminSessions(adminId: string) {
+    let n = 0
+    for (const [tok, sess] of this.sessions) {
+      if (sess.adminId === adminId) {
+        this.sessions.delete(tok)
+        n++
+      }
+    }
+    return n
   }
 
   async listUsers(orgId: string) {
@@ -2321,6 +2449,218 @@ export class MemoryStore implements OpsGateStore {
     return { revoked }
   }
 
+  async createInboxMessage(input: {
+    orgId: string
+    agentId: string
+    deviceLabel?: string
+    hostName?: string | null
+    category?: import("./types").InboxMessageCategory
+    subject: string
+    body: string
+    contextUrl?: string | null
+    contextHostname?: string | null
+  }) {
+    const subject = (input.subject || "").trim().slice(0, 120)
+    const body = (input.body || "").trim().slice(0, 4000)
+    if (subject.length < 3) {
+      return { ok: false as const, error: "subject_too_short" }
+    }
+    if (body.length < 5) {
+      return { ok: false as const, error: "body_too_short" }
+    }
+    const dayAgo = Date.now() - 24 * 60 * 60 * 1000
+    const recent = this.inboxMessages.filter(
+      (m) =>
+        m.orgId === input.orgId &&
+        m.agentId === input.agentId &&
+        Date.parse(m.createdAt) >= dayAgo
+    )
+    if (recent.length >= 15) {
+      return { ok: false as const, error: "rate_limited" }
+    }
+    const cat = input.category || "question"
+    const allowed: import("./types").InboxMessageCategory[] = [
+      "question",
+      "exception",
+      "block_appeal",
+      "other"
+    ]
+    const category = allowed.includes(cat) ? cat : "question"
+    const msg: import("./types").UserInboxMessage = {
+      id: newId("inbox"),
+      orgId: input.orgId,
+      agentId: input.agentId,
+      deviceLabel: (input.deviceLabel || "").trim() || "agent",
+      hostName: input.hostName ?? null,
+      category,
+      subject,
+      body,
+      contextUrl: input.contextUrl?.trim() || null,
+      contextHostname: input.contextHostname?.trim() || null,
+      status: "open",
+      createdAt: new Date().toISOString(),
+      readAt: null,
+      repliedAt: null,
+      closedAt: null,
+      adminReply: null,
+      repliedByAdminId: null,
+      repliedByAdminLabel: null,
+      userAckedAt: null
+    }
+    this.inboxMessages.unshift(msg)
+    // Cap mémoire org
+    const orgMsgs = this.inboxMessages.filter((m) => m.orgId === input.orgId)
+    if (orgMsgs.length > 500) {
+      const dropIds = new Set(orgMsgs.slice(500).map((m) => m.id))
+      this.inboxMessages = this.inboxMessages.filter((m) => !dropIds.has(m.id))
+    }
+    return { ok: true as const, message: msg }
+  }
+
+  async listInboxMessages(
+    orgId: string,
+    opts?: {
+      status?: import("./types").InboxMessageStatus | "all" | "unread"
+      limit?: number
+      agentId?: string
+    }
+  ) {
+    const limit = Math.min(200, Math.max(1, opts?.limit || 50))
+    let list = this.inboxMessages.filter((m) => m.orgId === orgId)
+    if (opts?.agentId) list = list.filter((m) => m.agentId === opts.agentId)
+    const st = opts?.status || "all"
+    if (st === "unread") {
+      list = list.filter((m) => m.status === "open")
+    } else if (st !== "all") {
+      list = list.filter((m) => m.status === st)
+    }
+    return list
+      .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
+      .slice(0, limit)
+  }
+
+  async getInboxMessage(orgId: string, messageId: string) {
+    return this.inboxMessages.find(
+      (m) => m.orgId === orgId && m.id === messageId
+    )
+  }
+
+  async markInboxRead(orgId: string, messageId: string) {
+    const idx = this.inboxMessages.findIndex(
+      (m) => m.orgId === orgId && m.id === messageId
+    )
+    if (idx < 0) return undefined
+    const cur = this.inboxMessages[idx]
+    if (cur.status === "open") {
+      this.inboxMessages[idx] = {
+        ...cur,
+        status: "read",
+        readAt: new Date().toISOString()
+      }
+    } else if (!cur.readAt) {
+      this.inboxMessages[idx] = {
+        ...cur,
+        readAt: new Date().toISOString()
+      }
+    }
+    return this.inboxMessages[idx]
+  }
+
+  async replyInboxMessage(
+    orgId: string,
+    messageId: string,
+    reply: string,
+    admin: { id: string; label: string }
+  ) {
+    const text = (reply || "").trim().slice(0, 4000)
+    if (text.length < 1) return undefined
+    const idx = this.inboxMessages.findIndex(
+      (m) => m.orgId === orgId && m.id === messageId
+    )
+    if (idx < 0) return undefined
+    const now = new Date().toISOString()
+    const cur = this.inboxMessages[idx]
+    this.inboxMessages[idx] = {
+      ...cur,
+      status: "replied",
+      adminReply: text,
+      repliedAt: now,
+      readAt: cur.readAt || now,
+      repliedByAdminId: admin.id,
+      repliedByAdminLabel: admin.label,
+      // Nouvelle réponse → l’agent doit re-acquitter (popup)
+      userAckedAt: null
+    }
+    return this.inboxMessages[idx]
+  }
+
+  async ackInboxMessage(orgId: string, messageId: string, agentId: string) {
+    const idx = this.inboxMessages.findIndex(
+      (m) =>
+        m.orgId === orgId && m.id === messageId && m.agentId === agentId
+    )
+    if (idx < 0) return undefined
+    const cur = this.inboxMessages[idx]
+    if (!cur.adminReply) return cur
+    this.inboxMessages[idx] = {
+      ...cur,
+      userAckedAt: new Date().toISOString()
+    }
+    return this.inboxMessages[idx]
+  }
+
+  async listPendingAdminReplies(orgId: string, agentId: string) {
+    return this.inboxMessages
+      .filter(
+        (m) =>
+          m.orgId === orgId &&
+          m.agentId === agentId &&
+          !!m.adminReply &&
+          !m.userAckedAt
+      )
+      .sort((a, b) => Date.parse(b.repliedAt || b.createdAt) - Date.parse(a.repliedAt || a.createdAt))
+  }
+
+  async closeInboxMessage(orgId: string, messageId: string) {
+    const idx = this.inboxMessages.findIndex(
+      (m) => m.orgId === orgId && m.id === messageId
+    )
+    if (idx < 0) return undefined
+    const now = new Date().toISOString()
+    const cur = this.inboxMessages[idx]
+    // Sans réponse écrite : notifier le client (popup) avec un message système
+    const systemClose =
+      "Votre demande a été clôturée par l'administrateur (sans message de réponse)."
+    const hadReply = !!(cur.adminReply && cur.adminReply.trim())
+    this.inboxMessages[idx] = {
+      ...cur,
+      status: "closed",
+      closedAt: now,
+      readAt: cur.readAt || now,
+      adminReply: hadReply ? cur.adminReply : systemClose,
+      repliedAt: hadReply ? cur.repliedAt : now,
+      repliedByAdminLabel: hadReply
+        ? cur.repliedByAdminLabel
+        : cur.repliedByAdminLabel || "Administrateur",
+      // Si l’agent n’a pas encore acquitté, le popup reste dû (réponse ou clôture)
+      userAckedAt: cur.userAckedAt || null
+    }
+    // Nouvelle notif de clôture sans réponse préalable → forcer re-ack
+    if (!hadReply) {
+      this.inboxMessages[idx] = {
+        ...this.inboxMessages[idx],
+        userAckedAt: null
+      }
+    }
+    return this.inboxMessages[idx]
+  }
+
+  async countInboxUnread(orgId: string) {
+    return this.inboxMessages.filter(
+      (m) => m.orgId === orgId && m.status === "open"
+    ).length
+  }
+
   async summary(orgId: string): Promise<OrgSummary> {
     const {
       briefAgent,
@@ -2349,6 +2689,23 @@ export class MemoryStore implements OpsGateStore {
       .map(([rule_id, count]) => ({ rule_id, count }))
       .sort((a, b) => b.count - a.count)
       .slice(0, 5)
+    const byAgentInbox = new Map<
+      string,
+      { agent_id: string; device_label: string; count: number }
+    >()
+    for (const m of this.inboxMessages.filter((x) => x.orgId === orgId)) {
+      const cur = byAgentInbox.get(m.agentId) || {
+        agent_id: m.agentId,
+        device_label: m.deviceLabel || m.agentId.slice(0, 10),
+        count: 0
+      }
+      cur.count++
+      if (m.deviceLabel) cur.device_label = m.deviceLabel
+      byAgentInbox.set(m.agentId, cur)
+    }
+    const top_inbox_requesters = [...byAgentInbox.values()]
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 8)
     const active = await this.getActivePack(orgId)
     const packs = this.packs.get(orgId) || []
     const agents = [...this.agents.values()].filter((a) => a.orgId === orgId)
@@ -2399,6 +2756,7 @@ export class MemoryStore implements OpsGateStore {
       events_total: events.length,
       by_decision: byDecision,
       top_rules,
+      top_inbox_requesters,
       active_rules_pack: active
         ? {
             version: active.version,
@@ -2440,8 +2798,28 @@ export class MemoryStore implements OpsGateStore {
     detail?: string
     meta?: Record<string, unknown>
   }) {
+    const {
+      AUDIT_GENESIS,
+      computeAuditEntryHash
+    } = await import("./audit-worm")
+    const orgRows = this.adminAudit.filter((e) => e.orgId === input.orgId)
+    const last = orgRows[orgRows.length - 1]
+    const seq = (last?.seq || 0) + 1
+    const prevHash = last?.entryHash || AUDIT_GENESIS
+    const id = newId("aud")
+    const createdAt = new Date().toISOString()
+    const entryHash = computeAuditEntryHash({
+      prevHash,
+      seq,
+      id,
+      orgId: input.orgId,
+      action: input.action,
+      detail: input.detail,
+      adminId: input.adminId,
+      createdAt
+    })
     this.adminAudit.push({
-      id: newId("aud"),
+      id,
       orgId: input.orgId,
       adminId: input.adminId,
       adminEmail: input.adminEmail,
@@ -2449,10 +2827,14 @@ export class MemoryStore implements OpsGateStore {
       action: input.action,
       detail: input.detail,
       meta: input.meta,
-      createdAt: new Date().toISOString()
+      createdAt,
+      seq,
+      entryHash,
+      prevHash
     })
-    if (this.adminAudit.length > 2000) {
-      this.adminAudit = this.adminAudit.slice(-1500)
+    // WORM : pas de purge agressive — plafond mémoire large (rétention légale côté config)
+    if (this.adminAudit.length > 50_000) {
+      this.adminAudit = this.adminAudit.slice(-40_000)
     }
   }
 
@@ -2465,6 +2847,11 @@ export class MemoryStore implements OpsGateStore {
       list = list.filter((e) => e.action === opts.action)
     }
     return list.slice(-(opts?.limit || 100)).reverse()
+  }
+
+  async listAdminAuditAsc(orgId: string, limit = 5000) {
+    const list = this.adminAudit.filter((e) => e.orgId === orgId)
+    return list.slice(-limit)
   }
 
   private normalizeMovingConditions(
@@ -2497,9 +2884,16 @@ export class MemoryStore implements OpsGateStore {
   }
 
   async listMovingRules(orgId: string) {
-    return [...(this.movingRules.get(orgId) || [])].sort(
-      (a, b) => a.priority - b.priority || a.createdAt.localeCompare(b.createdAt)
-    )
+    return [...(this.movingRules.get(orgId) || [])]
+      .map((r) => ({
+        ...r,
+        conditionLogic: r.conditionLogic === "or" ? ("or" as const) : ("and" as const),
+        permanent: !!r.permanent
+      }))
+      .sort(
+        (a, b) =>
+          a.priority - b.priority || a.createdAt.localeCompare(b.createdAt)
+      )
   }
 
   async upsertMovingRule(
@@ -2515,6 +2909,8 @@ export class MemoryStore implements OpsGateStore {
       targetGroupId: string
       priority?: number
       onlyIfUnassigned?: boolean
+      conditionLogic?: import("./types").MovingConditionLogic
+      permanent?: boolean
     }
   ) {
     if (!this.orgs.has(orgId)) return undefined
@@ -2526,37 +2922,50 @@ export class MemoryStore implements OpsGateStore {
     if (input.id) {
       const idx = list.findIndex((r) => r.id === input.id)
       if (idx < 0) return undefined
+      const permanent =
+        input.permanent !== undefined
+          ? input.permanent === true
+          : !!list[idx].permanent
       list[idx] = {
         ...list[idx],
         name: input.name,
         enabled: input.enabled !== false,
         conditions,
+        conditionLogic:
+          input.conditionLogic === "or" || input.conditionLogic === "and"
+            ? input.conditionLogic
+            : list[idx].conditionLogic || "and",
         matchField: first.field,
         matchOp: first.op,
         matchValue: first.value,
         targetGroupId: input.targetGroupId,
         priority: input.priority ?? list[idx].priority,
-        onlyIfUnassigned:
-          input.onlyIfUnassigned !== undefined
+        onlyIfUnassigned: permanent
+          ? false
+          : input.onlyIfUnassigned !== undefined
             ? input.onlyIfUnassigned === true
             : list[idx].onlyIfUnassigned,
+        permanent,
         updatedAt: now
       }
       this.movingRules.set(orgId, list)
       return list[idx]
     }
+    const permanent = input.permanent === true
     const created: import("./types").MovingRule = {
       id: newId("mvr"),
       orgId,
       name: input.name,
       enabled: input.enabled !== false,
       conditions,
+      conditionLogic: input.conditionLogic === "or" ? "or" : "and",
       matchField: first.field,
       matchOp: first.op,
       matchValue: first.value,
       targetGroupId: input.targetGroupId,
       priority: input.priority ?? 100,
-      onlyIfUnassigned: input.onlyIfUnassigned === true,
+      onlyIfUnassigned: permanent ? false : input.onlyIfUnassigned === true,
+      permanent,
       createdAt: now,
       updatedAt: now
     }
@@ -2608,8 +3017,7 @@ export class MemoryStore implements OpsGateStore {
               value: rule.matchValue
             }
           ]
-    return conds.every((c) => {
-      // Match label OU hostname si le champ demandé est vide / pour souplesse
+    const matchOne = (c: import("./types").MovingCondition) => {
       const label = agent.deviceLabel || ""
       const host = agent.hostName || ""
       if (c.field === "host_name") {
@@ -2622,7 +3030,11 @@ export class MemoryStore implements OpsGateStore {
         this.matchMovingRule(label, c.op, c.value) ||
         this.matchMovingRule(host, c.op, c.value)
       )
-    })
+    }
+    if (rule.conditionLogic === "or") {
+      return conds.some(matchOne)
+    }
+    return conds.every(matchOne)
   }
 
   async applyMovingRules(orgId: string, agentId: string) {
@@ -2630,8 +3042,8 @@ export class MemoryStore implements OpsGateStore {
     if (!agent || agent.orgId !== orgId) return { applied: false as const }
     const rules = await this.listMovingRules(orgId)
     for (const rule of rules.filter((r) => r.enabled)) {
-      // onlyIfUnassigned : ne bloque que si déjà dans un groupe (profil seul OK)
-      if (rule.onlyIfUnassigned && agent.groupId) {
+      // permanent = s’applique même si déjà groupé
+      if (!rule.permanent && rule.onlyIfUnassigned && agent.groupId) {
         continue
       }
       if (!this.ruleMatchesAgent(rule, agent)) continue
@@ -2646,6 +3058,110 @@ export class MemoryStore implements OpsGateStore {
       return { applied: true as const, ruleId: rule.id, groupId: group.id }
     }
     return { applied: false as const }
+  }
+
+  async importAgentsCsv(
+    orgId: string,
+    rows: Array<{
+      agent_id?: string
+      device_label?: string
+      host_name?: string
+      group_name?: string
+      group_id?: string
+      profile_name?: string
+      profile_id?: string
+      license?: boolean | null
+    }>,
+    opts?: { dryRun?: boolean }
+  ) {
+    const dry = !!opts?.dryRun
+    const agents = [...this.agents.values()].filter((a) => a.orgId === orgId)
+    const groups = this.groups.get(orgId) || []
+    const profiles = this.profiles.get(orgId) || []
+    let matched = 0
+    let updated = 0
+    let skipped = 0
+    const errors: string[] = []
+    const preview: Array<{ agent_id: string; changes: string[] }> = []
+
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i]!
+      const line = i + 2
+      let agent =
+        (row.agent_id && agents.find((a) => a.id === row.agent_id)) ||
+        undefined
+      if (!agent && row.device_label?.trim()) {
+        const lab = row.device_label.trim().toLowerCase()
+        agent = agents.find(
+          (a) => (a.deviceLabel || "").toLowerCase() === lab
+        )
+      }
+      if (!agent && row.host_name?.trim()) {
+        const h = row.host_name.trim().toLowerCase()
+        agent = agents.find((a) => (a.hostName || "").toLowerCase() === h)
+      }
+      if (!agent) {
+        skipped++
+        errors.push(`L${line}: agent introuvable`)
+        continue
+      }
+      matched++
+      const changes: string[] = []
+      let groupId = row.group_id?.trim() || undefined
+      if (!groupId && row.group_name?.trim()) {
+        const g = groups.find(
+          (x) => x.name.toLowerCase() === row.group_name!.trim().toLowerCase()
+        )
+        if (!g) {
+          errors.push(`L${line}: groupe « ${row.group_name} » inconnu`)
+        } else groupId = g.id
+      }
+      let profileId = row.profile_id?.trim() || undefined
+      if (!profileId && row.profile_name?.trim()) {
+        const p = profiles.find(
+          (x) =>
+            x.name.toLowerCase() === row.profile_name!.trim().toLowerCase()
+        )
+        if (!p) {
+          errors.push(`L${line}: profil « ${row.profile_name} » inconnu`)
+        } else profileId = p.id
+      }
+      if (groupId !== undefined) {
+        changes.push(`group=${groupId || "null"}`)
+        if (!dry) {
+          agent.groupId = groupId || undefined
+          const g = groups.find((x) => x.id === groupId)
+          if (g?.policyProfileId && profileId === undefined) {
+            agent.policyProfileId = g.policyProfileId
+          }
+        }
+      }
+      if (profileId !== undefined) {
+        changes.push(`profile=${profileId || "null"}`)
+        if (!dry) agent.policyProfileId = profileId || undefined
+      }
+      if (row.license === true || row.license === false) {
+        changes.push(`license=${row.license}`)
+        if (!dry) {
+          agent.licenseAssigned = row.license
+          if (!row.license) agent.unlicensedSince = new Date().toISOString()
+          else agent.unlicensedSince = undefined
+        }
+      }
+      if (changes.length) {
+        updated++
+        preview.push({ agent_id: agent.id, changes })
+      } else {
+        skipped++
+      }
+    }
+    return {
+      matched,
+      updated,
+      skipped,
+      errors: errors.slice(0, 50),
+      preview: dry ? preview.slice(0, 40) : undefined
+    }
   }
 
   async bulkAssignAgents(

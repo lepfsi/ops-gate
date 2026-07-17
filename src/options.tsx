@@ -670,7 +670,7 @@ function OptionsPage() {
           [
             ["scanConfigs", "Configurations"],
             ["scanDatabases", "Bases de données"],
-            ["scanImages", "Images"],
+            ["scanImages", "Images — OCR bitmap (Tesseract local)"],
             ["warnMedia", "Audio / vidéo"]
           ] as const
         ).map(([key, title]) => (

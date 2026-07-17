@@ -3,7 +3,10 @@ import {
   useEffect,
   useMemo,
   useRef,
-  useState
+  useState,
+  type DragEvent,
+  type PointerEvent as ReactPointerEvent,
+  type ReactNode
 } from "react"
 
 import {
@@ -18,6 +21,8 @@ import {
   type AgentRow,
   type EventRow,
   type GroupRow,
+  type NotificationChannel,
+  type NotificationChannelKind,
   type PackListItem,
   type PolicyDoc,
   type ProfileRow,
@@ -25,21 +30,38 @@ import {
   type UserRow
 } from "./api"
 import { BrandMark } from "./BrandMark"
+import {
+  parseConsoleHash,
+  routesEqual,
+  writeConsoleHash,
+  type ConsoleRoute,
+  type ConsoleTab,
+  type DashSection,
+  type SettingsSection
+} from "./hash-route"
 import { AI_HOST_PRESETS, HostPicker } from "./HostPicker"
 import { getStoredLang, makeT, setStoredLang, type Lang } from "./i18n"
+import {
+  loadDashLayout,
+  moveWidget,
+  patchWidget,
+  resetDashLayout,
+  saveDashLayout,
+  type DashWidgetId,
+  type DashWidgetLayout
+} from "./dash-layout"
+import {
+  COMMON_TIMEZONES,
+  loadDateTimePrefs,
+  saveDateTimePrefs,
+  type DateFormatPref,
+  type DateTimePrefs,
+  type TimeFormatPref
+} from "./datetime-prefs"
+import { LiveClock } from "./LiveClock"
+import { MfaQr } from "./MfaQr"
 
-type Tab =
-  | "summary"
-  | "policy"
-  | "people"
-  | "packs"
-  | "agents"
-  | "events"
-  | "audit"
-  | "moving"
-  | "settings"
-  | "support"
-  | "help"
+type Tab = ConsoleTab
 
 const IDLE_MS = 5 * 60 * 1000
 
@@ -61,41 +83,51 @@ const PERM_LABELS: Record<AdminPermission, string> = {
   email_password_reset: "Réinit. mdp par e-mail (self)"
 }
 
+function readInitialRoute(): ConsoleRoute {
+  try {
+    const fromHash = parseConsoleHash(window.location.hash)
+    if (fromHash) return fromHash
+  } catch {
+    /* ignore */
+  }
+  try {
+    const t = sessionStorage.getItem("opsgate_console_tab") as Tab | null
+    if (
+      t &&
+      [
+        "summary",
+        "policy",
+        "msp",
+        "people",
+        "packs",
+        "agents",
+        "events",
+        "audit",
+        "moving",
+        "settings",
+        "support",
+        "help"
+      ].includes(t)
+    ) {
+      return { tab: t }
+    }
+  } catch {
+    /* ignore */
+  }
+  return { tab: "summary", dashSection: "overview" }
+}
+
 export default function App() {
   const [sessionAdmin, setSessionAdmin] = useState<AdminRow | null>(null)
   const [authChecking, setAuthChecking] = useState(true)
-  const [tab, setTab] = useState<Tab>(() => {
-    try {
-      const t = sessionStorage.getItem("opsgate_console_tab") as Tab | null
-      if (
-        t &&
-        [
-          "summary",
-          "policy",
-          "people",
-          "packs",
-          "agents",
-          "events",
-          "audit",
-          "moving",
-          "settings",
-          "support",
-          "help"
-        ].includes(t)
-      ) {
-        return t
-      }
-    } catch {
-      /* ignore */
-    }
-    return "summary"
-  })
+  const initialRoute = useMemo(() => readInitialRoute(), [])
+  const [tab, setTab] = useState<Tab>(() => initialRoute.tab)
   /** Sous-section tableau de bord (une seule nav latérale) */
-  const [dashSection, setDashSection] = useState<
-    "overview" | "licenses" | "connectivity" | "activity" | "rules"
-  >("overview")
-  /** Sous-liens dashboard dépliés / repliés */
-  const [dashNavOpen, setDashNavOpen] = useState(true)
+  const [dashSection, setDashSection] = useState<DashSection>(
+    () => initialRoute.dashSection || "overview"
+  )
+  /** Évite boucle hashchange ↔ setState */
+  const applyingHash = useRef(false)
   /** Dashboard plein écran : topbar + nav masquées ; Échap pour sortir */
   const [dashExpanded, setDashExpanded] = useState(false)
   const [apiBase, setApiBaseState] = useState(getApiBase())
@@ -103,6 +135,7 @@ export default function App() {
   const [error, setErrorRaw] = useState<string | null>(null)
   const [info, setInfoRaw] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [inboxUnread, setInboxUnread] = useState(0)
   const [theme, setTheme] = useState<"light" | "dark">(() => {
     try {
       return localStorage.getItem("opsgate_theme") === "dark" ? "dark" : "light"
@@ -215,6 +248,34 @@ export default function App() {
   const [primaryEmail, setPrimaryEmail] = useState("")
   const [orgCode, setOrgCode] = useState("")
   const [orgName, setOrgName] = useState("")
+  const [orgId, setOrgId] = useState("")
+  const [accessibleOrgs, setAccessibleOrgs] = useState<
+    Array<{
+      org_id: string
+      org_code: string
+      name: string
+      is_principal: boolean
+      current: boolean
+    }>
+  >([])
+  const [switchBusy, setSwitchBusy] = useState(false)
+  /** Multi-tenant sans MFA → bannière + bascule bloquée */
+  const [mfaRequiredMultiOrg, setMfaRequiredMultiOrg] = useState(false)
+  const [mfaEnabled, setMfaEnabled] = useState(false)
+  /** Modal code MFA à chaque bascule de tenant */
+  const [switchMfa, setSwitchMfa] = useState<{
+    orgId: string
+    name: string
+  } | null>(null)
+  const [switchMfaCode, setSwitchMfaCode] = useState("")
+  const [switchMfaErr, setSwitchMfaErr] = useState<string | null>(null)
+  /** Demande de connexion concurrente (consentement 10 s) */
+  const [sessionChallenge, setSessionChallenge] = useState<{
+    challenge_id: string
+    seconds_left: number
+    requester_hint: string
+  } | null>(null)
+  const [sessionReadOnly, setSessionReadOnly] = useState(false)
 
   const refreshHealth = useCallback(async () => {
     try {
@@ -266,16 +327,129 @@ export default function App() {
         else if (me.org?.primary_email) setPrimaryEmail(me.org.primary_email)
         if (me.org?.org_code) setOrgCode(me.org.org_code)
         if (me.org?.name) setOrgName(me.org.name)
+        if (me.org?.id) setOrgId(me.org.id)
+        // Dropdown multi-tenant uniquement si l’API confirme multi_org + >1 org
+        const orgs = me.accessible_orgs || []
+        setAccessibleOrgs(
+          me.multi_org === true && orgs.length > 1
+            ? orgs
+            : me.org
+              ? [
+                  {
+                    org_id: me.org.id,
+                    org_code: me.org.org_code,
+                    name: me.org.name,
+                    is_principal: !!me.admin?.is_principal,
+                    current: true
+                  }
+                ]
+              : []
+        )
+        setMfaRequiredMultiOrg(!!me.mfa_required_multi_org)
+        setMfaEnabled(!!me.mfa_enabled)
+        setSessionReadOnly(!!me.read_only)
       } catch {
         setToken(null)
         setSessionAdmin(null)
         setOrgCode("")
         setOrgName("")
+        setOrgId("")
+        setAccessibleOrgs([])
+        setMfaRequiredMultiOrg(false)
+        setMfaEnabled(false)
+        setSessionReadOnly(false)
       } finally {
         setAuthChecking(false)
       }
     })()
   }, [])
+
+  // Poll demande de prise de session (autre navigateur)
+  useEffect(() => {
+    if (!sessionAdmin || !getToken()) return
+    let cancelled = false
+    const poll = async () => {
+      try {
+        const r = await api.pendingSessionChallenge()
+        if (cancelled) return
+        if (r.challenge && r.challenge.status === "pending") {
+          setSessionChallenge({
+            challenge_id: r.challenge.challenge_id,
+            seconds_left: r.challenge.seconds_left,
+            requester_hint: r.challenge.requester_hint || ""
+          })
+        } else if (
+          r.challenge &&
+          (r.challenge.status === "timeout" ||
+            r.challenge.status === "accepted" ||
+            r.challenge.status === "claimed")
+        ) {
+          // Session prise / timeout → se déconnecter
+          setSessionChallenge(null)
+          try {
+            await api.logout("manual")
+          } catch {
+            /* ignore */
+          }
+          setToken(null)
+          setSessionAdmin(null)
+          setInfo(t("login.challengeKicked"))
+        } else {
+          setSessionChallenge(null)
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+    void poll()
+    const id = setInterval(() => void poll(), 1500)
+    return () => {
+      cancelled = true
+      clearInterval(id)
+    }
+  }, [sessionAdmin, t, setInfo])
+
+  const applyTenantSession = useCallback(
+    (r: {
+      admin: AdminRow
+      org: {
+        id: string
+        name: string
+        org_code: string
+        primary_email?: string
+      } | null
+      accessible_orgs?: typeof accessibleOrgs
+      token?: string
+    }) => {
+      if (r.token) setToken(r.token)
+      setSessionAdmin(r.admin)
+      if (r.org) {
+        setOrgId(r.org.id)
+        setOrgCode(r.org.org_code || "")
+        setOrgName(r.org.name || "")
+        if (r.org.primary_email) setPrimaryEmail(r.org.primary_email)
+      }
+      if (r.accessible_orgs) {
+        const orgs = r.accessible_orgs
+        setAccessibleOrgs(
+          orgs.length > 1
+            ? orgs
+            : r.org
+              ? [
+                  {
+                    org_id: r.org.id,
+                    org_code: r.org.org_code,
+                    name: r.org.name,
+                    is_principal: !!r.admin?.is_principal,
+                    current: true
+                  }
+                ]
+              : orgs
+        )
+      }
+    },
+    []
+  )
 
   /** Même hauteur de vue pour tous les modules (contenu haut ; header rarement utile) */
   const scrollConsoleTop = useCallback(() => {
@@ -290,32 +464,166 @@ export default function App() {
     })
   }, [])
 
-  const goTab = useCallback(
-    (t: Tab) => {
-      setTab(t)
+  const currentRoute = useCallback((): ConsoleRoute => {
+    if (tab === "summary") {
+      return { tab, dashSection }
+    }
+    if (tab === "settings") {
+      // settingsTab vit dans SettingsView — on lit le hash ou general
+      const h = parseConsoleHash(window.location.hash)
+      return {
+        tab,
+        settingsSection: h?.settingsSection || "general"
+      }
+    }
+    return { tab }
+  }, [tab, dashSection])
+
+  const applyRoute = useCallback(
+    (route: ConsoleRoute, opts?: { scroll?: boolean }) => {
+      setTab(route.tab)
       try {
-        sessionStorage.setItem("opsgate_console_tab", t)
+        sessionStorage.setItem("opsgate_console_tab", route.tab)
       } catch {
         /* ignore */
       }
-      if (t === "summary") {
-        setDashNavOpen(true)
-        setDashSection("overview")
+      if (route.tab === "summary") {
+        setDashSection(route.dashSection || "overview")
+        setDashExpanded(false)
       } else {
         setDashExpanded(false)
       }
-      scrollConsoleTop()
+      if (route.tab === "settings" && route.settingsSection) {
+        try {
+          sessionStorage.setItem(
+            "opsgate_console_settings_tab",
+            route.settingsSection
+          )
+        } catch {
+          /* ignore */
+        }
+        window.dispatchEvent(
+          new CustomEvent("opsgate-settings-tab", {
+            detail: route.settingsSection
+          })
+        )
+      }
+      if (opts?.scroll !== false) scrollConsoleTop()
     },
     [scrollConsoleTop]
   )
 
+  const goTab = useCallback(
+    (t: Tab) => {
+      let settingsSection: SettingsSection | undefined
+      if (t === "settings") {
+        try {
+          const s = sessionStorage.getItem(
+            "opsgate_console_settings_tab"
+          ) as SettingsSection | null
+          settingsSection = s || "general"
+        } catch {
+          settingsSection = "general"
+        }
+      }
+      const route: ConsoleRoute =
+        t === "summary"
+          ? { tab: t, dashSection: "overview" }
+          : t === "settings"
+            ? { tab: t, settingsSection }
+            : { tab: t }
+      applyRoute(route)
+      writeConsoleHash(route, "push")
+    },
+    [applyRoute]
+  )
+
+  const goDashSection = useCallback(
+    (id: DashSection) => {
+      const route: ConsoleRoute = { tab: "summary", dashSection: id }
+      applyRoute(route, { scroll: false })
+      writeConsoleHash(route, "push")
+      if (id === "overview" || id === "licenses" || id === "connectivity") {
+        scrollConsoleTop()
+        return
+      }
+      const elId = id === "activity" ? "dash-activity" : "dash-rules"
+      setTimeout(() => {
+        document
+          .getElementById(elId)
+          ?.scrollIntoView({ behavior: "smooth", block: "start" })
+      }, 30)
+    },
+    [applyRoute, scrollConsoleTop]
+  )
+
+  // Sync état → hash (remplace l’URL pour partage / F5)
   useEffect(() => {
+    if (applyingHash.current) return
+    if (!sessionAdmin) return
+    const route = currentRoute()
+    writeConsoleHash(route, "replace")
     try {
       sessionStorage.setItem("opsgate_console_tab", tab)
     } catch {
       /* ignore */
     }
-  }, [tab])
+  }, [tab, dashSection, sessionAdmin, currentRoute])
+
+  // Back / forward / lien collé
+  useEffect(() => {
+    const onHash = () => {
+      const route = parseConsoleHash(window.location.hash)
+      if (!route) return
+      applyingHash.current = true
+      applyRoute(route)
+      requestAnimationFrame(() => {
+        applyingHash.current = false
+      })
+    }
+    window.addEventListener("hashchange", onHash)
+    return () => window.removeEventListener("hashchange", onHash)
+  }, [applyRoute])
+
+  // Au premier login : si hash présent, l’appliquer
+  useEffect(() => {
+    if (!sessionAdmin) return
+    const route = parseConsoleHash(window.location.hash)
+    if (route && !routesEqual(route, currentRoute())) {
+      applyingHash.current = true
+      applyRoute(route)
+      requestAnimationFrame(() => {
+        applyingHash.current = false
+      })
+    } else if (!parseConsoleHash(window.location.hash)) {
+      writeConsoleHash(currentRoute(), "replace")
+    }
+    // une fois session prête
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionAdmin?.id])
+
+  // Badge non-lus inbox (poll léger)
+  useEffect(() => {
+    if (!sessionAdmin || !getToken()) {
+      setInboxUnread(0)
+      return
+    }
+    let cancelled = false
+    const tick = async () => {
+      try {
+        const r = await api.inboxUnreadCount()
+        if (!cancelled) setInboxUnread(r.unread || 0)
+      } catch {
+        /* ignore */
+      }
+    }
+    void tick()
+    const id = window.setInterval(() => void tick(), 60_000)
+    return () => {
+      cancelled = true
+      window.clearInterval(id)
+    }
+  }, [sessionAdmin])
 
   const loadTab = useCallback(async (t: Tab) => {
     if (!getToken()) return
@@ -387,6 +695,123 @@ export default function App() {
     }
   }, [])
 
+  const goMfaSettings = useCallback(() => {
+    const route: ConsoleRoute = {
+      tab: "settings",
+      settingsSection: "general"
+    }
+    applyRoute(route)
+    writeConsoleHash(route, "push")
+  }, [applyRoute])
+
+  /** Multi-tenant : ouvre le modal MFA (code 6 chiffres) avant bascule. */
+  const switchTenant = useCallback(
+    (targetOrgId: string) => {
+      if (!targetOrgId || targetOrgId === orgId) return
+      setError(null)
+      if (accessibleOrgs.length > 1) {
+        if (mfaRequiredMultiOrg || !mfaEnabled) {
+          setError(t("msp.mfaSetupRequired"))
+          goMfaSettings()
+          return
+        }
+        const target = accessibleOrgs.find((o) => o.org_id === targetOrgId)
+        setSwitchMfa({
+          orgId: targetOrgId,
+          name: target?.name || target?.org_code || targetOrgId
+        })
+        setSwitchMfaCode("")
+        setSwitchMfaErr(null)
+        return
+      }
+      // Mono-tenant : bascule directe (ne devrait pas apparaître en UI)
+      void (async () => {
+        setSwitchBusy(true)
+        try {
+          const r = await api.switchOrg(targetOrgId, { force: true })
+          applyTenantSession(r)
+          setInfo(
+            t("msp.switched", {
+              name: r.org?.name || r.org?.org_code || targetOrgId
+            })
+          )
+          await loadTab(tab)
+          void refreshHealth()
+        } catch (e) {
+          setError(String(e))
+        } finally {
+          setSwitchBusy(false)
+        }
+      })()
+    },
+    [
+      orgId,
+      accessibleOrgs,
+      mfaRequiredMultiOrg,
+      mfaEnabled,
+      tab,
+      applyTenantSession,
+      loadTab,
+      refreshHealth,
+      goMfaSettings,
+      t
+    ]
+  )
+
+  const confirmSwitchWithMfa = useCallback(async () => {
+    if (!switchMfa) return
+    const code = switchMfaCode.replace(/\D/g, "").slice(0, 6)
+    if (code.length !== 6) {
+      setSwitchMfaErr(t("msp.mfaCodeHint"))
+      return
+    }
+    setSwitchBusy(true)
+    setSwitchMfaErr(null)
+    setError(null)
+    try {
+      const r = await api.switchOrg(switchMfa.orgId, {
+        force: true,
+        totp_code: code
+      })
+      applyTenantSession(r)
+      setSwitchMfa(null)
+      setSwitchMfaCode("")
+      setInfo(
+        t("msp.switched", {
+          name: r.org?.name || r.org?.org_code || switchMfa.orgId
+        })
+      )
+      await loadTab(tab)
+      void refreshHealth()
+    } catch (e) {
+      const err = e as Error & { code?: string }
+      if (err.code === "mfa_setup_required_multi_org") {
+        setSwitchMfa(null)
+        setMfaRequiredMultiOrg(true)
+        setMfaEnabled(false)
+        setError(err.message || t("msp.mfaSetupRequired"))
+        goMfaSettings()
+      } else if (err.code === "mfa_invalid") {
+        setSwitchMfaErr(err.message || t("msp.mfaInvalid"))
+      } else if (err.code === "mfa_required") {
+        setSwitchMfaErr(err.message || t("msp.mfaRequired"))
+      } else {
+        setSwitchMfaErr(String(e))
+      }
+    } finally {
+      setSwitchBusy(false)
+    }
+  }, [
+    switchMfa,
+    switchMfaCode,
+    tab,
+    applyTenantSession,
+    loadTab,
+    refreshHealth,
+    goMfaSettings,
+    t
+  ])
+
   useEffect(() => {
     if (!sessionAdmin) return
     void refreshHealth()
@@ -451,9 +876,29 @@ export default function App() {
           try {
             const me = await api.me()
             if (me.admin?.is_principal && me.admin.email) setPrimaryEmail(me.admin.email)
-        else if (me.org?.primary_email) setPrimaryEmail(me.org.primary_email)
+            else if (me.org?.primary_email) setPrimaryEmail(me.org.primary_email)
             if (me.org?.org_code) setOrgCode(me.org.org_code)
             if (me.org?.name) setOrgName(me.org.name)
+            if (me.org?.id) setOrgId(me.org.id)
+            const orgs = me.accessible_orgs || []
+            setAccessibleOrgs(
+              me.multi_org === true && orgs.length > 1
+                ? orgs
+                : me.org
+                  ? [
+                      {
+                        org_id: me.org.id,
+                        org_code: me.org.org_code,
+                        name: me.org.name,
+                        is_principal: !!me.admin?.is_principal,
+                        current: true
+                      }
+                    ]
+                  : []
+            )
+            setMfaRequiredMultiOrg(!!me.mfa_required_multi_org)
+            setMfaEnabled(!!me.mfa_enabled)
+            setSessionReadOnly(!!me.read_only)
           } catch {
             /* ignore */
           }
@@ -527,40 +972,166 @@ export default function App() {
           }}
         />
       )}
+      {switchMfa && (
+        <SwitchOrgMfaModal
+          orgName={switchMfa.name}
+          code={switchMfaCode}
+          setCode={setSwitchMfaCode}
+          err={switchMfaErr}
+          busy={switchBusy}
+          t={t}
+          onCancel={() => {
+            setSwitchMfa(null)
+            setSwitchMfaCode("")
+            setSwitchMfaErr(null)
+          }}
+          onConfirm={() => void confirmSwitchWithMfa()}
+        />
+      )}
+      {sessionChallenge && (
+        <SessionTakeoverModal
+          challenge={sessionChallenge}
+          t={t}
+          onAccept={async () => {
+            try {
+              await api.respondSessionChallenge(
+                sessionChallenge.challenge_id,
+                "accept"
+              )
+              try {
+                await api.logout("manual")
+              } catch {
+                /* ignore */
+              }
+              setToken(null)
+              setSessionAdmin(null)
+              setSessionChallenge(null)
+              setInfo(t("login.challengeAcceptedLocal"))
+            } catch (e) {
+              setError(String(e))
+            }
+          }}
+          onRefuse={async () => {
+            try {
+              await api.respondSessionChallenge(
+                sessionChallenge.challenge_id,
+                "refuse"
+              )
+              setSessionChallenge(null)
+              setInfo(t("login.challengeRefusedLocal"))
+            } catch (e) {
+              setError(String(e))
+            }
+          }}
+        />
+      )}
       {!dashExpanded && (
       <header className="topbar">
         <div className="brand">
-          <BrandMark size={40} />
+          <BrandMark size={36} />
           <div className="brand-text">
             <h1>OpsGate</h1>
-            <p>
-              {sessionAdmin.label} · {sessionAdmin.email}
-              {sessionAdmin.is_principal ? " · Principal" : ""}
-            </p>
+            {/* Une seule org : nom/code statique. Dropdown uniquement si multi_org réel. */}
+            {(orgName || orgCode) && (
+              <div className="topbar-org-line">
+                {accessibleOrgs.length > 1 ? (
+                  <select
+                    className="input topbar-org-select"
+                    disabled={switchBusy || busy || !!switchMfa}
+                    value={orgId}
+                    onChange={(e) => switchTenant(e.target.value)}
+                    title={t("msp.switchHint")}
+                    aria-label={t("msp.org")}>
+                    {accessibleOrgs.map((o) => (
+                      <option key={o.org_id} value={o.org_id}>
+                        {o.name}
+                        {o.org_code ? ` (${o.org_code})` : ""}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <span
+                    className="topbar-org-static mono"
+                    title={orgName || orgCode}>
+                    {orgName || orgCode}
+                    {orgName && orgCode ? ` · ${orgCode}` : ""}
+                  </span>
+                )}
+              </div>
+            )}
           </div>
         </div>
         <div className="topbar-actions">
-          <input
-            className="input"
-            value={apiBase}
-            onChange={(e) => setApiBaseState(e.target.value)}
-            placeholder="http://127.0.0.1:8787"
-          />
-          <button className="btn secondary btn-sm" type="button" onClick={saveApi}>
-            {t("top.apply")}
-          </button>
+          <LiveClock className="topbar-clock mono" />
+          <div className="topbar-api-group" title={health}>
+            <span
+              className={`api-status ${health.startsWith("API OK") ? "ok" : "bad"}`}>
+              API
+            </span>
+            <input
+              className="input topbar-api-input"
+              value={apiBase}
+              onChange={(e) => setApiBaseState(e.target.value)}
+              onBlur={saveApi}
+              placeholder="http://127.0.0.1:8787"
+              title={apiBase}
+            />
+          </div>
           <button
             className="btn secondary btn-sm"
             type="button"
+            disabled={busy}
+            title={t("top.refresh")}
             onClick={() => {
               void refreshHealth()
               void loadTab(tab)
             }}>
-            {t("top.refresh")}
+            {t("dash.refresh")}
+          </button>
+          {tab === "summary" && (
+            <>
+              <button
+                className="btn secondary btn-sm"
+                type="button"
+                title={t("dash.expand")}
+                onClick={() => setDashExpanded(true)}>
+                {t("dash.expand")}
+              </button>
+              <button
+                className="btn btn-sm"
+                type="button"
+                disabled={busy}
+                title={t("dash.forceSync")}
+                onClick={async () => {
+                  setBusy(true)
+                  setError(null)
+                  setInfo(null)
+                  try {
+                    const r = await api.forceSync()
+                    setInfo(
+                      `Force-sync epoch=${r.config_epoch} · ${r.agents} agent(s)`
+                    )
+                  } catch (e) {
+                    setError(String(e))
+                  } finally {
+                    setBusy(false)
+                  }
+                }}>
+                {t("dash.forceSync")}
+              </button>
+            </>
+          )}
+          <button
+            className="btn secondary btn-sm"
+            type="button"
+            title="Clair / sombre"
+            onClick={() => setTheme((th) => (th === "dark" ? "light" : "dark"))}>
+            {theme === "dark" ? "☀" : "☾"}
           </button>
           <button
             className="btn secondary btn-sm"
             type="button"
+            title={`${sessionAdmin.email}${sessionAdmin.is_principal ? " · Principal" : ""}`}
             onClick={async () => {
               try {
                 await api.logout("manual")
@@ -591,11 +1162,28 @@ export default function App() {
         </div>
       )}
 
+      {mfaRequiredMultiOrg && !dashExpanded && (
+        <div className="mfa-multi-banner" role="alert">
+          <span>{t("msp.mfaBanner")}</span>
+          <button
+            type="button"
+            className="btn btn-sm"
+            onClick={goMfaSettings}>
+            {t("msp.mfaBannerCta")}
+          </button>
+        </div>
+      )}
+      {sessionReadOnly && !dashExpanded && (
+        <div className="readonly-banner" role="status">
+          <span>{t("login.readOnlyBanner")}</span>
+        </div>
+      )}
+
       <div className="shell-body">
       {!dashExpanded && (
       <nav className="shell-nav" aria-label="Navigation principale">
         <div className="shell-nav-brand">
-          <BrandMark size={32} />
+          <BrandMark size={28} />
           <div className="shell-nav-brand-text">
             <strong>OpsGate</strong>
             <span>Console</span>
@@ -603,61 +1191,17 @@ export default function App() {
         </div>
         <button
           type="button"
-          className={`shell-nav-item ${tab === "summary" ? "active" : ""} ${
-            tab === "summary" && dashNavOpen ? "open" : ""
-          }`}
-          onClick={() => {
-            if (tab === "summary") {
-              // Toggle sous-liens + même hauteur haute (contenu dashboard)
-              setDashNavOpen((o) => !o)
-              setDashSection("overview")
-              scrollConsoleTop()
-              return
-            }
-            goTab("summary")
-          }}>
-          {t("nav.dashboard")}{" "}
-          {tab === "summary" ? (dashNavOpen ? "▾" : "▸") : ""}
+          className={`shell-nav-item ${tab === "summary" ? "active" : ""}`}
+          onClick={() => goTab("summary")}>
+          {t("nav.dashboard")}
         </button>
-        {tab === "summary" && dashNavOpen && (
-          <>
-            {(
-              [
-                ["overview", "nav.overview"],
-                ["licenses", "nav.licenses"],
-                ["connectivity", "nav.connectivity"],
-                ["activity", "nav.activity"],
-                ["rules", "nav.rules"]
-              ] as const
-            ).map(([id, labelKey]) => (
-              <button
-                key={id}
-                type="button"
-                className={`shell-nav-sub ${dashSection === id ? "active" : ""}`}
-                onClick={() => {
-                  setTab("summary")
-                  setDashSection(id)
-                  // Overview / licences / stale → haut du contenu (pas le bas de page)
-                  if (
-                    id === "overview" ||
-                    id === "licenses" ||
-                    id === "connectivity"
-                  ) {
-                    scrollConsoleTop()
-                    return
-                  }
-                  const elId =
-                    id === "activity" ? "dash-activity" : "dash-rules"
-                  setTimeout(() => {
-                    document
-                      .getElementById(elId)
-                      ?.scrollIntoView({ behavior: "smooth", block: "start" })
-                  }, 30)
-                }}>
-                {t(labelKey)}
-              </button>
-            ))}
-          </>
+        {accessibleOrgs.length > 1 && (
+          <button
+            type="button"
+            className={`shell-nav-item ${tab === "msp" ? "active" : ""}`}
+            onClick={() => goTab("msp")}>
+            {t("nav.msp")}
+          </button>
         )}
         <button
           type="button"
@@ -715,6 +1259,24 @@ export default function App() {
             className={`shell-nav-item ${tab === "support" ? "active" : ""}`}
             onClick={() => goTab("support")}>
             {t("nav.support")}
+            {inboxUnread > 0 && (
+              <span
+                style={{
+                  marginLeft: 6,
+                  display: "inline-block",
+                  minWidth: 18,
+                  padding: "0 6px",
+                  borderRadius: 999,
+                  background: "#0f766e",
+                  color: "#fff",
+                  fontSize: 11,
+                  fontWeight: 700,
+                  lineHeight: "18px",
+                  textAlign: "center"
+                }}>
+                {inboxUnread > 99 ? "99+" : inboxUnread}
+              </span>
+            )}
           </button>
           <button
             type="button"
@@ -730,38 +1292,6 @@ export default function App() {
         className={`shell-main${
           tab === "summary" && dashExpanded ? " shell-main--dash-expanded" : ""
         }`}>
-      {/* Bandeau API : scrolle avec le contenu ; masqué en mode dashboard étendu */}
-      {!(tab === "summary" && dashExpanded) && (
-      <div className="status-strip">
-        <span>
-          <span
-            className={`api-status ${health.startsWith("API OK") ? "ok" : "bad"}`}
-            title={health}>
-            API
-          </span>
-          <strong>
-            {health.startsWith("API OK") ? t("login.apiOk") : health}
-          </strong>
-        </span>
-        {orgCode ? (
-          <span title={orgName || orgCode}>
-            Org · <strong className="mono">{orgCode}</strong>
-          </span>
-        ) : null}
-        <span title="Compte connecté">
-          Compte · <strong>{sessionAdmin.email}</strong>
-        </span>
-        <span className="meta-tag">V1 1.2</span>
-        <button
-          type="button"
-          className="btn secondary btn-sm"
-          title="Clair / sombre"
-          onClick={() => setTheme((th) => (th === "dark" ? "light" : "dark"))}>
-          {theme === "dark" ? t("top.themeLight") : t("top.themeDark")}
-        </button>
-      </div>
-      )}
-
       {busy && tab !== "packs" && tab !== "policy" && !dashExpanded && (
         <p className="muted">{t("common.loading")}</p>
       )}
@@ -971,8 +1501,16 @@ export default function App() {
           busy={busy}
         />
       )}
+      {tab === "msp" && accessibleOrgs.length > 1 && (
+        <MspPortfolioView
+          currentOrgId={orgId}
+          t={t}
+          onSwitch={(id) => switchTenant(id)}
+          switchBusy={switchBusy}
+        />
+      )}
       {tab === "audit" && sessionAdmin && (
-        <AuditView isPrincipal={!!sessionAdmin.is_principal} />
+        <AuditView isPrincipal={!!sessionAdmin.is_principal} t={t} />
       )}
       {tab === "settings" && (
         <SystemSettingsView
@@ -988,10 +1526,19 @@ export default function App() {
             setLang(l)
             setStoredLang(l)
           }}
+          multiOrg={accessibleOrgs.length > 1}
+          onMfaChange={(enabled) => {
+            setMfaEnabled(enabled)
+            setMfaRequiredMultiOrg(
+              accessibleOrgs.length > 1 && !enabled
+            )
+          }}
           t={t}
         />
       )}
-      {tab === "support" && <SupportView t={t} />}
+      {tab === "support" && (
+        <SupportView t={t} onUnreadChange={setInboxUnread} />
+      )}
       {tab === "help" && <HelpView t={t} />}
 
       <footer className="console-footer">
@@ -1002,6 +1549,143 @@ export default function App() {
         DailyOps.Tech
       </footer>
       </main>
+      </div>
+    </div>
+  )
+}
+
+function SessionTakeoverModal({
+  challenge,
+  t,
+  onAccept,
+  onRefuse
+}: {
+  challenge: {
+    challenge_id: string
+    seconds_left: number
+    requester_hint: string
+  }
+  t: (k: string, vars?: Record<string, string | number>) => string
+  onAccept: () => void
+  onRefuse: () => void
+}) {
+  const [left, setLeft] = useState(challenge.seconds_left)
+  useEffect(() => {
+    setLeft(challenge.seconds_left)
+  }, [challenge.seconds_left, challenge.challenge_id])
+  useEffect(() => {
+    const id = setInterval(() => {
+      setLeft((n) => Math.max(0, n - 1))
+    }, 1000)
+    return () => clearInterval(id)
+  }, [challenge.challenge_id])
+  return (
+    <div className="modal-overlay" role="dialog" aria-modal="true">
+      <div className="card modal-card">
+        <h2 style={{ marginTop: 0 }}>{t("login.takeoverTitle")}</h2>
+        <p style={{ fontSize: 13, lineHeight: 1.45 }}>
+          {t("login.takeoverHint", {
+            hint: challenge.requester_hint || "—",
+            n: left
+          })}
+        </p>
+        <p className="muted" style={{ fontSize: 12 }}>
+          {t("login.takeoverTimeout")}
+        </p>
+        <div
+          className="row"
+          style={{ gap: 8, marginTop: 14, flexWrap: "wrap" }}>
+          <button
+            className="btn danger"
+            type="button"
+            style={{ flex: 1, minWidth: 100 }}
+            onClick={onRefuse}>
+            {t("login.takeoverRefuse")}
+          </button>
+          <button
+            className="btn"
+            type="button"
+            style={{ flex: 1, minWidth: 100 }}
+            onClick={onAccept}>
+            {t("login.takeoverAccept")}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function SwitchOrgMfaModal({
+  orgName,
+  code,
+  setCode,
+  err,
+  busy,
+  t,
+  onCancel,
+  onConfirm
+}: {
+  orgName: string
+  code: string
+  setCode: (c: string) => void
+  err: string | null
+  busy: boolean
+  t: (k: string, vars?: Record<string, string | number>) => string
+  onCancel: () => void
+  onConfirm: () => void
+}) {
+  return (
+    <div className="modal-overlay" role="dialog" aria-modal="true">
+      <div className="card modal-card">
+        <h2 style={{ marginTop: 0 }}>{t("msp.mfaSwitchTitle")}</h2>
+        <p className="muted" style={{ fontSize: 13, lineHeight: 1.45 }}>
+          {t("msp.mfaSwitchHint", { name: orgName })}
+        </p>
+        <label className="field-label">{t("mfa.code")}</label>
+        <input
+          className="input mono"
+          inputMode="numeric"
+          autoComplete="one-time-code"
+          autoFocus
+          maxLength={6}
+          placeholder="123456"
+          value={code}
+          disabled={busy}
+          onChange={(e) =>
+            setCode(e.target.value.replace(/\D/g, "").slice(0, 6))
+          }
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && code.replace(/\D/g, "").length === 6) {
+              e.preventDefault()
+              onConfirm()
+            }
+            if (e.key === "Escape") {
+              e.preventDefault()
+              onCancel()
+            }
+          }}
+        />
+        {err && <p className="err">{err}</p>}
+        <div
+          className="row"
+          style={{ gap: 8, marginTop: 14, flexWrap: "wrap" }}>
+          <button
+            className="btn secondary"
+            type="button"
+            disabled={busy}
+            style={{ flex: 1, minWidth: 100 }}
+            onClick={onCancel}>
+            {t("msp.mfaSwitchCancel")}
+          </button>
+          <button
+            className="btn"
+            type="button"
+            disabled={busy || code.replace(/\D/g, "").length !== 6}
+            style={{ flex: 1, minWidth: 100 }}
+            onClick={onConfirm}>
+            {t("msp.mfaSwitchSubmit")}
+          </button>
+        </div>
       </div>
     </div>
   )
@@ -1107,6 +1791,155 @@ function SummaryView({
   const [drillBusy, setDrillBusy] = useState(false)
   /** Panneau contextuel : unlicensed | grace | offline | decision | duplicates */
   const [panel, setPanel] = useState<string | null>(null)
+  const [dashLayout, setDashLayout] = useState<DashWidgetLayout[]>(() =>
+    loadDashLayout()
+  )
+  const [dragId, setDragId] = useState<DashWidgetId | null>(null)
+  const [overId, setOverId] = useState<DashWidgetId | null>(null)
+  const resizeRef = useRef<{
+    id: DashWidgetId
+    startX: number
+    startY: number
+    startW: 1 | 2 | 3
+    startH: number
+  } | null>(null)
+
+  const persistLayout = useCallback((next: DashWidgetLayout[]) => {
+    setDashLayout(next)
+    saveDashLayout(next)
+  }, [])
+
+  const onWidgetDragStart = (id: DashWidgetId, e: DragEvent) => {
+    setDragId(id)
+    e.dataTransfer.effectAllowed = "move"
+    e.dataTransfer.setData("text/plain", id)
+  }
+  const onWidgetDrop = (targetId: DashWidgetId) => {
+    if (!dragId || dragId === targetId) {
+      setDragId(null)
+      setOverId(null)
+      return
+    }
+    persistLayout(moveWidget(dashLayout, dragId, targetId))
+    setDragId(null)
+    setOverId(null)
+  }
+  const startResize = (
+    id: DashWidgetId,
+    w: 1 | 2 | 3,
+    h: number,
+    e: ReactPointerEvent
+  ) => {
+    e.preventDefault()
+    e.stopPropagation()
+    const start = {
+      id,
+      startX: e.clientX,
+      startY: e.clientY,
+      startW: w,
+      startH: h
+    }
+    resizeRef.current = start
+    const onMove = (ev: PointerEvent) => {
+      const r = resizeRef.current
+      if (!r) return
+      const dx = ev.clientX - r.startX
+      const dy = ev.clientY - r.startY
+      let nw: 1 | 2 | 3 = r.startW
+      if (dx > 90) nw = 3
+      else if (dx > 40) nw = r.startW === 1 ? 2 : 3
+      else if (dx < -90) nw = 1
+      else if (dx < -40) nw = r.startW === 3 ? 2 : 1
+      const nh = r.startH + dy
+      setDashLayout((prev) => patchWidget(prev, r.id, { w: nw, h: nh }))
+    }
+    const onUp = () => {
+      if (resizeRef.current) {
+        setDashLayout((prev) => {
+          saveDashLayout(prev)
+          return prev
+        })
+      }
+      resizeRef.current = null
+      window.removeEventListener("pointermove", onMove)
+      window.removeEventListener("pointerup", onUp)
+    }
+    window.addEventListener("pointermove", onMove)
+    window.addEventListener("pointerup", onUp)
+  }
+
+  const wrapWidget = (
+    id: DashWidgetId,
+    title: string,
+    body: ReactNode,
+    extraClass?: string
+  ) => {
+    const lay = dashLayout.find((x) => x.id === id) || {
+      id,
+      w: 1 as const,
+      h: 200
+    }
+    const colSpan = lay.w
+    return (
+      <div
+        key={id}
+        id={
+          id === "activity"
+            ? "dash-activity"
+            : id === "threats"
+              ? "dash-rules"
+              : undefined
+        }
+        className={`card dash-widget ${extraClass || ""} ${
+          dragId === id ? "is-dragging" : ""
+        } ${overId === id ? "is-drag-over" : ""}`}
+        style={{
+          gridColumn: `span ${colSpan}`,
+          height: lay.h,
+          minHeight: lay.h
+        }}
+        onDragOver={(e) => {
+          e.preventDefault()
+          setOverId(id)
+        }}
+        onDragLeave={() => setOverId((o) => (o === id ? null : o))}
+        onDrop={(e) => {
+          e.preventDefault()
+          onWidgetDrop(id)
+        }}>
+        <div
+          className="dash-widget-head"
+          draggable
+          onDragStart={(e) => onWidgetDragStart(id, e)}
+          onDragEnd={() => {
+            setDragId(null)
+            setOverId(null)
+          }}
+          title={t("dash.dragHint")}>
+          <h2>{title}</h2>
+          <div className="dash-widget-head-actions">
+            <button
+              type="button"
+              className="btn secondary btn-sm dash-widget-wbtn"
+              title={t("dash.width")}
+              onClick={(e) => {
+                e.stopPropagation()
+                const nw = (lay.w >= 3 ? 1 : ((lay.w + 1) as 1 | 2 | 3))
+                persistLayout(patchWidget(dashLayout, id, { w: nw }))
+              }}>
+              {lay.w}×
+            </button>
+          </div>
+        </div>
+        <div className="dash-widget-body">{body}</div>
+        <div
+          className="dash-widget-resize"
+          title={t("dash.resize")}
+          onPointerDown={(e) => startResize(id, lay.w, lay.h, e)}
+        />
+      </div>
+    )
+  }
 
   if (!summary) {
     return (
@@ -1241,6 +2074,10 @@ function SummaryView({
     1,
     ...(summary.top_rules || []).map((r) => r.count)
   )
+  const maxInboxReq = Math.max(
+    1,
+    ...(summary.top_inbox_requesters || []).map((r) => r.count)
+  )
   const maxDay = Math.max(
     1,
     ...(summary.events_by_day || []).map((d) => d.count)
@@ -1334,11 +2171,11 @@ function SummaryView({
 
   return (
     <div className={dashExpanded ? "dash-fill" : undefined}>
-      {/* Barre compacte en mode étendu ; hero complet sinon */}
-      {dashExpanded ? (
+      {/* Mode étendu uniquement : barre pour quitter le plein écran */}
+      {dashExpanded && (
         <div className="dash-fill-toolbar">
           <div className="dash-fill-toolbar-title">
-            <strong>{t("dash.status")}</strong>
+            <strong>{t("nav.dashboard")}</strong>
             <span className="muted dash-fs-hint">{t("dash.escHint")}</span>
           </div>
           <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
@@ -1368,39 +2205,6 @@ function SummaryView({
             </button>
           </div>
         </div>
-      ) : (
-      <div className="hero-card card">
-        <div className="hero-copy">
-          <p className="hero-kicker">{t("nav.dashboard")}</p>
-          <h2>{t("dash.status")}</h2>
-        </div>
-        <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
-          <button
-            className="btn secondary"
-            type="button"
-            disabled={busy}
-            onClick={onRefresh}>
-            {t("dash.refresh")}
-          </button>
-          <button
-            className="btn secondary"
-            type="button"
-            onClick={() => {
-              setDashExpanded(true)
-              setPanel(null)
-              setDrill(null)
-            }}>
-            {t("dash.expand")}
-          </button>
-          <button
-            className="btn"
-            type="button"
-            disabled={busy}
-            onClick={onForceSync}>
-            {t("dash.forceSync")}
-          </button>
-        </div>
-      </div>
       )}
 
       {/* Panneaux contextuels — masqués en mode étendu (graphiques seuls) */}
@@ -1592,319 +2396,353 @@ function SummaryView({
       )}
       </div>}
 
-      {/* Charts licences / activité — toujours visibles ; remplissent l’écran en mode étendu */}
+      {/* Dashboard libre : ordre + taille mémorisés (localStorage) */}
       <div className={dashExpanded ? "dash-fill-body" : undefined}>
-      <div id="dash-charts" />
-      <div id="dash-licenses" className="dash-grid">
-        <div className="card dash-widget">
-          <div className="dash-widget-head">
-            <h2>{t("nav.licenses")}</h2>
-            <span className="muted" style={{ fontSize: 11 }}>
-              {t("dash.seats")} {lic.seats_used}
-              {lic.seats > 0 ? ` / ${lic.seats}` : ` · ${t("dash.unlimited")}`}
-            </span>
-          </div>
-          <div className="dash-status-row">
-            <div
-              className="dash-donut"
-              aria-hidden
-              style={{
-                background: `conic-gradient(
+        <div className="dash-board-toolbar">
+          <button
+            type="button"
+            className="btn secondary btn-sm"
+            title={t("dash.resetLayoutHint")}
+            onClick={() => persistLayout(resetDashLayout())}>
+            {t("dash.resetLayout")}
+          </button>
+        </div>
+        <div className="dash-board" id="dash-charts">
+          {dashLayout.map((lay) => {
+            if (lay.id === "licenses") {
+              return wrapWidget(
+                "licenses",
+                t("nav.licenses"),
+                <>
+                  <div className="muted" style={{ fontSize: 11, marginBottom: 8 }}>
+                    {t("dash.seats")} {lic.seats_used}
+                    {lic.seats > 0
+                      ? ` / ${lic.seats}`
+                      : ` · ${t("dash.unlimited")}`}
+                  </div>
+                  <div className="dash-status-row">
+                    <div
+                      className="dash-donut"
+                      aria-hidden
+                      style={{
+                        background: `conic-gradient(
                   var(--accent) 0 ${lic.licensed ? (lic.licensed / Math.max(1, summary.agents)) * 100 : 0}%,
                   #fbbf24 ${lic.licensed ? (lic.licensed / Math.max(1, summary.agents)) * 100 : 0}% ${(lic.licensed + lic.grace) / Math.max(1, summary.agents) * 100}%,
                   #ef4444 ${(lic.licensed + lic.grace) / Math.max(1, summary.agents) * 100}% 100%
                 )`
-              }}>
-              <div className="dash-donut-inner">
-                <span className="dash-donut-num">{lic.unlicensed}</span>
-                <span className="dash-donut-lbl">{t("dash.unlicShort")}</span>
-              </div>
-            </div>
-            <ul className="dash-status-list">
-              <li>
-                <button
-                  type="button"
-                  className="dash-link-row"
-                  onClick={() => openPanel("licensed")}>
-                  <span className="dash-dot ok" /> {t("dash.licensed")}{" "}
-                  <strong>{lic.licensed}</strong>
-                </button>
-              </li>
-              <li>
-                <button
-                  type="button"
-                  className="dash-link-row"
-                  onClick={() => openPanel("grace")}>
-                  <span className="dash-dot warn" /> {t("dash.grace")}{" "}
-                  <strong>{lic.grace}</strong>
-                </button>
-              </li>
-              <li>
-                <button
-                  type="button"
-                  className="dash-link-row crit-text"
-                  onClick={() => openPanel("unlicensed")}>
-                  <span className="dash-dot crit" />{" "}
-                  <strong>
-                    {t("dash.unlicensed")} {lic.unlicensed}
-                  </strong>
-                </button>
-              </li>
-            </ul>
-          </div>
-        </div>
-
-        <div className="card dash-widget">
-          <div className="dash-widget-head">
-            <h2>{t("nav.connectivity")}</h2>
-            <span className="muted" style={{ fontSize: 11 }}>
-              {t("dash.offlineLong")} &gt;{" "}
-              {Math.round(conn.offline_long_ms / 3600000)} h
-            </span>
-          </div>
-          <ul className="dash-status-list">
-            <li>
-              <button
-                type="button"
-                className="dash-link-row"
-                onClick={() => openPanel("online")}>
-                <span className="dash-dot ok" />{" "}
-                {t("dash.onlineLt", {
-                  n: Math.round(conn.online_ms / 60000)
-                })}{" "}
-                <strong>{conn.online}</strong>
-              </button>
-            </li>
-            <li>
-              <button
-                type="button"
-                className="dash-link-row"
-                onClick={() => openPanel("stale")}>
-                <span className="dash-dot warn" /> {t("dash.stale")}{" "}
-                <strong>{conn.stale ?? 0}</strong>
-              </button>
-            </li>
-            <li>
-              <button
-                type="button"
-                className="dash-link-row crit-text"
-                onClick={() => openPanel("offline")}>
-                <span className="dash-dot crit" /> {t("dash.offlineLongLabel")}{" "}
-                <strong>{conn.offline_long ?? 0}</strong>
-              </button>
-            </li>
-            {(conn.maintenance ?? 0) > 0 ||
-            (summary.agents_maintenance?.length ?? 0) > 0 ? (
-              <li>
-                <button
-                  type="button"
-                  className="dash-link-row"
-                  onClick={() => openPanel("maintenance")}>
-                  <span className="dash-dot warn" /> {t("dash.maintenance")}{" "}
-                  <strong>
-                    {conn.maintenance ??
-                      summary.agents_maintenance?.length ??
-                      0}
-                  </strong>
-                </button>
-              </li>
-            ) : null}
-          </ul>
-          <p className="muted" style={{ fontSize: 11, marginBottom: 0 }}>
-            En ligne &lt; {Math.round(conn.online_ms / 60000)} min · Inactif
-            jusqu’à {Math.round(conn.offline_long_ms / 60000)} min · Hors ligne
-            au-delà
-            {conn.schedule_active && !conn.within_work_hours
-              ? ` · ${t("dash.offHoursSilent")}`
-              : conn.schedule_active
-                ? ` · ${t("dash.workHours")}`
-                : ""}
-            {" · "}
-            {t("dash.clickList")}
-          </p>
-        </div>
-
-        <div className="card dash-widget">
-          <div className="dash-widget-head">
-            <h2>{t("dash.protection")}</h2>
-          </div>
-          <div className="dash-status-row">
-            <div className="dash-donut" aria-hidden>
-              <div className="dash-donut-inner">
-                <span className="dash-donut-num">{summary.agents}</span>
-                <span className="dash-donut-lbl">{t("dash.agentsLbl")}</span>
-              </div>
-            </div>
-            <ul className="dash-status-list">
-              <li>
-                <span className="dash-dot ok" /> {t("dash.enrolled")}{" "}
-                <strong>{summary.agents}</strong>
-              </li>
-              <li>
-                <span className="dash-dot warn" /> Events{" "}
-                <strong>{summary.events_total}</strong>
-              </li>
-              <li>
-                <span className="dash-dot crit" /> {t("dash.riskySends")}{" "}
-                <strong>{riskN}</strong>
-              </li>
-              <li className="muted" style={{ fontSize: 12 }}>
-                Pack{" "}
-                <strong className="mono">
-                  {summary.active_rules_pack?.version || " - "}
-                </strong>
-              </li>
-            </ul>
-          </div>
-        </div>
-      </div>
-
-      <div id="dash-activity" className="dash-grid dash-grid--equal2">
-        <div className="card dash-widget dash-widget--activity">
-          <div className="dash-widget-head">
-            <h2>{t("dash.activity")}</h2>
-            <span className="muted" style={{ fontSize: 11 }}>
-              {t("dash.clickDetail")}
-            </span>
-          </div>
-          <div className="dash-bars dash-bars--compact">
-            {(
-              [
-                ["mask_send", t("dash.mask"), maskN, "ok"],
-                ["send_anyway", t("dash.risky"), riskN, "crit"],
-                ["cancel", t("dash.cancel"), cancelN, "warn"],
-                ["observe", t("dash.observe"), observeN, "ok"],
-                ["block", t("dash.block"), blockN, "crit"]
-              ] as const
-            ).map(([k, label, n, tone]) => (
-              <button
-                key={k}
-                type="button"
-                className={`dash-bar-row ${drill === k ? "is-active" : ""}`}
-                onClick={() => void openDecision(k)}>
-                <span className="dash-bar-label">{label}</span>
-                <span className="dash-bar-track">
-                  <span
-                    className={`dash-bar-fill ${tone}`}
-                    style={{
-                      width: `${totalDec ? Math.max(4, (n / totalDec) * 100) : 0}%`
-                    }}
-                  />
-                </span>
-                <span className="dash-bar-n mono">{n}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="card dash-widget dash-widget--timeline">
-          <div className="dash-widget-head">
-            <h2>{t("dash.events14")}</h2>
-            <span className="muted" style={{ fontSize: 11 }}>
-              {t("dash.timeline")}
-            </span>
-          </div>
-          <div className="dash-timeline">
-            {(summary.events_by_day || []).map((d) => (
-              <div key={d.day} className="dash-tl-col" title={`${d.day}: ${d.count}`}>
-                <div className="dash-tl-bar-wrap">
-                  <div
-                    className="dash-tl-bar"
-                    style={{
-                      height: `${Math.max(4, (d.count / maxDay) * 100)}%`
-                    }}
-                  />
+                      }}>
+                      <div className="dash-donut-inner">
+                        <span className="dash-donut-num">{lic.unlicensed}</span>
+                        <span className="dash-donut-lbl">
+                          {t("dash.unlicShort")}
+                        </span>
+                      </div>
+                    </div>
+                    <ul className="dash-status-list">
+                      <li>
+                        <button
+                          type="button"
+                          className="dash-link-row"
+                          onClick={() => openPanel("licensed")}>
+                          <span className="dash-dot ok" /> {t("dash.licensed")}{" "}
+                          <strong>{lic.licensed}</strong>
+                        </button>
+                      </li>
+                      <li>
+                        <button
+                          type="button"
+                          className="dash-link-row"
+                          onClick={() => openPanel("grace")}>
+                          <span className="dash-dot warn" /> {t("dash.grace")}{" "}
+                          <strong>{lic.grace}</strong>
+                        </button>
+                      </li>
+                      <li>
+                        <button
+                          type="button"
+                          className="dash-link-row crit-text"
+                          onClick={() => openPanel("unlicensed")}>
+                          <span className="dash-dot crit" />{" "}
+                          <strong>
+                            {t("dash.unlicensed")} {lic.unlicensed}
+                          </strong>
+                        </button>
+                      </li>
+                    </ul>
+                  </div>
+                </>
+              )
+            }
+            if (lay.id === "connectivity") {
+              return wrapWidget(
+                "connectivity",
+                t("nav.connectivity"),
+                <>
+                  <ul className="dash-status-list">
+                    <li>
+                      <button
+                        type="button"
+                        className="dash-link-row"
+                        onClick={() => openPanel("online")}>
+                        <span className="dash-dot ok" />{" "}
+                        {t("dash.onlineLt", {
+                          n: Math.round(conn.online_ms / 60000)
+                        })}{" "}
+                        <strong>{conn.online}</strong>
+                      </button>
+                    </li>
+                    <li>
+                      <button
+                        type="button"
+                        className="dash-link-row"
+                        onClick={() => openPanel("stale")}>
+                        <span className="dash-dot warn" /> {t("dash.stale")}{" "}
+                        <strong>{conn.stale ?? 0}</strong>
+                      </button>
+                    </li>
+                    <li>
+                      <button
+                        type="button"
+                        className="dash-link-row crit-text"
+                        onClick={() => openPanel("offline")}>
+                        <span className="dash-dot crit" />{" "}
+                        {t("dash.offlineLongLabel")}{" "}
+                        <strong>{conn.offline_long ?? 0}</strong>
+                      </button>
+                    </li>
+                    {(conn.maintenance ?? 0) > 0 ||
+                    (summary.agents_maintenance?.length ?? 0) > 0 ? (
+                      <li>
+                        <button
+                          type="button"
+                          className="dash-link-row"
+                          onClick={() => openPanel("maintenance")}>
+                          <span className="dash-dot warn" />{" "}
+                          {t("dash.maintenance")}{" "}
+                          <strong>
+                            {conn.maintenance ??
+                              summary.agents_maintenance?.length ??
+                              0}
+                          </strong>
+                        </button>
+                      </li>
+                    ) : null}
+                  </ul>
+                  <p className="muted" style={{ fontSize: 11, marginBottom: 0 }}>
+                    {t("dash.clickList")}
+                  </p>
+                </>
+              )
+            }
+            if (lay.id === "protection") {
+              return wrapWidget(
+                "protection",
+                t("dash.protection"),
+                <div className="dash-status-row">
+                  <div className="dash-donut" aria-hidden>
+                    <div className="dash-donut-inner">
+                      <span className="dash-donut-num">{summary.agents}</span>
+                      <span className="dash-donut-lbl">
+                        {t("dash.agentsLbl")}
+                      </span>
+                    </div>
+                  </div>
+                  <ul className="dash-status-list">
+                    <li>
+                      <span className="dash-dot ok" /> {t("dash.enrolled")}{" "}
+                      <strong>{summary.agents}</strong>
+                    </li>
+                    <li>
+                      <span className="dash-dot warn" /> Events{" "}
+                      <strong>{summary.events_total}</strong>
+                    </li>
+                    <li>
+                      <span className="dash-dot crit" /> {t("dash.riskySends")}{" "}
+                      <strong>{riskN}</strong>
+                    </li>
+                    <li className="muted" style={{ fontSize: 12 }}>
+                      Pack{" "}
+                      <strong className="mono">
+                        {summary.active_rules_pack?.version || " - "}
+                      </strong>
+                    </li>
+                  </ul>
                 </div>
-                <span className="dash-tl-lbl">
-                  {d.day.slice(8)}
-                </span>
+              )
+            }
+            if (lay.id === "activity") {
+              return wrapWidget(
+                "activity",
+                t("dash.activity"),
+                <div className="dash-bars dash-bars--compact">
+                  {(
+                    [
+                      ["mask_send", t("dash.mask"), maskN, "ok"],
+                      ["send_anyway", t("dash.risky"), riskN, "crit"],
+                      ["cancel", t("dash.cancel"), cancelN, "warn"],
+                      ["observe", t("dash.observe"), observeN, "ok"],
+                      ["block", t("dash.block"), blockN, "crit"]
+                    ] as const
+                  ).map(([k, label, n, tone]) => (
+                    <button
+                      key={k}
+                      type="button"
+                      className={`dash-bar-row ${drill === k ? "is-active" : ""}`}
+                      onClick={() => void openDecision(k)}>
+                      <span className="dash-bar-label">{label}</span>
+                      <span className="dash-bar-track">
+                        <span
+                          className={`dash-bar-fill ${tone}`}
+                          style={{
+                            width: `${totalDec ? Math.max(4, (n / totalDec) * 100) : 0}%`
+                          }}
+                        />
+                      </span>
+                      <span className="dash-bar-n mono">{n}</span>
+                    </button>
+                  ))}
+                </div>,
+                "dash-widget--activity"
+              )
+            }
+            if (lay.id === "timeline") {
+              return wrapWidget(
+                "timeline",
+                t("dash.events14"),
+                <div className="dash-timeline">
+                  {(summary.events_by_day || []).map((d) => (
+                    <div
+                      key={d.day}
+                      className="dash-tl-col"
+                      title={`${d.day}: ${d.count}`}>
+                      <div className="dash-tl-bar-wrap">
+                        <div
+                          className="dash-tl-bar"
+                          style={{
+                            height: `${Math.max(4, (d.count / maxDay) * 100)}%`
+                          }}
+                        />
+                      </div>
+                      <span className="dash-tl-lbl">{d.day.slice(8)}</span>
+                    </div>
+                  ))}
+                  {!(summary.events_by_day || []).length && (
+                    <p className="muted">{t("dash.noSeries")}</p>
+                  )}
+                </div>,
+                "dash-widget--timeline"
+              )
+            }
+            if (lay.id === "threats") {
+              if (dashExpanded) {
+                return wrapWidget(
+                  "threats",
+                  t("dash.userDecisions"),
+                  <div className="decision-grid decision-grid--compact">
+                    {(
+                      [
+                        ["mask_send", t("dash.maskSend")],
+                        ["send_anyway", t("dash.sendAnyway")],
+                        ["cancel", t("dash.cancel")],
+                        ["observe", t("dash.observe")],
+                        ["block", t("dash.block")],
+                        ["enroll", t("dash.enroll")],
+                        ["unenroll", t("dash.unenroll")]
+                      ] as const
+                    ).map(([k, label]) => (
+                      <button
+                        key={k}
+                        type="button"
+                        className={`decision-btn decision-btn--${k} ${drill === k ? "is-active" : ""}`}
+                        onClick={() => void openDecision(k)}>
+                        <div className="decision-key">{label}</div>
+                        <div className="decision-count">
+                          {decisions[k] || 0}
+                        </div>
+                        <div className="decision-code mono">{k}</div>
+                      </button>
+                    ))}
+                  </div>
+                )
+              }
+              return wrapWidget(
+                "threats",
+                t("dash.topThreats"),
+                summary.top_rules?.length ? (
+                  <ol className="dash-rank">
+                    {summary.top_rules.slice(0, 6).map((r, i) => (
+                      <li key={r.rule_id}>
+                        <span className="dash-rank-i">{i + 1}.</span>
+                        <span className="mono dash-rank-id" title={r.rule_id}>
+                          {r.rule_id}
+                        </span>
+                        <span className="dash-rank-bar-wrap">
+                          <span
+                            className="dash-rank-bar"
+                            style={{
+                              width: `${(r.count / maxRule) * 100}%`
+                            }}
+                          />
+                        </span>
+                        <strong className="dash-rank-n">{r.count}</strong>
+                      </li>
+                    ))}
+                  </ol>
+                ) : (
+                  <div className="empty">{t("dash.noEvents")}</div>
+                )
+              )
+            }
+            if (lay.id === "requesters") {
+              return wrapWidget(
+                "requesters",
+                t("dash.topRequesters"),
+                summary.top_inbox_requesters?.length ? (
+                  <ol className="dash-rank">
+                    {summary.top_inbox_requesters.slice(0, 8).map((r, i) => (
+                      <li key={r.agent_id}>
+                        <span className="dash-rank-i">{i + 1}.</span>
+                        <span className="dash-rank-id" title={r.agent_id}>
+                          {r.device_label || r.agent_id.slice(0, 12)}
+                        </span>
+                        <span className="dash-rank-bar-wrap">
+                          <span
+                            className="dash-rank-bar"
+                            style={{
+                              width: `${(r.count / maxInboxReq) * 100}%`,
+                              background: "var(--teal, #2BD9C5)"
+                            }}
+                          />
+                        </span>
+                        <strong className="dash-rank-n">{r.count}</strong>
+                      </li>
+                    ))}
+                  </ol>
+                ) : (
+                  <div className="empty">{t("dash.noRequests")}</div>
+                )
+              )
+            }
+            return null
+          })}
+          {dups.length > 0 && !dashExpanded && (
+            <div className="card dash-widget" style={{ gridColumn: "span 1" }}>
+              <div className="dash-widget-head">
+                <h2>{t("dash.duplicates")}</h2>
+                <button
+                  type="button"
+                  className="btn secondary btn-sm"
+                  onClick={() => openPanel("duplicates")}>
+                  {t("dash.view")}
+                </button>
               </div>
-            ))}
-            {!(summary.events_by_day || []).length && (
-              <p className="muted">{t("dash.noSeries")}</p>
-            )}
-          </div>
+              <p className="muted" style={{ fontSize: 12 }}>
+                {dups.length} {t("dash.dupHint")}
+              </p>
+            </div>
+          )}
         </div>
       </div>
-
-      <div id="dash-rules" className="dash-grid">
-        {/* Mode étendu : Décisions utilisateur à la place des menaces/règles */}
-        {dashExpanded ? (
-          <div className="card dash-widget dash-widget--decisions">
-            <div className="dash-widget-head">
-              <h2>{t("dash.userDecisions")}</h2>
-            </div>
-            <div className="decision-grid decision-grid--compact">
-              {(
-                [
-                  ["mask_send", t("dash.maskSend")],
-                  ["send_anyway", t("dash.sendAnyway")],
-                  ["cancel", t("dash.cancel")],
-                  ["observe", t("dash.observe")],
-                  ["block", t("dash.block")],
-                  ["enroll", t("dash.enroll")],
-                  ["unenroll", t("dash.unenroll")]
-                ] as const
-              ).map(([k, label]) => (
-                <button
-                  key={k}
-                  type="button"
-                  className={`decision-btn decision-btn--${k} ${drill === k ? "is-active" : ""}`}
-                  onClick={() => void openDecision(k)}>
-                  <div className="decision-key">{label}</div>
-                  <div className="decision-count">{decisions[k] || 0}</div>
-                  <div className="decision-code mono">{k}</div>
-                </button>
-              ))}
-            </div>
-          </div>
-        ) : (
-          <div className="card dash-widget">
-            <div className="dash-widget-head">
-              <h2>{t("dash.topThreats")}</h2>
-            </div>
-            {summary.top_rules?.length ? (
-              <ol className="dash-rank">
-                {summary.top_rules.slice(0, 6).map((r, i) => (
-                  <li key={r.rule_id}>
-                    <span className="dash-rank-i">{i + 1}.</span>
-                    <span className="mono dash-rank-id" title={r.rule_id}>
-                      {r.rule_id}
-                    </span>
-                    <span className="dash-rank-bar-wrap">
-                      <span
-                        className="dash-rank-bar"
-                        style={{ width: `${(r.count / maxRule) * 100}%` }}
-                      />
-                    </span>
-                    <strong className="dash-rank-n">{r.count}</strong>
-                  </li>
-                ))}
-              </ol>
-            ) : (
-              <div className="empty">{t("dash.noEvents")}</div>
-            )}
-          </div>
-        )}
-        {dups.length > 0 && !dashExpanded && (
-          <div className="card dash-widget">
-            <div className="dash-widget-head">
-              <h2>{t("dash.duplicates")}</h2>
-              <button
-                type="button"
-                className="btn secondary btn-sm"
-                onClick={() => openPanel("duplicates")}>
-                {t("dash.view")}
-              </button>
-            </div>
-            <p className="muted" style={{ fontSize: 12 }}>
-              {dups.length} {t("dash.dupHint")}
-            </p>
-          </div>
-        )}
-      </div>
-
-      </div>{/* end dash-fill-body */}
 
       {/* Décisions utilisateur (vue normale uniquement) */}
       {!dashExpanded && (
@@ -2137,6 +2975,87 @@ function SecurityReportPanel({
   )
 }
 
+function DateTimePrefsPanel({
+  t,
+  setInfo
+}: {
+  t: (k: string) => string
+  setInfo: (i: string | null) => void
+}) {
+  const [prefs, setPrefs] = useState<DateTimePrefs>(() => loadDateTimePrefs())
+
+  const update = (patch: Partial<DateTimePrefs>) => {
+    const next = { ...prefs, ...patch }
+    setPrefs(next)
+    saveDateTimePrefs(next)
+    setInfo(t("dt.saved"))
+  }
+
+  return (
+    <>
+      <h3 style={{ marginTop: 24 }}>{t("dt.title")}</h3>
+      <p className="muted" style={{ fontSize: 12, maxWidth: 480 }}>
+        {t("dt.hint")}
+      </p>
+      <div className="form-stack" style={{ maxWidth: 420 }}>
+        <label className="field-label">{t("dt.timezone")}</label>
+        <select
+          className="input"
+          value={prefs.timezone}
+          onChange={(e) => update({ timezone: e.target.value })}>
+          {[
+            ...new Set([prefs.timezone, ...COMMON_TIMEZONES])
+          ].map((z) => (
+            <option key={z} value={z}>
+              {z}
+            </option>
+          ))}
+        </select>
+        <label className="field-label">{t("dt.dateFormat")}</label>
+        <select
+          className="input"
+          value={prefs.dateFormat}
+          onChange={(e) =>
+            update({
+              dateFormat: e.target.value as DateFormatPref
+            })
+          }>
+          <option value="dmy">{t("dt.date.dmy")}</option>
+          <option value="ymd">{t("dt.date.ymd")}</option>
+          <option value="mdy">{t("dt.date.mdy")}</option>
+        </select>
+        <label className="field-label">{t("dt.timeFormat")}</label>
+        <select
+          className="input"
+          value={prefs.timeFormat}
+          onChange={(e) =>
+            update({
+              timeFormat: e.target.value as TimeFormatPref
+            })
+          }>
+          <option value="24h">{t("dt.time.24h")}</option>
+          <option value="12h">{t("dt.time.12h")}</option>
+        </select>
+        <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <input
+            type="checkbox"
+            checked={prefs.showSeconds}
+            onChange={(e) => update({ showSeconds: e.target.checked })}
+          />
+          {t("dt.showSeconds")}
+        </label>
+        <p className="muted" style={{ fontSize: 12, margin: "4px 0 0" }}>
+          {t("dt.preview")}:{" "}
+          <span className="mono" style={{ fontWeight: 500 }}>
+            {/* Aperçu discret du format choisi — pas une horloge « widget » */}
+            <LiveClock />
+          </span>
+        </p>
+      </div>
+    </>
+  )
+}
+
 function SystemSettingsView({
   busy,
   setBusy,
@@ -2147,6 +3066,8 @@ function SystemSettingsView({
   primaryEmail,
   lang,
   setLang,
+  multiOrg,
+  onMfaChange,
   t
 }: {
   busy: boolean
@@ -2158,18 +3079,37 @@ function SystemSettingsView({
   primaryEmail: string
   lang: Lang
   setLang: (l: Lang) => void
-  t: (k: string) => string
+  multiOrg?: boolean
+  onMfaChange?: (enabled: boolean) => void
+  t: (k: string, vars?: Record<string, string | number>) => string
 }) {
-  const [settingsTab, setSettingsTab] = useState<
-    | "general"
-    | "logs"
-    | "license"
-    | "notifications"
-    | "monitoring"
-    | "ldap"
-    | "mail"
-    | "reports"
-  >("general")
+  const [settingsTab, setSettingsTab] = useState<SettingsSection>(() => {
+    try {
+      const h = parseConsoleHash(window.location.hash)
+      if (h?.tab === "settings" && h.settingsSection) return h.settingsSection
+      const s = sessionStorage.getItem(
+        "opsgate_console_settings_tab"
+      ) as SettingsSection | null
+      if (
+        s &&
+        [
+          "general",
+          "logs",
+          "license",
+          "notifications",
+          "monitoring",
+          "ldap",
+          "mail",
+          "reports"
+        ].includes(s)
+      ) {
+        return s
+      }
+    } catch {
+      /* ignore */
+    }
+    return "general"
+  })
   const [addLicOpen, setAddLicOpen] = useState(false)
   const [licenseKeyInput, setLicenseKeyInput] = useState("")
   const [licMode, setLicMode] = useState<"trial" | "full">("trial")
@@ -2184,7 +3124,27 @@ function SystemSettingsView({
   const [breakEnd, setBreakEnd] = useState("13:00")
   const [days, setDays] = useState<number[]>([1, 2, 3, 4, 5])
   const [retentionDays, setRetentionDays] = useState(90)
-  const [weeklyExport, setWeeklyExport] = useState(true)
+  const [auditLegalDays, setAuditLegalDays] = useState(365)
+  const [schedExpOn, setSchedExpOn] = useState(false)
+  const [schedExpEmails, setSchedExpEmails] = useState("")
+  const [schedExpDay, setSchedExpDay] = useState(1)
+  const [schedExpTime, setSchedExpTime] = useState("08:00")
+  const [schedExpTz, setSchedExpTz] = useState("Europe/Paris")
+  const [schedExpCsv, setSchedExpCsv] = useState(true)
+  const [schedExpJson, setSchedExpJson] = useState(false)
+  const [schedExpAttach, setSchedExpAttach] = useState(true)
+  const [manualExportFmt, setManualExportFmt] = useState<"csv" | "json">("csv")
+  const [exportArchives, setExportArchives] = useState<
+    Array<{
+      id: string
+      kind: string
+      format: string
+      filename: string
+      event_count: number
+      created_at: string
+      remaining_days: number
+    }>
+  >([])
   const [logDetection, setLogDetection] = useState(true)
   const [logProxy, setLogProxy] = useState(true)
   const [logLogin, setLogLogin] = useState(true)
@@ -2194,6 +3154,11 @@ function SystemSettingsView({
   const [notifLicDays, setNotifLicDays] = useState(30)
   const [notifBrute, setNotifBrute] = useState(true)
   const [notifBruteThr, setNotifBruteThr] = useState(5)
+  const [notifLockoutMail, setNotifLockoutMail] = useState(false)
+  const [notifRecovery, setNotifRecovery] = useState(false)
+  const [notifRecoveryThr, setNotifRecoveryThr] = useState(5)
+  const [notifEmails, setNotifEmails] = useState("")
+  const [notifChannels, setNotifChannels] = useState<NotificationChannel[]>([])
   const [siemOn, setSiemOn] = useState(false)
   const [siemHost, setSiemHost] = useState("")
   const [siemPort, setSiemPort] = useState(514)
@@ -2283,6 +3248,21 @@ function SystemSettingsView({
     })()
   }, [settingsTab, t])
 
+  // État MFA depuis /auth/me (obligatoire multi-tenant)
+  useEffect(() => {
+    void (async () => {
+      try {
+        const me = await api.me()
+        const on = !!me.mfa_enabled
+        setMfaOn(on)
+        onMfaChange?.(on)
+      } catch {
+        /* ignore */
+      }
+    })()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   useEffect(() => {
     void (async () => {
       try {
@@ -2296,7 +3276,24 @@ function SystemSettingsView({
         setWorkEnd(m.schedule?.workEnd || "17:00")
         setDays(m.schedule?.workDays || [1, 2, 3, 4, 5])
         setRetentionDays(m.logRetentionDays ?? 90)
-        setWeeklyExport(m.weeklyExportEnabled !== false)
+        setAuditLegalDays(m.auditLegalRetentionDays ?? 365)
+        {
+          const s = m.scheduledLogExport
+          const enabled =
+            s?.enabled === true ||
+            (s?.enabled !== false && m.weeklyExportEnabled === true)
+          setSchedExpOn(!!enabled)
+          setSchedExpEmails((s?.recipientEmails || []).join("\n"))
+          setSchedExpDay(s?.dayOfWeek ?? 1)
+          setSchedExpTime(s?.timeLocal || "08:00")
+          setSchedExpTz(
+            s?.timezone || m.schedule?.timezone || "Europe/Paris"
+          )
+          const fmts = s?.formats || m.weeklyExportFormats || ["csv"]
+          setSchedExpCsv(fmts.includes("csv"))
+          setSchedExpJson(fmts.includes("json"))
+          setSchedExpAttach(s?.attachFiles !== false)
+        }
         const br = m.schedule?.breaks?.[0]
         if (br) {
           setBreakStart(br.start)
@@ -2316,6 +3313,24 @@ function SystemSettingsView({
           setNotifLicDays(n.licenseExpiringDays ?? 30)
           setNotifBrute(n.loginBruteForce !== false)
           setNotifBruteThr(n.loginBruteForceThreshold ?? 5)
+          setNotifLockoutMail(n.accountLockoutEmail === true)
+          setNotifRecovery(n.recoveryLowStock === true)
+          setNotifRecoveryThr(n.recoveryLowStockThreshold ?? 5)
+          setNotifEmails((n.alertEmails || []).join("\n"))
+          setNotifChannels(
+            Array.isArray(n.channels)
+              ? n.channels.map((ch) => ({
+                  id: ch.id,
+                  kind: ch.kind,
+                  enabled: ch.enabled !== false,
+                  label: ch.label || "",
+                  emails: ch.emails,
+                  botToken: ch.botToken || "",
+                  chatId: ch.chatId || "",
+                  webhookUrl: ch.webhookUrl || ""
+                }))
+              : []
+          )
         }
         const si = m.siem
         if (si) {
@@ -2422,12 +3437,49 @@ function SystemSettingsView({
         3650,
         Math.max(1, Math.floor(retentionDays) || 90)
       )
+      const legalClamped = Math.min(
+        3650,
+        Math.max(90, Math.floor(auditLegalDays) || 365)
+      )
       setRetentionDays(daysClamped)
+      setAuditLegalDays(legalClamped)
       await api.updateMonitoring({
         onlineMs: onlineMin * 60 * 1000,
         offlineLongMs: offlineMin * 60 * 1000,
         logRetentionDays: daysClamped,
-        weeklyExportEnabled: weeklyExport,
+        auditLegalRetentionDays: legalClamped,
+        auditWormEnabled: true,
+        weeklyExportEnabled: schedExpOn,
+        weeklyExportFormats: [
+          ...(schedExpCsv ? (["csv"] as const) : []),
+          ...(schedExpJson ? (["json"] as const) : [])
+        ].length
+          ? [
+              ...(schedExpCsv ? (["csv"] as const) : []),
+              ...(schedExpJson ? (["json"] as const) : [])
+            ]
+          : (["csv"] as const),
+        scheduledLogExport: {
+          enabled: schedExpOn,
+          recipientEmails: schedExpEmails
+            .split(/[\n,;]+/)
+            .map((e) => e.trim().toLowerCase())
+            .filter((e) => e.includes("@"))
+            .slice(0, 20),
+          dayOfWeek: schedExpDay,
+          timeLocal: schedExpTime,
+          timezone: schedExpTz,
+          formats: [
+            ...(schedExpCsv ? (["csv"] as const) : []),
+            ...(schedExpJson ? (["json"] as const) : [])
+          ].length
+            ? [
+                ...(schedExpCsv ? (["csv"] as const) : []),
+                ...(schedExpJson ? (["json"] as const) : [])
+              ]
+            : (["csv"] as const),
+          attachFiles: schedExpAttach
+        },
         logCategories: {
           detectionEvents: logDetection,
           proxyEvents: logProxy,
@@ -2439,7 +3491,25 @@ function SystemSettingsView({
           licenseExpiring: notifLicExp,
           licenseExpiringDays: notifLicDays,
           loginBruteForce: notifBrute,
-          loginBruteForceThreshold: notifBruteThr
+          loginBruteForceThreshold: notifBruteThr,
+          accountLockoutEmail: notifLockoutMail,
+          recoveryLowStock: notifRecovery,
+          recoveryLowStockThreshold: notifRecoveryThr,
+          alertEmails: notifEmails
+            .split(/[\n,;]+/)
+            .map((e) => e.trim().toLowerCase())
+            .filter((e) => e.includes("@"))
+            .slice(0, 20),
+          channels: notifChannels.map((ch) => ({
+            id: ch.id,
+            kind: ch.kind,
+            enabled: ch.enabled,
+            label: ch.label || undefined,
+            emails: ch.emails,
+            botToken: ch.botToken || undefined,
+            chatId: ch.chatId || undefined,
+            webhookUrl: ch.webhookUrl || undefined
+          }))
         },
         schedule: {
           enabled: schedOn,
@@ -2497,20 +3567,33 @@ function SystemSettingsView({
     }
   }
 
+  // Deep-link / event parent → sous-onglet settings
+  useEffect(() => {
+    const onEvt = (e: Event) => {
+      const id = (e as CustomEvent<SettingsSection>).detail
+      if (id) setSettingsTab(id)
+    }
+    window.addEventListener("opsgate-settings-tab", onEvt)
+    return () => window.removeEventListener("opsgate-settings-tab", onEvt)
+  }, [])
+
+  useEffect(() => {
+    try {
+      sessionStorage.setItem("opsgate_console_settings_tab", settingsTab)
+    } catch {
+      /* ignore */
+    }
+    writeConsoleHash(
+      { tab: "settings", settingsSection: settingsTab },
+      "replace"
+    )
+  }, [settingsTab])
+
   if (!loaded) {
     return <div className="card empty">{t("common.loading")}</div>
   }
 
-  const settingsTabs: Array<
-    | "general"
-    | "logs"
-    | "license"
-    | "notifications"
-    | "monitoring"
-    | "ldap"
-    | "mail"
-    | "reports"
-  > = [
+  const settingsTabs: SettingsSection[] = [
     "general",
     "logs",
     "license",
@@ -2533,7 +3616,13 @@ function SystemSettingsView({
               role="tab"
               aria-selected={settingsTab === id}
               className={`settings-tab ${settingsTab === id ? "active" : ""}`}
-              onClick={() => setSettingsTab(id)}>
+              onClick={() => {
+                setSettingsTab(id)
+                writeConsoleHash(
+                  { tab: "settings", settingsSection: id },
+                  "push"
+                )
+              }}>
               {t(`settings.tab.${id}`)}
             </button>
           ))}
@@ -2558,6 +3647,8 @@ function SystemSettingsView({
             </p>
           </div>
 
+          <DateTimePrefsPanel t={t} setInfo={setInfo} />
+
           <h3 style={{ marginTop: 24 }}>{t("mfa.title")}</h3>
           <p className="muted" style={{ fontSize: 12 }}>
             {t("mfa.hint")}{" "}
@@ -2567,12 +3658,19 @@ function SystemSettingsView({
               </strong>
             ) : null}
           </p>
+          {multiOrg ? (
+            <p
+              className="mfa-multi-notice"
+              style={{ fontSize: 12, margin: "0 0 10px" }}>
+              {t("msp.mfaForced")}
+            </p>
+          ) : null}
           <div className="form-stack" style={{ maxWidth: 480 }}>
             <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
               <button
                 type="button"
                 className="btn secondary"
-                disabled={busy}
+                disabled={busy || mfaOn}
                 onClick={async () => {
                   setBusy(true)
                   try {
@@ -2591,12 +3689,42 @@ function SystemSettingsView({
             </div>
             {mfaSecret && (
               <>
-                <label className="field-label">{t("mfa.secret")}</label>
-                <input className="input mono" readOnly value={mfaSecret} />
-                <p className="muted mono" style={{ fontSize: 10, wordBreak: "break-all" }}>
-                  {mfaOtpUrl}
-                </p>
-                <label className="field-label">{t("mfa.code")}</label>
+                <div
+                  className="row"
+                  style={{
+                    gap: 20,
+                    flexWrap: "wrap",
+                    alignItems: "flex-start",
+                    marginTop: 4
+                  }}>
+                  {mfaOtpUrl ? <MfaQr otpauthUrl={mfaOtpUrl} size={180} /> : null}
+                  <div style={{ flex: "1 1 220px", minWidth: 200 }}>
+                    <p className="muted" style={{ fontSize: 12, margin: "0 0 8px" }}>
+                      {t("mfa.qrHint")}
+                    </p>
+                    <label className="field-label">{t("mfa.secret")}</label>
+                    <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+                      <input
+                        className="input mono"
+                        readOnly
+                        value={mfaSecret}
+                        style={{ flex: 1, minWidth: 160 }}
+                      />
+                      <button
+                        type="button"
+                        className="btn secondary btn-sm"
+                        onClick={() => {
+                          void navigator.clipboard.writeText(mfaSecret)
+                          setInfo(t("mfa.secretCopied"))
+                        }}>
+                        {t("mfa.copySecret")}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+                <label className="field-label" style={{ marginTop: 12 }}>
+                  {t("mfa.code")}
+                </label>
                 <input
                   className="input mono"
                   value={mfaCode}
@@ -2615,7 +3743,9 @@ function SystemSettingsView({
                       await api.mfaEnable(mfaCode)
                       setMfaOn(true)
                       setMfaSecret("")
+                      setMfaOtpUrl("")
                       setMfaCode("")
+                      onMfaChange?.(true)
                       setInfo(t("mfa.enabled"))
                     } catch (e) {
                       setError(String(e))
@@ -2627,42 +3757,123 @@ function SystemSettingsView({
                 </button>
               </>
             )}
-            <label className="field-label">{t("mfa.password")}</label>
-            <input
-              className="input"
-              type="password"
-              value={mfaPwd}
-              onChange={(e) => setMfaPwd(e.target.value)}
-            />
-            <label className="field-label">{t("mfa.code")}</label>
-            <input
-              className="input mono"
-              value={mfaCode}
-              onChange={(e) =>
-                setMfaCode(e.target.value.replace(/\D/g, "").slice(0, 6))
-              }
-            />
+            {!multiOrg && (
+              <>
+                <label className="field-label">{t("mfa.password")}</label>
+                <input
+                  className="input"
+                  type="password"
+                  value={mfaPwd}
+                  onChange={(e) => setMfaPwd(e.target.value)}
+                />
+                <label className="field-label">{t("mfa.code")}</label>
+                <input
+                  className="input mono"
+                  value={mfaCode}
+                  onChange={(e) =>
+                    setMfaCode(e.target.value.replace(/\D/g, "").slice(0, 6))
+                  }
+                />
+                <button
+                  type="button"
+                  className="btn danger"
+                  disabled={busy || !mfaPwd}
+                  onClick={async () => {
+                    setBusy(true)
+                    try {
+                      await api.mfaDisable(mfaPwd, mfaCode)
+                      setMfaOn(false)
+                      setMfaPwd("")
+                      setMfaCode("")
+                      onMfaChange?.(false)
+                      setInfo(t("mfa.disabled"))
+                    } catch (e) {
+                      setError(String(e))
+                    } finally {
+                      setBusy(false)
+                    }
+                  }}>
+                  {t("mfa.disable")}
+                </button>
+              </>
+            )}
+            {multiOrg && mfaOn ? (
+              <p className="muted" style={{ fontSize: 12, margin: 0 }}>
+                {t("msp.mfaCannotDisable")}
+              </p>
+            ) : null}
+          </div>
+
+          <PasskeySettingsPanel t={t} setError={setError} setInfo={setInfo} setBusy={setBusy} busy={busy} />
+
+          <h3 style={{ marginTop: 28 }}>{t("backup.title")}</h3>
+          <p className="muted" style={{ fontSize: 12 }}>
+            {t("backup.hint")}
+          </p>
+          <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
             <button
               type="button"
-              className="btn danger"
-              disabled={busy || !mfaPwd}
+              className="btn secondary"
+              disabled={busy}
               onClick={async () => {
                 setBusy(true)
                 try {
-                  await api.mfaDisable(mfaPwd, mfaCode)
-                  setMfaOn(false)
-                  setMfaPwd("")
-                  setMfaCode("")
-                  setInfo(t("mfa.disabled"))
+                  const r = await api.orgBackupExport()
+                  const blob = new Blob([JSON.stringify(r.backup, null, 2)], {
+                    type: "application/json"
+                  })
+                  const url = URL.createObjectURL(blob)
+                  const a = document.createElement("a")
+                  a.href = url
+                  a.download = `opsgate-org-backup-${new Date().toISOString().slice(0, 10)}.json`
+                  a.click()
+                  URL.revokeObjectURL(url)
+                  setInfo(t("backup.exported"))
                 } catch (e) {
                   setError(String(e))
                 } finally {
                   setBusy(false)
                 }
               }}>
-              {t("mfa.disable")}
+              {t("backup.export")}
             </button>
+            <label className="btn secondary" style={{ cursor: "pointer", margin: 0 }}>
+              {t("backup.import")}
+              <input
+                type="file"
+                accept="application/json,.json"
+                style={{ display: "none" }}
+                onChange={async (e) => {
+                  const f = e.target.files?.[0]
+                  e.target.value = ""
+                  if (!f) return
+                  if (
+                    !confirm(t("backup.importConfirm"))
+                  ) {
+                    return
+                  }
+                  setBusy(true)
+                  try {
+                    const text = await f.text()
+                    const json = JSON.parse(text)
+                    const r = await api.orgBackupImport(json)
+                    setInfo(
+                      t("backup.imported", {
+                        list: (r.applied || []).join(", ") || "—"
+                      })
+                    )
+                  } catch (err) {
+                    setError(String(err))
+                  } finally {
+                    setBusy(false)
+                  }
+                }}
+              />
+            </label>
           </div>
+          <p className="muted" style={{ fontSize: 11, marginTop: 8 }}>
+            {t("backup.dbHint")}
+          </p>
         </div>
         )}
 
@@ -2684,14 +3895,25 @@ function SystemSettingsView({
             <p className="muted" style={{ fontSize: 12, margin: 0 }}>
               {t("logs.retentionHint")}
             </p>
-            <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              <input
-                type="checkbox"
-                checked={weeklyExport}
-                onChange={(e) => setWeeklyExport(e.target.checked)}
-              />
-              {t("logs.weekly")}
+            <label className="field-label" style={{ marginTop: 12 }}>
+              {t("logs.auditLegal")}
             </label>
+            <input
+              className="input"
+              type="number"
+              min={90}
+              max={3650}
+              value={auditLegalDays}
+              onChange={(e) =>
+                setAuditLegalDays(Number(e.target.value) || 365)
+              }
+            />
+            <p className="muted" style={{ fontSize: 12, margin: 0 }}>
+              {t("logs.auditLegalHint")}
+            </p>
+            <p className="muted" style={{ fontSize: 12, margin: "8px 0 0" }}>
+              {t("logs.exportRedirect")}
+            </p>
             <div className="field-label" style={{ marginTop: 8 }}>
               {t("logs.types")}
             </div>
@@ -2748,10 +3970,183 @@ function SystemSettingsView({
         {settingsTab === "notifications" && (
         <div className="settings-section">
           <h3>{t("notif.title")}</h3>
-          <div className="form-stack" style={{ maxWidth: 520 }}>
+          <div className="form-stack" style={{ maxWidth: 560 }}>
             <p className="muted" style={{ fontSize: 12, margin: 0 }}>
               {t("notif.hint")}
             </p>
+            <label className="field-label">{t("notif.recipients")}</label>
+            <textarea
+              className="input"
+              rows={3}
+              value={notifEmails}
+              onChange={(e) => setNotifEmails(e.target.value)}
+              placeholder={"soc@entreprise.com\nadmin@entreprise.com"}
+            />
+            <p className="muted" style={{ fontSize: 11, margin: 0 }}>
+              {t("notif.recipientsHint")}
+            </p>
+
+            <h4 style={{ margin: "16px 0 6px", fontSize: 14 }}>
+              {t("notif.channels")}
+            </h4>
+            <p className="muted" style={{ fontSize: 12, margin: 0 }}>
+              {t("notif.channelsHint")}
+            </p>
+            {notifChannels.map((ch, idx) => (
+              <div key={ch.id} className="notif-channel-card">
+                <div
+                  className="row"
+                  style={{
+                    gap: 8,
+                    flexWrap: "wrap",
+                    alignItems: "center",
+                    marginBottom: 8
+                  }}>
+                  <label
+                    style={{
+                      display: "flex",
+                      gap: 6,
+                      alignItems: "center",
+                      fontSize: 13
+                    }}>
+                    <input
+                      type="checkbox"
+                      checked={ch.enabled}
+                      onChange={(e) => {
+                        const next = [...notifChannels]
+                        next[idx] = { ...ch, enabled: e.target.checked }
+                        setNotifChannels(next)
+                      }}
+                    />
+                    {t("notif.channelEnabled")}
+                  </label>
+                  <select
+                    className="input"
+                    style={{ maxWidth: 140 }}
+                    value={ch.kind}
+                    onChange={(e) => {
+                      const kind = e.target.value as NotificationChannelKind
+                      const next = [...notifChannels]
+                      next[idx] = { ...ch, kind }
+                      setNotifChannels(next)
+                    }}>
+                    <option value="telegram">Telegram</option>
+                    <option value="slack">Slack</option>
+                    <option value="webhook">Webhook</option>
+                    <option value="email">E-mail</option>
+                  </select>
+                  <input
+                    className="input"
+                    style={{ flex: 1, minWidth: 120 }}
+                    placeholder={t("notif.channelLabel")}
+                    value={ch.label || ""}
+                    onChange={(e) => {
+                      const next = [...notifChannels]
+                      next[idx] = { ...ch, label: e.target.value }
+                      setNotifChannels(next)
+                    }}
+                  />
+                  <button
+                    type="button"
+                    className="btn secondary btn-sm"
+                    onClick={() =>
+                      setNotifChannels(notifChannels.filter((_, i) => i !== idx))
+                    }>
+                    {t("notif.channelRemove")}
+                  </button>
+                </div>
+                {ch.kind === "telegram" && (
+                  <>
+                    <label className="field-label">Bot token</label>
+                    <input
+                      className="input mono"
+                      value={ch.botToken || ""}
+                      onChange={(e) => {
+                        const next = [...notifChannels]
+                        next[idx] = { ...ch, botToken: e.target.value }
+                        setNotifChannels(next)
+                      }}
+                      placeholder="123456:ABC-DEF…"
+                    />
+                    <label className="field-label">Chat ID</label>
+                    <input
+                      className="input mono"
+                      value={ch.chatId || ""}
+                      onChange={(e) => {
+                        const next = [...notifChannels]
+                        next[idx] = { ...ch, chatId: e.target.value }
+                        setNotifChannels(next)
+                      }}
+                      placeholder="-100…"
+                    />
+                  </>
+                )}
+                {(ch.kind === "slack" || ch.kind === "webhook") && (
+                  <>
+                    <label className="field-label">
+                      {ch.kind === "slack"
+                        ? "Incoming Webhook URL"
+                        : "Webhook URL"}
+                    </label>
+                    <input
+                      className="input mono"
+                      value={ch.webhookUrl || ""}
+                      onChange={(e) => {
+                        const next = [...notifChannels]
+                        next[idx] = { ...ch, webhookUrl: e.target.value }
+                        setNotifChannels(next)
+                      }}
+                      placeholder="https://…"
+                    />
+                  </>
+                )}
+                {ch.kind === "email" && (
+                  <>
+                    <label className="field-label">
+                      {t("notif.channelEmails")}
+                    </label>
+                    <textarea
+                      className="input"
+                      rows={2}
+                      value={(ch.emails || []).join("\n")}
+                      onChange={(e) => {
+                        const emails = e.target.value
+                          .split(/[\n,;]+/)
+                          .map((x) => x.trim().toLowerCase())
+                          .filter((x) => x.includes("@"))
+                        const next = [...notifChannels]
+                        next[idx] = { ...ch, emails }
+                        setNotifChannels(next)
+                      }}
+                      placeholder="alerts@entreprise.com"
+                    />
+                  </>
+                )}
+              </div>
+            ))}
+            <button
+              type="button"
+              className="btn secondary btn-sm"
+              onClick={() =>
+                setNotifChannels([
+                  ...notifChannels,
+                  {
+                    id: `ch_${Date.now().toString(36)}`,
+                    kind: "telegram",
+                    enabled: true,
+                    label: "",
+                    botToken: "",
+                    chatId: "",
+                    webhookUrl: ""
+                  }
+                ])
+              }>
+              {t("notif.channelAdd")}
+            </button>
+
+            <h4 style={{ margin: "12px 0 4px", fontSize: 14 }}>
+              {t("notif.events")}
+            </h4>
             <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
               <input
                 type="checkbox"
@@ -2800,6 +4195,41 @@ function SystemSettingsView({
                 />
               </div>
             )}
+            <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <input
+                type="checkbox"
+                checked={notifLockoutMail}
+                onChange={(e) => setNotifLockoutMail(e.target.checked)}
+              />
+              {t("notif.lockoutMail")}
+            </label>
+            <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <input
+                type="checkbox"
+                checked={notifRecovery}
+                onChange={(e) => setNotifRecovery(e.target.checked)}
+              />
+              {t("notif.recovery")}
+            </label>
+            {notifRecovery && (
+              <div>
+                <label className="field-label">{t("notif.recoveryThr")}</label>
+                <input
+                  className="input"
+                  type="number"
+                  min={1}
+                  max={50}
+                  value={notifRecoveryThr}
+                  onChange={(e) =>
+                    setNotifRecoveryThr(Number(e.target.value) || 5)
+                  }
+                  style={{ maxWidth: 120 }}
+                />
+              </div>
+            )}
+            <p className="muted" style={{ fontSize: 12, marginTop: 8 }}>
+              {t("notif.smtpNote")}
+            </p>
           </div>
         </div>
         )}
@@ -3018,21 +4448,371 @@ function SystemSettingsView({
         {settingsTab === "reports" && (
         <div className="settings-section">
           <h3>{t("settings.tab.reports")}</h3>
-          <div className="form-stack" style={{ maxWidth: 520 }}>
+
+          {/* ── Export automatique des logs ── */}
+          <div className="form-stack" style={{ maxWidth: 560, marginBottom: 24 }}>
+            <h4 style={{ margin: "0 0 4px", fontSize: 15 }}>
+              {t("rep.autoTitle")}
+            </h4>
+            <p className="muted" style={{ fontSize: 12, margin: 0 }}>
+              {t("rep.autoHint")}
+            </p>
+            <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <input
+                type="checkbox"
+                checked={schedExpOn}
+                onChange={(e) => setSchedExpOn(e.target.checked)}
+              />
+              {t("rep.autoEnable")}
+            </label>
+            {schedExpOn && (
+              <>
+                <label className="field-label">{t("rep.autoEmails")}</label>
+                <textarea
+                  className="input"
+                  rows={3}
+                  value={schedExpEmails}
+                  onChange={(e) => setSchedExpEmails(e.target.value)}
+                  placeholder={"admin@entreprise.com\nsoc@entreprise.com"}
+                />
+                <p className="muted" style={{ fontSize: 11, margin: 0 }}>
+                  {t("rep.autoEmailsHint")}
+                </p>
+                <div className="row" style={{ gap: 12, flexWrap: "wrap" }}>
+                  <div style={{ flex: "1 1 140px" }}>
+                    <label className="field-label">{t("rep.autoDay")}</label>
+                    <select
+                      className="input"
+                      value={schedExpDay}
+                      onChange={(e) =>
+                        setSchedExpDay(Number(e.target.value) || 1)
+                      }>
+                      <option value={1}>{t("rep.day.1")}</option>
+                      <option value={2}>{t("rep.day.2")}</option>
+                      <option value={3}>{t("rep.day.3")}</option>
+                      <option value={4}>{t("rep.day.4")}</option>
+                      <option value={5}>{t("rep.day.5")}</option>
+                      <option value={6}>{t("rep.day.6")}</option>
+                      <option value={7}>{t("rep.day.7")}</option>
+                    </select>
+                  </div>
+                  <div style={{ flex: "1 1 120px" }}>
+                    <label className="field-label">{t("rep.autoTime")}</label>
+                    <input
+                      className="input"
+                      type="time"
+                      value={schedExpTime}
+                      onChange={(e) =>
+                        setSchedExpTime(e.target.value || "08:00")
+                      }
+                    />
+                  </div>
+                  <div style={{ flex: "1 1 180px" }}>
+                    <label className="field-label">{t("rep.autoTz")}</label>
+                    <select
+                      className="input"
+                      value={schedExpTz}
+                      onChange={(e) => setSchedExpTz(e.target.value)}>
+                      {(
+                        [
+                          "Europe/Paris",
+                          "Europe/Brussels",
+                          "Europe/London",
+                          "Africa/Douala",
+                          "Africa/Nairobi",
+                          "America/New_York",
+                          "UTC"
+                        ] as const
+                      ).map((z) => (
+                        <option key={z} value={z}>
+                          {z}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+                <div className="field-label">{t("rep.autoFormats")}</div>
+                <div className="row" style={{ gap: 16, flexWrap: "wrap" }}>
+                  <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                    <input
+                      type="checkbox"
+                      checked={schedExpCsv}
+                      onChange={(e) => setSchedExpCsv(e.target.checked)}
+                    />
+                    CSV
+                  </label>
+                  <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                    <input
+                      type="checkbox"
+                      checked={schedExpJson}
+                      onChange={(e) => setSchedExpJson(e.target.checked)}
+                    />
+                    JSON
+                  </label>
+                </div>
+                <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  <input
+                    type="checkbox"
+                    checked={schedExpAttach}
+                    onChange={(e) => setSchedExpAttach(e.target.checked)}
+                  />
+                  {t("rep.autoAttach")}
+                </label>
+                <p className="muted" style={{ fontSize: 11, margin: 0 }}>
+                  {t("rep.autoAttachHint")}
+                </p>
+                <p className="muted" style={{ fontSize: 12, margin: 0 }}>
+                  {t("rep.autoSmtpNote")}
+                </p>
+                <button
+                  type="button"
+                  className="btn"
+                  style={{ marginTop: 8 }}
+                  disabled={busy || !schedExpEmails.trim()}
+                  onClick={async () => {
+                    setBusy(true)
+                    setError(null)
+                    try {
+                      // Persiste e-mails / planning avant envoi
+                      await api.updateMonitoring({
+                        weeklyExportEnabled: true,
+                        scheduledLogExport: {
+                          enabled: true,
+                          recipientEmails: schedExpEmails
+                            .split(/[\n,;]+/)
+                            .map((e) => e.trim().toLowerCase())
+                            .filter((e) => e.includes("@"))
+                            .slice(0, 20),
+                          dayOfWeek: schedExpDay,
+                          timeLocal: schedExpTime,
+                          timezone: schedExpTz,
+                          formats: [
+                            ...(schedExpCsv ? (["csv"] as const) : []),
+                            ...(schedExpJson ? (["json"] as const) : [])
+                          ].length
+                            ? [
+                                ...(schedExpCsv ? (["csv"] as const) : []),
+                                ...(schedExpJson ? (["json"] as const) : [])
+                              ]
+                            : (["csv"] as const),
+                          attachFiles: schedExpAttach
+                        }
+                      })
+                      setSchedExpOn(true)
+                      const r = await api.runExportNow()
+                      if ((r.mails_ok || 0) > 0) {
+                        setInfo(
+                          t("rep.runNowOk", {
+                            n: r.mails_ok ?? 0,
+                            week: r.weekKey || "?"
+                          })
+                        )
+                      } else {
+                        setError(r.hint || t("rep.runNowFail"))
+                      }
+                    } catch (e) {
+                      setError(String(e))
+                    } finally {
+                      setBusy(false)
+                    }
+                  }}>
+                  {t("rep.runNow")}
+                </button>
+                <p className="muted" style={{ fontSize: 11, margin: 0 }}>
+                  {t("rep.runNowHint")}
+                </p>
+              </>
+            )}
+          </div>
+
+          {/* ── Export manuel immédiat ── */}
+          <div className="form-stack" style={{ maxWidth: 560, marginBottom: 24 }}>
+            <h4 style={{ margin: "0 0 4px", fontSize: 15 }}>
+              {t("rep.manualTitle")}
+            </h4>
+            <p className="muted" style={{ fontSize: 12, margin: 0 }}>
+              {t("rep.manualHint")}
+            </p>
             <label className="field-label">{t("rep.format")}</label>
             <select
               className="input"
-              value={reportFormat}
-              onChange={(e) =>
-                setReportFormat(e.target.value === "json" ? "json" : "csv")
-              }>
+              style={{ maxWidth: 200, display: "block" }}
+              value={manualExportFmt}
+              onChange={(e) => {
+                const f = e.target.value === "json" ? "json" : "csv"
+                setManualExportFmt(f)
+                setReportFormat(f)
+                try {
+                  localStorage.setItem("opsgate_report_format", f)
+                } catch {
+                  /* ignore */
+                }
+              }}>
               <option value="csv">{t("rep.csv")}</option>
               <option value="json">{t("rep.json")}</option>
             </select>
-            <p className="muted" style={{ fontSize: 12, margin: 0 }}>
-              {t("rep.format")} — events bruts (CSV/JSON). Le rapport PDF ci-dessous
-              compile les charts dashboard.
-            </p>
+            <div
+              className="row"
+              style={{
+                gap: 10,
+                flexWrap: "wrap",
+                marginTop: 14,
+                paddingTop: 4
+              }}>
+              <button
+                type="button"
+                className="btn btn-sm"
+                disabled={busy}
+                onClick={async () => {
+                  setBusy(true)
+                  try {
+                    const r = await api.exportEvents("week", manualExportFmt)
+                    const blob = new Blob([r.content], {
+                      type:
+                        manualExportFmt === "json"
+                          ? "application/json"
+                          : "text/csv;charset=utf-8"
+                    })
+                    const url = URL.createObjectURL(blob)
+                    const a = document.createElement("a")
+                    a.href = url
+                    a.download = r.filename
+                    a.click()
+                    URL.revokeObjectURL(url)
+                    setInfo(
+                      `${t("rep.downloaded")} · ${r.count} events · ${manualExportFmt.toUpperCase()}`
+                    )
+                  } catch (e) {
+                    setError(String(e))
+                  } finally {
+                    setBusy(false)
+                  }
+                }}>
+                {t("rep.downloadWeek")}
+              </button>
+              <button
+                type="button"
+                className="btn secondary btn-sm"
+                disabled={busy}
+                onClick={async () => {
+                  setBusy(true)
+                  try {
+                    const r = await api.exportEvents("all", manualExportFmt)
+                    const blob = new Blob([r.content], {
+                      type:
+                        manualExportFmt === "json"
+                          ? "application/json"
+                          : "text/csv;charset=utf-8"
+                    })
+                    const url = URL.createObjectURL(blob)
+                    const a = document.createElement("a")
+                    a.href = url
+                    a.download = r.filename
+                    a.click()
+                    URL.revokeObjectURL(url)
+                    setInfo(
+                      `${t("rep.downloaded")} · ${r.count} events · ${manualExportFmt.toUpperCase()}`
+                    )
+                  } catch (e) {
+                    setError(String(e))
+                  } finally {
+                    setBusy(false)
+                  }
+                }}>
+                {t("rep.downloadAll")}
+              </button>
+            </div>
+          </div>
+
+          {/* ── Archives générées ── */}
+          <div className="form-stack" style={{ maxWidth: 640, marginBottom: 24 }}>
+            <h4 style={{ margin: "0 0 4px", fontSize: 15 }}>
+              {t("rep.archives")}
+            </h4>
+            <div className="row" style={{ gap: 8 }}>
+              <button
+                type="button"
+                className="btn secondary btn-sm"
+                disabled={busy}
+                onClick={async () => {
+                  setBusy(true)
+                  try {
+                    const r = await api.listEventExports()
+                    setExportArchives(r.exports || [])
+                    setInfo(
+                      `${(r.exports || []).length} archive(s)`
+                    )
+                  } catch (e) {
+                    setError(String(e))
+                  } finally {
+                    setBusy(false)
+                  }
+                }}>
+                {t("rep.refreshArchives")}
+              </button>
+            </div>
+            {exportArchives.length === 0 ? (
+              <p className="muted" style={{ fontSize: 13 }}>
+                {t("rep.noArchives")}
+              </p>
+            ) : (
+              <div className="table-wrap">
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th>{t("rep.col.file")}</th>
+                      <th>{t("rep.col.format")}</th>
+                      <th>{t("rep.col.events")}</th>
+                      <th>{t("rep.col.remaining")}</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {exportArchives.map((a) => (
+                      <tr key={a.id}>
+                        <td className="mono" style={{ fontSize: 12 }}>
+                          {a.filename}
+                        </td>
+                        <td>{a.format.toUpperCase()}</td>
+                        <td>{a.event_count}</td>
+                        <td>{a.remaining_days} j</td>
+                        <td>
+                          <button
+                            type="button"
+                            className="btn btn-sm"
+                            disabled={busy}
+                            onClick={async () => {
+                              setBusy(true)
+                              try {
+                                const r = await api.downloadEventExport(a.id)
+                                const blob = new Blob([r.content], {
+                                  type:
+                                    r.format === "json"
+                                      ? "application/json"
+                                      : "text/csv;charset=utf-8"
+                                })
+                                const url = URL.createObjectURL(blob)
+                                const el = document.createElement("a")
+                                el.href = url
+                                el.download = r.filename || a.filename
+                                el.click()
+                                URL.revokeObjectURL(url)
+                                setInfo(t("rep.downloaded"))
+                              } catch (e) {
+                                setError(String(e))
+                              } finally {
+                                setBusy(false)
+                              }
+                            }}>
+                            {t("rep.download")}
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
 
           <SecurityReportPanel
@@ -3693,43 +5473,347 @@ function SystemSettingsView({
   )
 }
 
-function SupportView({ t }: { t: (k: string) => string }) {
+function SupportView({
+  t,
+  onUnreadChange
+}: {
+  t: (k: string) => string
+  onUnreadChange?: (n: number) => void
+}) {
+  const [filter, setFilter] = useState<
+    "all" | "unread" | "open" | "read" | "replied" | "closed"
+  >("all")
+  const [messages, setMessages] = useState<import("./api").InboxMessage[]>([])
+  const [unread, setUnread] = useState(0)
+  const [expanded, setExpanded] = useState<string | null>(null)
+  const [replyDraft, setReplyDraft] = useState("")
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+  const [info, setInfo] = useState<string | null>(null)
+
+  const load = useCallback(async () => {
+    setErr(null)
+    try {
+      const r = await api.inboxList({ status: filter, limit: 100 })
+      setMessages(r.messages || [])
+      setUnread(r.unread || 0)
+      onUnreadChange?.(r.unread || 0)
+    } catch (e) {
+      setErr(String(e))
+    }
+  }, [filter, onUnreadChange])
+
+  useEffect(() => {
+    void load()
+  }, [load])
+
+  const catLabel = (c: string) => {
+    const k = `inbox.cat.${c}` as const
+    const v = t(k)
+    return v === k ? c : v
+  }
+  const stLabel = (s: string) => {
+    const k = `inbox.st.${s}` as const
+    const v = t(k)
+    return v === k ? s : v
+  }
+
   return (
-    <div className="card help-card">
-      <h2>{t("support.title")}</h2>
-      <p className="muted" style={{ fontSize: 13, maxWidth: 560 }}>
-        {t("support.intro")}
-      </p>
-      <div className="help-grid">
-        <div className="help-tile">
-          <div className="help-tile-kicker">{t("support.contact")}</div>
-          <strong>Email</strong>
-          <p>
-            <a href="mailto:contact@dailyops.tech?subject=%5BOpsGate%5D%20">
-              contact@dailyops.tech
-            </a>
-          </p>
-          <p className="muted" style={{ fontSize: 12 }}>
-            {t("support.response")}
-          </p>
+    <div>
+      <div className="card" style={{ marginBottom: 16 }}>
+        <div
+          className="row"
+          style={{
+            justifyContent: "space-between",
+            alignItems: "center",
+            flexWrap: "wrap",
+            gap: 8
+          }}>
+          <div>
+            <h2 style={{ margin: 0 }}>{t("support.title")}</h2>
+            <p className="muted" style={{ fontSize: 13, margin: "6px 0 0" }}>
+              {t("support.intro")}
+              {unread > 0 && (
+                <strong style={{ marginLeft: 8, color: "var(--teal, #0f766e)" }}>
+                  · {unread} {t("inbox.unreadBadge")}
+                </strong>
+              )}
+            </p>
+          </div>
+          <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+            <label className="row" style={{ gap: 6, fontSize: 13 }}>
+              {t("inbox.filter")}
+              <select
+                className="input"
+                style={{ width: 140 }}
+                value={filter}
+                onChange={(e) =>
+                  setFilter(
+                    e.target.value as
+                      | "all"
+                      | "unread"
+                      | "open"
+                      | "read"
+                      | "replied"
+                      | "closed"
+                  )
+                }>
+                <option value="all">{t("inbox.all")}</option>
+                <option value="unread">{t("inbox.unread")}</option>
+                <option value="open">{t("inbox.open")}</option>
+                <option value="read">{t("inbox.read")}</option>
+                <option value="replied">{t("inbox.replied")}</option>
+                <option value="closed">{t("inbox.closed")}</option>
+              </select>
+            </label>
+            <button
+              className="btn secondary btn-sm"
+              type="button"
+              disabled={busy}
+              onClick={() => void load()}>
+              {t("inbox.refresh")}
+            </button>
+          </div>
         </div>
-        <div className="help-tile">
-          <div className="help-tile-kicker">{t("support.ticket")}</div>
-          <strong>{t("support.openTicket")}</strong>
-          <p style={{ fontSize: 13 }}>
-            {t("support.subject")}{" "}
-            <code>[OpsGate] code-org · …</code>
-          </p>
-          <ul className="help-list">
-            <li>{t("support.orgCode")}</li>
-            <li>{t("support.version")}</li>
-            <li>{t("support.desc")}</li>
-          </ul>
-        </div>
-        <div className="help-tile">
-          <div className="help-tile-kicker">{t("support.urgent")}</div>
-          <strong>{t("support.recovery")}</strong>
-          <p style={{ fontSize: 13 }}>{t("support.recoveryHint")}</p>
+        {err && <p className="err">{err}</p>}
+        {info && <p className="ok">{info}</p>}
+      </div>
+
+      <div className="card">
+        {messages.length === 0 ? (
+          <p className="muted">{t("inbox.empty")}</p>
+        ) : (
+          <>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "1.2fr 1.6fr 1fr 0.8fr 0.9fr",
+                gap: 8,
+                padding: "8px 12px",
+                fontSize: 11,
+                color: "var(--muted)",
+                borderBottom: "1px solid var(--line)",
+                fontWeight: 600
+              }}>
+              <span>{t("inbox.device")}</span>
+              <span>{t("inbox.subject")}</span>
+              <span>{t("inbox.category")}</span>
+              <span>{t("inbox.status")}</span>
+              <span>{t("inbox.date")}</span>
+            </div>
+            {messages.map((m) => {
+              const open = expanded === m.id
+              const isNew = m.status === "open"
+              return (
+                <div
+                  key={m.id}
+                  style={{ borderBottom: "1px solid var(--line)" }}>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      setExpanded(open ? null : m.id)
+                      setReplyDraft("")
+                      setInfo(null)
+                      if (!open && m.status === "open") {
+                        try {
+                          await api.inboxMarkRead(m.id)
+                          await load()
+                        } catch {
+                          /* ignore */
+                        }
+                      }
+                    }}
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "1.2fr 1.6fr 1fr 0.8fr 0.9fr",
+                      gap: 8,
+                      width: "100%",
+                      textAlign: "left",
+                      padding: "10px 12px",
+                      border: "none",
+                      background: open
+                        ? "var(--surface-2)"
+                        : isNew
+                          ? "rgba(43, 217, 197, 0.08)"
+                          : "transparent",
+                      cursor: "pointer",
+                      font: "inherit",
+                      color: "inherit",
+                      fontWeight: isNew ? 650 : 400
+                    }}>
+                    <span style={{ fontSize: 13 }}>
+                      {open ? "▼ " : "▶ "}
+                      {m.device_label || m.agent_id.slice(0, 10)}
+                    </span>
+                    <span
+                      style={{
+                        fontSize: 13,
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap"
+                      }}>
+                      {m.subject}
+                    </span>
+                    <span style={{ fontSize: 12 }}>{catLabel(m.category)}</span>
+                    <span style={{ fontSize: 12 }}>{stLabel(m.status)}</span>
+                    <span style={{ fontSize: 12 }}>
+                      {String(m.created_at).slice(0, 16).replace("T", " ")}
+                    </span>
+                  </button>
+                  {open && (
+                    <div
+                      style={{
+                        padding: "12px 16px 16px",
+                        background: "var(--surface-2)",
+                        fontSize: 13
+                      }}>
+                      <div className="muted" style={{ fontSize: 11 }}>
+                        {t("inbox.body")}
+                      </div>
+                      <p style={{ whiteSpace: "pre-wrap", marginTop: 4 }}>
+                        {m.body}
+                      </p>
+                      {(m.context_hostname || m.context_url) && (
+                        <p className="muted" style={{ fontSize: 12 }}>
+                          {t("inbox.context")}:{" "}
+                          {m.context_hostname || m.context_url}
+                        </p>
+                      )}
+                      {m.admin_reply && (
+                        <div
+                          style={{
+                            marginTop: 12,
+                            padding: 10,
+                            borderRadius: 8,
+                            background: "var(--surface, #fff)",
+                            border: "1px solid var(--line)"
+                          }}>
+                          <div className="muted" style={{ fontSize: 11 }}>
+                            {t("inbox.reply")}
+                            {m.replied_by_admin_label
+                              ? ` · ${m.replied_by_admin_label}`
+                              : ""}
+                          </div>
+                          <p style={{ whiteSpace: "pre-wrap", margin: "4px 0 0" }}>
+                            {m.admin_reply}
+                          </p>
+                        </div>
+                      )}
+                      {m.status !== "closed" && (
+                        <div style={{ marginTop: 12 }}>
+                          <label className="field-label">{t("inbox.reply")}</label>
+                          <textarea
+                            className="input"
+                            rows={3}
+                            value={replyDraft}
+                            onChange={(e) => setReplyDraft(e.target.value)}
+                            placeholder={t("inbox.replyPlaceholder")}
+                          />
+                          <div
+                            className="row"
+                            style={{ gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+                            <button
+                              className="btn btn-sm"
+                              type="button"
+                              disabled={busy || replyDraft.trim().length < 1}
+                              onClick={async () => {
+                                setBusy(true)
+                                setErr(null)
+                                try {
+                                  await api.inboxReply(m.id, replyDraft.trim())
+                                  setReplyDraft("")
+                                  setInfo("Réponse envoyée")
+                                  await load()
+                                } catch (e) {
+                                  setErr(String(e))
+                                } finally {
+                                  setBusy(false)
+                                }
+                              }}>
+                              {t("inbox.sendReply")}
+                            </button>
+                            {m.status === "open" && (
+                              <button
+                                className="btn secondary btn-sm"
+                                type="button"
+                                disabled={busy}
+                                onClick={async () => {
+                                  setBusy(true)
+                                  try {
+                                    await api.inboxMarkRead(m.id)
+                                    await load()
+                                  } catch (e) {
+                                    setErr(String(e))
+                                  } finally {
+                                    setBusy(false)
+                                  }
+                                }}>
+                                {t("inbox.markRead")}
+                              </button>
+                            )}
+                            <button
+                              className="btn secondary btn-sm"
+                              type="button"
+                              disabled={busy}
+                              onClick={async () => {
+                                if (
+                                  !confirm(
+                                    m.admin_reply
+                                      ? "Fermer ce fil ? (déjà répondu)"
+                                      : "Fermer sans réponse ? L’utilisateur recevra une notification de clôture."
+                                  )
+                                )
+                                  return
+                                setBusy(true)
+                                try {
+                                  await api.inboxClose(m.id)
+                                  setExpanded(null)
+                                  setInfo(
+                                    m.admin_reply
+                                      ? "Fil fermé"
+                                      : "Fil fermé — l’utilisateur sera notifié (popup)"
+                                  )
+                                  await load()
+                                } catch (e) {
+                                  setErr(String(e))
+                                } finally {
+                                  setBusy(false)
+                                }
+                              }}>
+                              {t("inbox.close")}
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </>
+        )}
+      </div>
+
+      <div className="card help-card" style={{ marginTop: 16 }}>
+        <h3 style={{ marginTop: 0 }}>{t("support.contact")}</h3>
+        <div className="help-grid">
+          <div className="help-tile">
+            <div className="help-tile-kicker">{t("support.ticket")}</div>
+            <strong>{t("support.openTicket")}</strong>
+            <p>
+              <a href="mailto:contact@dailyops.tech?subject=%5BOpsGate%5D%20">
+                contact@dailyops.tech
+              </a>
+            </p>
+            <p className="muted" style={{ fontSize: 12 }}>
+              {t("support.response")}
+            </p>
+          </div>
+          <div className="help-tile">
+            <div className="help-tile-kicker">{t("support.urgent")}</div>
+            <strong>{t("support.recovery")}</strong>
+            <p style={{ fontSize: 13 }}>{t("support.recoveryHint")}</p>
+          </div>
         </div>
       </div>
     </div>
@@ -3812,8 +5896,10 @@ function LoginScreen({
   const [err, setErr] = useState<string | null>(null)
   const [info, setInfo] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
-  /** Session concurrente détectée → proposer force login */
-  const [canForce, setCanForce] = useState(false)
+  /** Challenge session concurrente (consentement 10 s) */
+  const [challengeId, setChallengeId] = useState<string | null>(null)
+  const [challengeLeft, setChallengeLeft] = useState(10)
+  const [challengeStatus, setChallengeStatus] = useState<string | null>(null)
   /** Session concurrente via SSO OIDC */
   const [canForceOidc, setCanForceOidc] = useState(false)
   const [oidcEnabled, setOidcEnabled] = useState(false)
@@ -3847,21 +5933,93 @@ function LoginScreen({
     })()
   }, [apiBase])
 
-  async function doLogin(force: boolean, orgId?: string) {
+  async function doLogin(opts?: {
+    readOnly?: boolean
+    orgId?: string
+  }) {
     setApiBase(apiBase)
-    const r = await api.login(
-      email,
-      password,
-      force,
-      totp || undefined,
-      orgId ? { org_id: orgId } : undefined
-    )
+    const r = await api.login(email, password, {
+      read_only: !!opts?.readOnly,
+      totpCode: totp || undefined,
+      org_id: opts?.orgId || selectedOrgId || undefined
+    })
     setToken(r.token)
     setNeedMfa(false)
     setOrgChoices([])
     setSelectedOrgId("")
+    setChallengeId(null)
+    setChallengeStatus(null)
     onLoggedIn(r.admin)
+    if (r.hint) setInfo(r.hint)
   }
+
+  async function claimChallenge(id: string) {
+    setBusy(true)
+    setErr(null)
+    try {
+      setApiBase(apiBase)
+      const r = await api.challengeClaim(id)
+      setToken(r.token)
+      setChallengeId(null)
+      setChallengeStatus(null)
+      setNeedMfa(false)
+      if (r.hint) setInfo(r.hint)
+      onLoggedIn(r.admin)
+    } catch (e) {
+      const err = e as Error & { code?: string }
+      if (err.code === "challenge_refused") {
+        setErr(t("login.challengeRefused"))
+      } else if (err.code === "challenge_pending") {
+        setErr(t("login.challengeWait"))
+      } else {
+        setErr(String(e))
+      }
+      setChallengeId(null)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  // Poll challenge jusqu’à accept / refuse / timeout
+  useEffect(() => {
+    if (!challengeId) return
+    let cancelled = false
+    let claiming = false
+    const tick = async () => {
+      if (claiming || cancelled) return
+      try {
+        const r = await api.challengeStatus(challengeId)
+        if (cancelled) return
+        const st = r.challenge?.status || "pending"
+        setChallengeStatus(st)
+        setChallengeLeft(r.challenge?.seconds_left ?? 0)
+        if (st === "accepted" || st === "timeout") {
+          claiming = true
+          const idToClaim = challengeId
+          setChallengeId(null)
+          await claimChallenge(idToClaim)
+          return
+        }
+        if (st === "refused" || st === "expired" || st === "claimed") {
+          setChallengeId(null)
+          setErr(
+            st === "refused"
+              ? t("login.challengeRefused")
+              : t("login.challengeExpired")
+          )
+        }
+      } catch {
+        /* ignore transient */
+      }
+    }
+    void tick()
+    const id = setInterval(() => void tick(), 1000)
+    return () => {
+      cancelled = true
+      clearInterval(id)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [challengeId])
 
   // Erreurs SSO renvoyées en fragment après callback IdP
   useEffect(() => {
@@ -4051,16 +6209,16 @@ function LoginScreen({
               onClick={async () => {
                 setBusy(true)
                 setErr(null)
-                setCanForce(false)
+                setChallengeId(null)
                 try {
-                  await doLogin(
-                    false,
-                    selectedOrgId || undefined
-                  )
+                  await doLogin({ orgId: selectedOrgId || undefined })
                 } catch (e) {
                   const err = e as Error & {
                     code?: string
                     remaining_attempts?: number
+                    challenge_id?: string
+                    expires_in?: number
+                    challenge?: { seconds_left?: number }
                     orgs?: Array<{
                       org_id: string
                       org_code: string
@@ -4100,10 +6258,20 @@ function LoginScreen({
                     setNeedMfa(true)
                     setErr(t("login.mfaInvalid"))
                   } else if (
+                    err.code === "session_challenge_required" ||
+                    err.challenge_id
+                  ) {
+                    const cid = err.challenge_id || ""
+                    setChallengeId(cid)
+                    setChallengeLeft(
+                      err.challenge?.seconds_left ?? err.expires_in ?? 10
+                    )
+                    setChallengeStatus("pending")
+                    setErr(t("login.challengeWait"))
+                  } else if (
                     err.code === "session_already_active" ||
                     msg.includes("session_already_active")
                   ) {
-                    setCanForce(true)
                     setErr(t("login.sessionActive"))
                   } else if (
                     err.code === "account_locked" ||
@@ -4136,7 +6304,98 @@ function LoginScreen({
               }}>
               {t("login.submit")}
             </button>
+            <button
+              className="btn secondary"
+              type="button"
+              style={{ marginTop: 8, width: "100%" }}
+              disabled={busy}
+              onClick={async () => {
+                setBusy(true)
+                setErr(null)
+                try {
+                  setApiBase(apiBase)
+                  const {
+                    webauthnSupported,
+                    toRequestOptions,
+                    assertionToBody
+                  } = await import("./webauthn-client")
+                  if (!webauthnSupported()) {
+                    setErr(t("passkey.unsupported"))
+                    return
+                  }
+                  const opts = await api.webauthnLoginOptions(
+                    email.trim() || undefined
+                  )
+                  const req = toRequestOptions(opts.publicKey)
+                  const cred = (await navigator.credentials.get({
+                    publicKey: req
+                  })) as PublicKeyCredential | null
+                  if (!cred) {
+                    setErr(t("passkey.cancelled"))
+                    return
+                  }
+                  const r = await api.webauthnLogin(
+                    assertionToBody(opts.challenge_id, cred)
+                  )
+                  setToken(r.token)
+                  setNeedMfa(false)
+                  if (r.hint) setInfo(r.hint)
+                  onLoggedIn(r.admin)
+                } catch (e) {
+                  setErr(String(e))
+                } finally {
+                  setBusy(false)
+                }
+              }}>
+              {t("login.passkey")}
+            </button>
           </>
+        )}
+        {challengeId && (
+          <div className="login-challenge-box" style={{ marginTop: 12 }}>
+            <p style={{ fontSize: 13, margin: "0 0 8px" }}>
+              {t("login.challengeHint", { n: challengeLeft })}
+            </p>
+            <p className="muted" style={{ fontSize: 12, margin: "0 0 10px" }}>
+              {t("login.challengeStatus", {
+                status: challengeStatus || "pending"
+              })}
+            </p>
+            <button
+              className="btn secondary"
+              type="button"
+              style={{ width: "100%" }}
+              disabled={busy}
+              onClick={async () => {
+                setBusy(true)
+                setErr(null)
+                try {
+                  await doLogin({
+                    readOnly: true,
+                    orgId: selectedOrgId || undefined
+                  })
+                  setChallengeId(null)
+                } catch (e) {
+                  setErr(String(e))
+                } finally {
+                  setBusy(false)
+                }
+              }}>
+              {t("login.readOnly")}
+            </button>
+            <button
+              type="button"
+              className="btn secondary"
+              style={{ width: "100%", marginTop: 6 }}
+              disabled={busy}
+              onClick={() => {
+                setChallengeId(null)
+                setChallengeStatus(null)
+                setErr(null)
+              }}>
+              {t("login.challengeCancel")}
+            </button>
+          </div>
         )}
         <button
           type="button"
@@ -4145,36 +6404,6 @@ function LoginScreen({
           {advanced ? t("login.advancedHide") : t("login.advanced")}
         </button>
         <p className="login-footer-meta">OpsGate · V1</p>
-        {canForce && (
-          <button
-            className="btn secondary"
-            type="button"
-            style={{ marginTop: 8, width: "100%" }}
-            disabled={busy}
-            onClick={async () => {
-              setBusy(true)
-              setErr(null)
-              try {
-                setApiBase(apiBase)
-                const r = await api.login(
-                  email,
-                  password,
-                  true,
-                  totp || undefined
-                )
-                setToken(r.token)
-                setCanForce(false)
-                setInfo(r.hint || t("login.force"))
-                onLoggedIn(r.admin)
-              } catch (e) {
-                setErr(String(e))
-              } finally {
-                setBusy(false)
-              }
-            }}>
-            Forcer la déconnexion de l’autre session
-          </button>
-        )}
         <p style={{ marginTop: 14, fontSize: 13 }}>
           <button
             type="button"
@@ -6799,6 +9028,43 @@ function AgentsView({
               title="Exporte la vue filtrée (JSON)">
               Export JSON
             </button>
+            <label
+              className="btn secondary btn-sm"
+              style={{ cursor: "pointer", margin: 0 }}
+              title="CSV : agent_id ou device_label ou host_name + group/profile/license">
+              Import CSV…
+              <input
+                type="file"
+                accept=".csv,text/csv"
+                style={{ display: "none" }}
+                onChange={async (e) => {
+                  const f = e.target.files?.[0]
+                  e.target.value = ""
+                  if (!f) return
+                  setBusy(true)
+                  setError(null)
+                  try {
+                    const text = await f.text()
+                    const dry = await api.importAgentsCsv(text, true)
+                    const msg = `Aperçu : ${dry.matched} match · ${dry.updated} maj · ${dry.skipped} skip${
+                      dry.errors?.length
+                        ? ` · ${dry.errors.slice(0, 3).join(" ; ")}`
+                        : ""
+                    }\nAppliquer l’import ?`
+                    if (!confirm(msg)) return
+                    const r = await api.importAgentsCsv(text, false)
+                    setInfo(
+                      `Import CSV : ${r.updated} mis à jour · ${r.matched} match · ${r.skipped} ignorés`
+                    )
+                    onReload()
+                  } catch (err) {
+                    setError(String(err))
+                  } finally {
+                    setBusy(false)
+                  }
+                }}
+              />
+            </label>
           </div>
         </div>
         <div
@@ -7438,6 +9704,15 @@ function EventsView({
   const [pageSize, setPageSize] = useState(50)
   const [page, setPage] = useState(1)
   const [exportBusy, setExportBusy] = useState(false)
+  const [manualFmt, setManualFmt] = useState<"csv" | "json">(() => {
+    try {
+      return localStorage.getItem("opsgate_report_format") === "json"
+        ? "json"
+        : "csv"
+    } catch {
+      return "csv"
+    }
+  })
   const searchRef = useRef<HTMLInputElement>(null)
   const [archives, setArchives] = useState<
     Array<{
@@ -7538,14 +9813,7 @@ function EventsView({
     setExportBusy(true)
     setError?.(null)
     try {
-      let fmt: "csv" | "json" = "csv"
-      try {
-        if (localStorage.getItem("opsgate_report_format") === "json") {
-          fmt = "json"
-        }
-      } catch {
-        /* ignore */
-      }
+      const fmt = manualFmt
       if (range === "custom" && (!from || !to)) {
         setError?.("from/to required")
         setExportBusy(false)
@@ -7561,7 +9829,7 @@ function EventsView({
         fmt === "json" ? "application/json" : "text/csv;charset=utf-8"
       )
       setInfo?.(
-        `Export ${range}${from && to ? ` ${from}→${to}` : ""} · ${r.count} events`
+        `Export ${range}${from && to ? ` ${from}→${to}` : ""} · ${r.count} events · ${fmt.toUpperCase()}`
       )
       const list = await api.listEventExports()
       setArchives(list.exports || [])
@@ -7584,28 +9852,57 @@ function EventsView({
           marginBottom: 12
         }}>
         <h2 style={{ margin: 0 }}>{t("events.title")}</h2>
-        <div className="row" style={{ flexWrap: "wrap", gap: 8 }}>
-          <button
-            type="button"
-            className="btn secondary btn-sm"
-            disabled={exportBusy}
-            onClick={() => void doExport("week")}>
-            {exportBusy ? "…" : t("events.exportWeek")}
-          </button>
-          <button
-            type="button"
-            className="btn secondary btn-sm"
-            disabled={exportBusy}
-            onClick={() => setShowExportRange((v) => !v)}>
-            {t("events.exportCustom")}
-          </button>
-          <button
-            type="button"
-            className="btn secondary btn-sm"
-            disabled={exportBusy}
-            onClick={() => void doExport("all")}>
-            {t("events.exportAll")}
-          </button>
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "flex-end",
+            gap: 10
+          }}>
+          <label
+            className="row"
+            style={{ gap: 8, fontSize: 12, alignItems: "center" }}>
+            {t("rep.format")}
+            <select
+              className="input"
+              style={{ width: 100 }}
+              value={manualFmt}
+              onChange={(e) => {
+                const f = e.target.value === "json" ? "json" : "csv"
+                setManualFmt(f)
+                try {
+                  localStorage.setItem("opsgate_report_format", f)
+                } catch {
+                  /* ignore */
+                }
+              }}>
+              <option value="csv">CSV</option>
+              <option value="json">JSON</option>
+            </select>
+          </label>
+          <div className="row" style={{ flexWrap: "wrap", gap: 8 }}>
+            <button
+              type="button"
+              className="btn btn-sm"
+              disabled={exportBusy}
+              onClick={() => void doExport("week")}>
+              {exportBusy ? "…" : t("rep.downloadWeek")}
+            </button>
+            <button
+              type="button"
+              className="btn secondary btn-sm"
+              disabled={exportBusy}
+              onClick={() => setShowExportRange((v) => !v)}>
+              {t("events.exportCustom")}
+            </button>
+            <button
+              type="button"
+              className="btn secondary btn-sm"
+              disabled={exportBusy}
+              onClick={() => void doExport("all")}>
+              {exportBusy ? "…" : t("rep.downloadAll")}
+            </button>
+          </div>
         </div>
       </div>
       {showExportRange && (
@@ -7667,7 +9964,8 @@ function EventsView({
                     <td>
                       <button
                         type="button"
-                        className="btn secondary btn-sm"
+                        className="btn btn-sm"
+                        title={t("rep.download")}
                         onClick={async () => {
                           try {
                             const r = await api.downloadEventExport(a.id)
@@ -7678,6 +9976,7 @@ function EventsView({
                                 ? "application/json"
                                 : "text/csv;charset=utf-8"
                             )
+                            setInfo?.(t("rep.downloaded"))
                           } catch (e) {
                             setError?.(String(e))
                           }
@@ -7901,7 +10200,305 @@ function EventsView({
   )
 }
 
-function AuditView({ isPrincipal }: { isPrincipal: boolean }) {
+function PasskeySettingsPanel({
+  t,
+  setError,
+  setInfo,
+  setBusy,
+  busy
+}: {
+  t: (k: string, vars?: Record<string, string | number>) => string
+  setError: (e: string | null) => void
+  setInfo: (i: string | null) => void
+  setBusy: (b: boolean) => void
+  busy: boolean
+}) {
+  const [creds, setCreds] = useState<
+    Array<{ credential_id: string; label?: string; created_at?: string }>
+  >([])
+  const [enabled, setEnabled] = useState(false)
+  const [supported, setSupported] = useState(false)
+
+  const load = useCallback(async () => {
+    try {
+      const st = await api.webauthnStatus()
+      setEnabled(!!st.enabled)
+      const {
+        webauthnSupported
+      } = await import("./webauthn-client")
+      setSupported(webauthnSupported())
+      if (st.enabled) {
+        const r = await api.webauthnCredentials()
+        setCreds(r.credentials || [])
+      }
+    } catch {
+      setEnabled(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    void load()
+  }, [load])
+
+  if (!enabled) {
+    return (
+      <>
+        <h3 style={{ marginTop: 28 }}>{t("passkey.title")}</h3>
+        <p className="muted" style={{ fontSize: 12 }}>
+          {t("passkey.disabled")}
+        </p>
+      </>
+    )
+  }
+
+  return (
+    <>
+      <h3 style={{ marginTop: 28 }}>{t("passkey.title")}</h3>
+      <p className="muted" style={{ fontSize: 12 }}>
+        {t("passkey.hint")}
+      </p>
+      {!supported && (
+        <p className="err" style={{ fontSize: 12 }}>
+          {t("passkey.unsupported")}
+        </p>
+      )}
+      <ul style={{ fontSize: 13, paddingLeft: 18 }}>
+        {creds.length === 0 ? (
+          <li className="muted">{t("passkey.none")}</li>
+        ) : (
+          creds.map((c) => (
+            <li key={c.credential_id} style={{ marginBottom: 6 }}>
+              {c.label || t("passkey.defaultLabel")}{" "}
+              <span className="muted mono" style={{ fontSize: 11 }}>
+                {c.credential_id.slice(0, 12)}…
+              </span>
+              <button
+                type="button"
+                className="btn secondary btn-sm"
+                style={{ marginLeft: 8 }}
+                disabled={busy}
+                onClick={async () => {
+                  if (!confirm(t("passkey.deleteConfirm"))) return
+                  setBusy(true)
+                  try {
+                    await api.webauthnDelete(c.credential_id)
+                    setInfo(t("passkey.deleted"))
+                    await load()
+                  } catch (e) {
+                    setError(String(e))
+                  } finally {
+                    setBusy(false)
+                  }
+                }}>
+                {t("passkey.delete")}
+              </button>
+            </li>
+          ))
+        )}
+      </ul>
+      <button
+        type="button"
+        className="btn"
+        disabled={busy || !supported}
+        onClick={async () => {
+          setBusy(true)
+          setError(null)
+          try {
+            const {
+              toCreationOptions,
+              credentialPublicKeyJwk,
+              bufToB64url
+            } = await import("./webauthn-client")
+            const opts = await api.webauthnRegisterOptions()
+            const creation = toCreationOptions(opts.publicKey)
+            const cred = (await navigator.credentials.create({
+              publicKey: creation
+            })) as PublicKeyCredential | null
+            if (!cred) throw new Error(t("passkey.cancelled"))
+            const jwk = await credentialPublicKeyJwk(cred)
+            if (!jwk) throw new Error(t("passkey.noJwk"))
+            const att = cred.response as AuthenticatorAttestationResponse
+            await api.webauthnRegister({
+              challenge_id: opts.challenge_id,
+              credentialId: bufToB64url(cred.rawId),
+              publicKeyJwk: jwk,
+              transports: (
+                att as AuthenticatorAttestationResponse & {
+                  getTransports?: () => string[]
+                }
+              ).getTransports?.(),
+              label: "Windows Hello / Passkey"
+            })
+            setInfo(t("passkey.added"))
+            await load()
+          } catch (e) {
+            setError(String(e))
+          } finally {
+            setBusy(false)
+          }
+        }}>
+        {t("passkey.add")}
+      </button>
+    </>
+  )
+}
+
+function MspPortfolioView({
+  currentOrgId,
+  t,
+  onSwitch,
+  switchBusy
+}: {
+  currentOrgId: string
+  t: (k: string, vars?: Record<string, string | number>) => string
+  onSwitch: (orgId: string) => void
+  switchBusy: boolean
+}) {
+  const [data, setData] = useState<Awaited<
+    ReturnType<typeof api.mspOverview>
+  > | null>(null)
+  const [err, setErr] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+
+  const load = useCallback(async () => {
+    setBusy(true)
+    setErr(null)
+    try {
+      setData(await api.mspOverview())
+    } catch (e) {
+      setErr(String(e))
+    } finally {
+      setBusy(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    void load()
+  }, [load, currentOrgId])
+
+  if (err) {
+    return (
+      <div className="card">
+        <h2>{t("msp.portfolio")}</h2>
+        <p className="err">{err}</p>
+      </div>
+    )
+  }
+  if (!data || busy) {
+    return (
+      <div className="card empty">{t("common.loading")}</div>
+    )
+  }
+
+  const totals = data.totals
+  return (
+    <div className="msp-portfolio">
+      <div className="card" style={{ marginBottom: 14 }}>
+        <h2 style={{ marginTop: 0 }}>{t("msp.portfolio")}</h2>
+        <p className="muted" style={{ fontSize: 13, maxWidth: 640 }}>
+          {t("msp.portfolioHint")}
+        </p>
+        <div className="msp-totals">
+          <div className="msp-stat">
+            <span className="muted">{t("msp.statOrgs")}</span>
+            <strong>{data.org_count}</strong>
+          </div>
+          <div className="msp-stat">
+            <span className="muted">{t("msp.statAgents")}</span>
+            <strong>
+              {totals.online}/{totals.agents}
+            </strong>
+          </div>
+          <div className="msp-stat">
+            <span className="muted">{t("msp.statSeats")}</span>
+            <strong>
+              {totals.seats_used}/{totals.seats || "—"}
+            </strong>
+          </div>
+          <div className="msp-stat">
+            <span className="muted">{t("msp.statExpiring")}</span>
+            <strong
+              style={{
+                color:
+                  totals.expiring_licenses > 0
+                    ? "var(--warn, #b45309)"
+                    : undefined
+              }}>
+              {totals.expiring_licenses}
+            </strong>
+          </div>
+        </div>
+        <button
+          type="button"
+          className="btn secondary btn-sm"
+          disabled={busy}
+          onClick={() => void load()}>
+          {t("top.refresh")}
+        </button>
+      </div>
+      <div className="msp-grid">
+        {data.orgs.map((o) => (
+          <div
+            key={o.org_id}
+            className={`card msp-org-card${o.current ? " msp-org-card--current" : ""}`}>
+            <div className="row" style={{ justifyContent: "space-between", gap: 8 }}>
+              <div>
+                <strong>{o.name}</strong>
+                <div className="mono muted" style={{ fontSize: 12 }}>
+                  {o.org_code}
+                </div>
+              </div>
+              {o.current ? (
+                <span className="lic-status ok">{t("msp.current")}</span>
+              ) : null}
+            </div>
+            <dl className="msp-org-meta">
+              <div>
+                <dt>{t("msp.agentsOnline")}</dt>
+                <dd>
+                  {o.online}/{o.agents}
+                </dd>
+              </div>
+              <div>
+                <dt>{t("msp.seats")}</dt>
+                <dd>
+                  {o.seats_used}/{o.seats || "—"}
+                </dd>
+              </div>
+              <div>
+                <dt>{t("msp.license")}</dt>
+                <dd>
+                  {o.license_mode}
+                  {o.license_days_left != null
+                    ? ` · ${o.license_days_left} j`
+                    : ""}
+                </dd>
+              </div>
+            </dl>
+            {!o.current && (
+              <button
+                type="button"
+                className="btn btn-sm"
+                style={{ width: "100%", marginTop: 8 }}
+                disabled={switchBusy}
+                onClick={() => onSwitch(o.org_id)}>
+                {t("msp.openTenant")}
+              </button>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function AuditView({
+  isPrincipal,
+  t
+}: {
+  isPrincipal: boolean
+  t: (k: string, vars?: Record<string, string | number>) => string
+}) {
   const [rows, setRows] = useState<
     Array<{
       id: string
@@ -7910,6 +10507,9 @@ function AuditView({ isPrincipal }: { isPrincipal: boolean }) {
       action: string
       detail?: string
       createdAt: string
+      seq?: number
+      entry_hash?: string
+      prev_hash?: string
     }>
   >([])
   const [filter, setFilter] = useState("")
@@ -7920,6 +10520,13 @@ function AuditView({ isPrincipal }: { isPrincipal: boolean }) {
   const [page, setPage] = useState(1)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
+  const [legalDays, setLegalDays] = useState<number | null>(null)
+  const [integrity, setIntegrity] = useState<{
+    ok: boolean
+    tip?: string
+    checked: number
+    with_hash: number
+  } | null>(null)
 
   const load = useCallback(async () => {
     if (!isPrincipal) return
@@ -7928,6 +10535,9 @@ function AuditView({ isPrincipal }: { isPrincipal: boolean }) {
     try {
       const r = await api.audit(filter || undefined)
       setRows(r.events || [])
+      if (typeof r.legal_retention_days === "number") {
+        setLegalDays(r.legal_retention_days)
+      }
     } catch (e) {
       setErr(String(e))
     } finally {
@@ -7977,7 +10587,16 @@ function AuditView({ isPrincipal }: { isPrincipal: boolean }) {
   }
 
   const exportCsv = () => {
-    const headers = ["created_at", "admin_label", "admin_email", "action", "detail"]
+    const headers = [
+      "created_at",
+      "admin_label",
+      "admin_email",
+      "action",
+      "detail",
+      "seq",
+      "entry_hash",
+      "prev_hash"
+    ]
     const lines = [headers.join(",")]
     for (const r of filtered) {
       const cells = [
@@ -7985,10 +10604,11 @@ function AuditView({ isPrincipal }: { isPrincipal: boolean }) {
         r.adminLabel || "",
         r.adminEmail || "",
         r.action || "",
-        (r.detail || "").replace(/"/g, '""')
-      ].map((c) =>
-        /[",\n]/.test(c) ? `"${c}"` : c
-      )
+        (r.detail || "").replace(/"/g, '""'),
+        r.seq != null ? String(r.seq) : "",
+        r.entry_hash || "",
+        r.prev_hash || ""
+      ].map((c) => (/[",\n]/.test(c) ? `"${c}"` : c))
       lines.push(cells.join(","))
     }
     downloadTextFile(
@@ -7996,6 +10616,24 @@ function AuditView({ isPrincipal }: { isPrincipal: boolean }) {
       lines.join("\n"),
       "text/csv;charset=utf-8"
     )
+  }
+
+  const verifyIntegrity = async () => {
+    setBusy(true)
+    try {
+      const r = await api.auditIntegrity()
+      setIntegrity({
+        ok: r.ok,
+        tip: r.tip,
+        checked: r.checked,
+        with_hash: r.with_hash
+      })
+      if (!r.ok) setErr(r.tip || r.broken_reason || "Chaîne invalide")
+    } catch (e) {
+      setErr(String(e))
+    } finally {
+      setBusy(false)
+    }
   }
 
   return (
@@ -8009,14 +10647,51 @@ function AuditView({ isPrincipal }: { isPrincipal: boolean }) {
           gap: 8,
           marginBottom: 12
         }}>
-        <h2 style={{ margin: 0 }}>Audit administration</h2>
-        <button
-          type="button"
-          className="btn secondary btn-sm"
-          disabled={!filtered.length}
-          onClick={exportCsv}>
-          Export CSV
-        </button>
+        <div>
+          <h2 style={{ margin: 0 }}>Audit administration</h2>
+          <p className="muted" style={{ fontSize: 12, margin: "4px 0 0" }}>
+            <span className="lic-status ok" style={{ marginRight: 8 }}>
+              WORM
+            </span>
+            {t("audit.wormHint")}
+            {legalDays != null
+              ? ` · ${t("audit.legalRetention", { n: legalDays })}`
+              : ""}
+          </p>
+          {integrity && (
+            <p
+              style={{
+                fontSize: 12,
+                margin: "6px 0 0",
+                color: integrity.ok
+                  ? "var(--ok, #047857)"
+                  : "var(--danger, #b91c1c)"
+              }}>
+              {integrity.ok
+                ? t("audit.integrityOk", {
+                    n: integrity.with_hash,
+                    total: integrity.checked
+                  })
+                : integrity.tip || t("audit.integrityBad")}
+            </p>
+          )}
+        </div>
+        <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+          <button
+            type="button"
+            className="btn secondary btn-sm"
+            disabled={busy}
+            onClick={() => void verifyIntegrity()}>
+            {t("audit.verify")}
+          </button>
+          <button
+            type="button"
+            className="btn secondary btn-sm"
+            disabled={!filtered.length}
+            onClick={exportCsv}>
+            Export CSV
+          </button>
+        </div>
       </div>
       <div className="filters-bar" role="search" aria-label="Filtres audit">
         <select
@@ -8136,6 +10811,7 @@ function AuditView({ isPrincipal }: { isPrincipal: boolean }) {
                   <th>Admin</th>
                   <th>Action</th>
                   <th className="col-detail">Détail</th>
+                  <th title="Sceau WORM">Hash</th>
                 </tr>
               </thead>
               <tbody>
@@ -8158,6 +10834,15 @@ function AuditView({ isPrincipal }: { isPrincipal: boolean }) {
                       <code>{r.action}</code>
                     </td>
                     <td className="muted">{r.detail || " - "}</td>
+                    <td
+                      className="mono muted"
+                      style={{ fontSize: 10 }}
+                      title={r.entry_hash || ""}>
+                      {r.seq != null ? `#${r.seq} ` : ""}
+                      {r.entry_hash
+                        ? r.entry_hash.slice(0, 10) + "…"
+                        : "—"}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -8205,6 +10890,8 @@ function MovingRulesView({
   const [groupId, setGroupId] = useState("")
   const [priority, setPriority] = useState(100)
   const [onlyUnassigned, setOnlyUnassigned] = useState(false)
+  const [condLogic, setCondLogic] = useState<"and" | "or">("and")
+  const [permanent, setPermanent] = useState(false)
   const [enabled, setEnabled] = useState(true)
 
   const load = useCallback(async () => {
@@ -8227,6 +10914,8 @@ function MovingRulesView({
     setGroupId("")
     setPriority(100)
     setOnlyUnassigned(false)
+    setCondLogic("and")
+    setPermanent(false)
     setEnabled(true)
   }
 
@@ -8241,6 +10930,8 @@ function MovingRulesView({
     setGroupId(r.targetGroupId)
     setPriority(r.priority)
     setOnlyUnassigned(r.onlyIfUnassigned)
+    setCondLogic(r.conditionLogic === "or" ? "or" : "and")
+    setPermanent(!!r.permanent)
     setEnabled(r.enabled !== false)
     setFormOpen(true)
   }
@@ -8542,6 +11233,16 @@ function MovingRulesView({
                 onClick={() => setConds([...conds, emptyCond()])}>
                 + Condition
               </button>
+              <label className="field-label">Logique multi-conditions</label>
+              <select
+                className="input"
+                value={condLogic}
+                onChange={(e) =>
+                  setCondLogic(e.target.value === "or" ? "or" : "and")
+                }>
+                <option value="and">AND — toutes les conditions</option>
+                <option value="or">OR — au moins une condition</option>
+              </select>
               <label className="field-label">Priorité (plus petit = d’abord)</label>
               <input
                 className="input"
@@ -8564,10 +11265,22 @@ function MovingRulesView({
               <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
                 <input
                   type="checkbox"
-                  checked={onlyUnassigned}
+                  checked={permanent}
+                  onChange={(e) => {
+                    setPermanent(e.target.checked)
+                    if (e.target.checked) setOnlyUnassigned(false)
+                  }}
+                />
+                Permanent — s’applique même si l’agent a déjà un groupe
+              </label>
+              <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <input
+                  type="checkbox"
+                  checked={onlyUnassigned && !permanent}
+                  disabled={permanent}
                   onChange={(e) => setOnlyUnassigned(e.target.checked)}
                 />
-                Uniquement si agent sans groupe (sinon la règle déplace aussi les déjà groupés)
+                Uniquement si agent sans groupe
               </label>
               <p className="muted" style={{ fontSize: 11, margin: 0 }}>
                 Ex. label « contient mon » matche « mon-pc ». Après création, les
@@ -8602,7 +11315,9 @@ function MovingRulesView({
                         })),
                         target_group_id: groupId,
                         priority,
-                        only_if_unassigned: onlyUnassigned,
+                        only_if_unassigned: onlyUnassigned && !permanent,
+                        condition_logic: condLogic,
+                        permanent,
                         enabled
                       }
                       if (editId) {

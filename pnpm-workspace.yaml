@@ -10,3 +10,4 @@ allowBuilds:
   lmdb: true
   msgpackr-extract: true
   sharp: true
+  tesseract.js: set this to true or false

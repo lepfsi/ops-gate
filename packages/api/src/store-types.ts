@@ -59,6 +59,12 @@ export type OrgSummary = {
   events_total: number
   by_decision: Record<string, number>
   top_rules: { rule_id: string; count: number }[]
+  /** Agents les plus demandeurs (messages inbox user→admin) */
+  top_inbox_requesters?: Array<{
+    agent_id: string
+    device_label: string
+    count: number
+  }>
   active_rules_pack: {
     version: string
     rules_count: number
@@ -248,14 +254,45 @@ export interface OpsGateStore {
   unlockAdmin(orgId: string, adminId: string): Promise<OrgAdmin | undefined>
   findAdminsByEmail(email: string): Promise<OrgAdmin[]>
   /**
+   * Orgs accessibles pour un email admin (multi-tenant / MSP).
+   * Exclut les orgs personnelles.
+   */
+  listAccessibleOrgsForEmail(email: string): Promise<
+    Array<{
+      org_id: string
+      org_code: string
+      name: string
+      is_principal: boolean
+      admin_id: string
+    }>
+  >
+  /**
+   * Bascule de tenant sans re-saisie mdp (session déjà authentifiée, même email).
+   */
+  switchAdminOrg(opts: {
+    currentToken: string
+    targetOrgId: string
+    force?: boolean
+  }): Promise<
+    | {
+        ok: true
+        session: AdminSession
+        admin: OrgAdmin
+        forced?: boolean
+      }
+    | { ok: false; error: string }
+  >
+  /**
    * Login console.
-   * @param force si true, révoque la session existante du même compte (prise de contrôle).
+   * @param force si true, révoque la session existante (legacy / claim challenge).
+   * @param readOnly si true, session concurrente lecture seule (sans kick).
    */
   createAdminSession(
     email: string,
     password: string,
     opts?: {
       force?: boolean
+      readOnly?: boolean
       totpCode?: string
       orgId?: string
       orgCode?: string
@@ -271,6 +308,10 @@ export interface OpsGateStore {
         ok: false
         error: string
         orgs?: Array<{ org_id: string; org_code: string; name: string }>
+        /** Présent si session_already_active — pour challenge */
+        orgId?: string
+        adminId?: string
+        adminEmail?: string
       }
   >
   /**
@@ -279,8 +320,32 @@ export interface OpsGateStore {
    */
   createAdminSessionOidc(
     email: string,
-    opts?: { force?: boolean }
+    opts?: { force?: boolean; readOnly?: boolean }
   ): Promise<
+    | {
+        ok: true
+        session: AdminSession
+        admin: OrgAdmin
+        forced?: boolean
+      }
+    | {
+        ok: false
+        error: string
+        orgId?: string
+        adminId?: string
+        adminEmail?: string
+      }
+  >
+  /**
+   * Émet une session après challenge accepté/timeout (sans re-saisie mdp).
+   * force=true : révoque les autres sessions full.
+   */
+  issueAdminSessionDirect(opts: {
+    orgId: string
+    adminId: string
+    force?: boolean
+    readOnly?: boolean
+  }): Promise<
     | {
         ok: true
         session: AdminSession
@@ -293,6 +358,8 @@ export interface OpsGateStore {
     token: string
   ): Promise<{ session: AdminSession; admin: OrgAdmin } | undefined>
   revokeAdminSession(token: string): Promise<boolean>
+  /** Révoque toutes les sessions d’un admin (prise de contrôle) */
+  revokeAllAdminSessions(adminId: string): Promise<number>
   /** Admins dont le mdp est valide pour désenrôlement endpoint */
   listUnenrollAdmins(orgId: string): Promise<OrgAdmin[]>
 
@@ -502,6 +569,60 @@ export interface OpsGateStore {
   ): Promise<boolean>
   revokeRecoveryPool(orgId: string): Promise<{ revoked: number }>
 
+  /** Inbox user → admin */
+  createInboxMessage(input: {
+    orgId: string
+    agentId: string
+    deviceLabel?: string
+    hostName?: string | null
+    category?: import("./types").InboxMessageCategory
+    subject: string
+    body: string
+    contextUrl?: string | null
+    contextHostname?: string | null
+  }): Promise<
+    | { ok: true; message: import("./types").UserInboxMessage }
+    | { ok: false; error: string }
+  >
+  listInboxMessages(
+    orgId: string,
+    opts?: {
+      status?: import("./types").InboxMessageStatus | "all" | "unread"
+      limit?: number
+      agentId?: string
+    }
+  ): Promise<import("./types").UserInboxMessage[]>
+  getInboxMessage(
+    orgId: string,
+    messageId: string
+  ): Promise<import("./types").UserInboxMessage | undefined>
+  markInboxRead(
+    orgId: string,
+    messageId: string
+  ): Promise<import("./types").UserInboxMessage | undefined>
+  replyInboxMessage(
+    orgId: string,
+    messageId: string,
+    reply: string,
+    admin: { id: string; label: string }
+  ): Promise<import("./types").UserInboxMessage | undefined>
+  closeInboxMessage(
+    orgId: string,
+    messageId: string
+  ): Promise<import("./types").UserInboxMessage | undefined>
+  /** Agent acquitte la réponse admin (ferme le popup) */
+  ackInboxMessage(
+    orgId: string,
+    messageId: string,
+    agentId: string
+  ): Promise<import("./types").UserInboxMessage | undefined>
+  /** Réponses admin non acquittées pour cet agent */
+  listPendingAdminReplies(
+    orgId: string,
+    agentId: string
+  ): Promise<import("./types").UserInboxMessage[]>
+  countInboxUnread(orgId: string): Promise<number>
+
   summary(orgId: string): Promise<OrgSummary>
 
   appendAdminAudit(input: {
@@ -516,6 +637,11 @@ export interface OpsGateStore {
   listAdminAudit(
     orgId: string,
     opts?: { limit?: number; action?: string }
+  ): Promise<import("./types").AdminAuditEvent[]>
+  /** Audit en ordre chronologique (vérif chaîne WORM) */
+  listAdminAuditAsc(
+    orgId: string,
+    limit?: number
   ): Promise<import("./types").AdminAuditEvent[]>
 
   /** Moving rules (auto-affectation agents → groupe) */
@@ -533,8 +659,34 @@ export interface OpsGateStore {
       targetGroupId: string
       priority?: number
       onlyIfUnassigned?: boolean
+      conditionLogic?: import("./types").MovingConditionLogic
+      permanent?: boolean
     }
   ): Promise<import("./types").MovingRule | undefined>
+  /**
+   * Import CSV agents : matche id / device_label / host_name et applique
+   * groupe, profil, licence (ne crée pas d’agents — enroll requis).
+   */
+  importAgentsCsv(
+    orgId: string,
+    rows: Array<{
+      agent_id?: string
+      device_label?: string
+      host_name?: string
+      group_name?: string
+      group_id?: string
+      profile_name?: string
+      profile_id?: string
+      license?: boolean | null
+    }>,
+    opts?: { dryRun?: boolean }
+  ): Promise<{
+    matched: number
+    updated: number
+    skipped: number
+    errors: string[]
+    preview?: Array<{ agent_id: string; changes: string[] }>
+  }>
   deleteMovingRule(orgId: string, ruleId: string): Promise<boolean>
   /** Évalue les règles et applique profil/groupe sur l'agent. Retourne true si match. */
   applyMovingRules(

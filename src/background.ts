@@ -7,9 +7,13 @@ import {
   setSettings
 } from "~lib/agent-store"
 import {
+  ackAdminReply,
   enrollAgent,
   flushEventQueue,
+  listMyAdminMessages,
+  listPendingAdminReplies,
   revokeCurrentAgent,
+  sendAdminMessage,
   syncConfig
 } from "~lib/cloud"
 import { detectText } from "~lib/detect"
@@ -29,24 +33,34 @@ export {}
 /** Poll fréquent : force-sync + révocation console appliqués sans visite poste */
 const SYNC_ALARM = "opsgate-sync-config"
 const SYNC_PERIOD_MIN = 2
+/** Poll réponses admin (popup ack) */
+const INBOX_ALARM = "opsgate-inbox-poll"
+const INBOX_PERIOD_MIN = 1
+const PENDING_REPLIES_KEY = "opsGatePendingAdminReplies"
 
 ext.runtime.onInstalled.addListener(() => {
   console.log("[OpsGate] Extension installée / mise à jour")
   void ensureSyncAlarm()
   void maybeAutoSync()
+  void pollPendingAdminReplies()
 })
 
 ext.runtime.onStartup.addListener(() => {
   void ensureSyncAlarm()
   void maybeAutoSync()
+  void pollPendingAdminReplies()
 })
 
 initRulesMemoryListener()
 void ensureSyncAlarm()
+void pollPendingAdminReplies()
 
 ext.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === SYNC_ALARM) {
     void maybeAutoSync()
+  }
+  if (alarm.name === INBOX_ALARM) {
+    void pollPendingAdminReplies()
   }
 })
 
@@ -54,6 +68,13 @@ async function ensureSyncAlarm() {
   try {
     await ext.alarms.create(SYNC_ALARM, {
       periodInMinutes: SYNC_PERIOD_MIN
+    })
+  } catch {
+    // ignore
+  }
+  try {
+    await ext.alarms.create(INBOX_ALARM, {
+      periodInMinutes: INBOX_PERIOD_MIN
     })
   } catch {
     // ignore
@@ -68,6 +89,7 @@ async function maybeAutoSync() {
       console.log("[OpsGate] auto-sync", "ok")
       const n = await flushEventQueue(r.settings)
       if (n > 0) console.log("[OpsGate] flushed events", n)
+      void pollPendingAdminReplies()
     } else {
       console.log(
         "[OpsGate] auto-sync",
@@ -75,6 +97,34 @@ async function maybeAutoSync() {
       )
       void flushPendingEvents()
     }
+  }
+}
+
+/** Récupère les réponses admin non acquittées → badge + storage pour content scripts */
+async function pollPendingAdminReplies() {
+  const s = await getSettings()
+  if (!s.agentToken || s.mode === "local_only") {
+    try {
+      await ext.storage.local.set({ [PENDING_REPLIES_KEY]: [] })
+      await ext.action?.setBadgeText?.({ text: "" })
+    } catch {
+      /* ignore */
+    }
+    return
+  }
+  const r = await listPendingAdminReplies()
+  const list = r.ok ? r.messages : []
+  try {
+    await ext.storage.local.set({ [PENDING_REPLIES_KEY]: list })
+    const n = list.length
+    if (ext.action?.setBadgeText) {
+      await ext.action.setBadgeText({ text: n > 0 ? String(Math.min(n, 9)) : "" })
+      if (n > 0 && ext.action.setBadgeBackgroundColor) {
+        await ext.action.setBadgeBackgroundColor({ color: "#0f766e" })
+      }
+    }
+  } catch {
+    /* ignore */
   }
 }
 
@@ -99,6 +149,31 @@ async function handleMessage(message: OpsGateMessage): Promise<unknown> {
     case "DETECT": {
       const { detections } = await detectText(message.text ?? "")
       return { ok: true, detections }
+    }
+
+    case "OCR_BITMAP": {
+      // Tesseract dans le service worker (évite CSP des sites IA)
+      try {
+        const { ocrBitmapBase64 } = await import("~lib/ocr-bitmap")
+        const r = await ocrBitmapBase64(
+          message.base64 || "",
+          message.mime || "image/png"
+        )
+        if (r.ok === true) {
+          return {
+            ok: true,
+            text: r.text,
+            truncated: r.truncated,
+            ms: r.ms
+          }
+        }
+        return { ok: false, error: r.ok === false ? r.error : "ocr_failed" }
+      } catch (e) {
+        return {
+          ok: false,
+          error: e instanceof Error ? e.message : "ocr_failed"
+        }
+      }
     }
 
     case "LOG_DETECTION": {
@@ -246,6 +321,41 @@ async function handleMessage(message: OpsGateMessage): Promise<unknown> {
         eventReporting: settings.eventReporting,
         apiBaseUrl: settings.apiBaseUrl
       }
+    }
+
+    case "CONTACT_ADMIN": {
+      const r = await sendAdminMessage({
+        subject: message.subject,
+        body: message.body,
+        category: message.category,
+        contextUrl: message.contextUrl,
+        contextHostname: message.contextHostname
+      })
+      return r
+    }
+
+    case "LIST_ADMIN_MESSAGES": {
+      return listMyAdminMessages(15)
+    }
+
+    case "LIST_PENDING_ADMIN_REPLIES": {
+      const r = await listPendingAdminReplies()
+      if (r.ok) {
+        try {
+          await ext.storage.local.set({
+            opsGatePendingAdminReplies: r.messages
+          })
+        } catch {
+          /* ignore */
+        }
+      }
+      return r
+    }
+
+    case "ACK_ADMIN_REPLY": {
+      const r = await ackAdminReply(message.messageId)
+      if (r.ok) void pollPendingAdminReplies()
+      return r
     }
 
     default:

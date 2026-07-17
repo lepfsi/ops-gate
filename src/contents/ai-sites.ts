@@ -3,8 +3,10 @@ import type { DetectionRule } from "@opsgate/engine"
 
 import { initRulesMemoryListener } from "~lib/agent-store"
 import {
+  isAdminReplyModalOpen,
   isBannerOpen,
   removeBanner,
+  showAdminReplyModal,
   showAlertBanner,
   showToast,
   toastFromDecision
@@ -121,7 +123,76 @@ ext.storage?.onChanged?.addListener((changes, area) => {
   if (area === "local" && changes.opsGateSettings?.newValue) {
     settings = { ...DEFAULT_SETTINGS, ...changes.opsGateSettings.newValue }
   }
+  if (area === "local" && changes.opsGatePendingAdminReplies) {
+    void maybeShowPendingAdminReply()
+  }
 })
+
+/** Popup bloquant : réponses admin non acquittées */
+async function maybeShowPendingAdminReply() {
+  if (isAdminReplyModalOpen()) return
+  try {
+    // Préférer le cache background (rapide)
+    const stored = await ext.storage.local.get("opsGatePendingAdminReplies")
+    let list = (stored.opsGatePendingAdminReplies || []) as Array<{
+      id: string
+      subject: string
+      body?: string
+      admin_reply?: string | null
+      replied_by_admin_label?: string | null
+      replied_at?: string | null
+    }>
+    if (!list.length) {
+      const r = (await ext.runtime.sendMessage({
+        type: "LIST_PENDING_ADMIN_REPLIES"
+      })) as {
+        ok?: boolean
+        messages?: typeof list
+      }
+      if (r?.ok && r.messages?.length) list = r.messages
+    }
+    const first = list.find((m) => m.admin_reply && m.admin_reply.trim())
+    if (!first?.admin_reply) return
+
+    showAdminReplyModal(
+      {
+        id: first.id,
+        subject: first.subject,
+        body: first.body,
+        admin_reply: first.admin_reply,
+        replied_by_admin_label: first.replied_by_admin_label,
+        replied_at: first.replied_at
+      },
+      {
+        onAck: async () => {
+          const ack = (await ext.runtime.sendMessage({
+            type: "ACK_ADMIN_REPLY",
+            messageId: first.id
+          })) as { ok?: boolean; error?: string }
+          if (!ack?.ok) throw new Error(ack?.error || "Échec acquittement")
+          // Enchaîner sur le message suivant s’il y en a
+          setTimeout(() => void maybeShowPendingAdminReply(), 400)
+        },
+        onReply: async (text) => {
+          const send = (await ext.runtime.sendMessage({
+            type: "CONTACT_ADMIN",
+            subject: first.subject.startsWith("Re:")
+              ? first.subject
+              : `Re: ${first.subject}`,
+            body: text,
+            category: "question"
+          })) as { ok?: boolean; error?: string }
+          if (!send?.ok) throw new Error(send?.error || "Échec envoi")
+        }
+      }
+    )
+  } catch (e) {
+    console.warn("[OpsGate] pending admin reply:", e)
+  }
+}
+
+void maybeShowPendingAdminReply()
+setInterval(() => void maybeShowPendingAdminReply(), 20_000)
 
 function logDecision(
   decision: UserDecision,
@@ -407,6 +478,7 @@ function handlePotentialSend(event: Event, sourceEl?: Element | null): void {
   const action = settings.defaultAction || "mask_recommend"
   const msgs = mergeUserMessages(settings.userMessages)
 
+  // Toujours proposer le contact admin sur le bandeau (l’API gère non-enrôlé).
   showAlertBanner(
     detections,
     (decision) => {
@@ -443,7 +515,8 @@ function handlePotentialSend(event: Event, sourceEl?: Element | null): void {
       source: "prompt",
       defaultAction: action,
       userMessages: settings.userMessages,
-      orgName: settings.orgName
+      orgName: settings.orgName,
+      contactAdminEnabled: true
     }
   )
 }
@@ -587,17 +660,28 @@ async function processQuarantinedFiles(
     const detections = mergeDetections(scans)
     const fileNames = frozen.map((f) => f.name)
     const warnOnly = scans.filter((s) =>
-      ["unsupported", "media_warn", "office_warn", "image_skipped", "warn_confirm"].includes(
-        s.status
-      )
+      [
+        "unsupported",
+        "media_warn",
+        "office_warn",
+        "image_skipped",
+        "image_ocr_limited",
+        "image_ocr_failed",
+        "warn_confirm"
+      ].includes(s.status)
     )
     const partial = scans.filter((s) => s.status === "too_large_partial")
     const needsConfirm =
       detections.length > 0 ||
       warnOnly.some((s) =>
-        ["media_warn", "office_warn", "image_skipped", "warn_confirm"].includes(
-          s.status
-        )
+        [
+          "media_warn",
+          "office_warn",
+          "image_skipped",
+          "image_ocr_limited",
+          "image_ocr_failed",
+          "warn_confirm"
+        ].includes(s.status)
       )
 
     // Rien de sensible et pas de warning media/office → livrer
@@ -747,7 +831,8 @@ async function processQuarantinedFiles(
         note: notes.length ? notes.join(" ") : undefined,
         defaultAction: fileAction,
         userMessages: settings.userMessages,
-        orgName: settings.orgName
+        orgName: settings.orgName,
+        contactAdminEnabled: true
       }
     )
   } catch (err) {

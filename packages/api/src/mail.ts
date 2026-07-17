@@ -196,6 +196,12 @@ export async function sendMail(opts: {
   subject: string
   text: string
   html?: string
+  /** Pièces jointes (exports logs, etc.) */
+  attachments?: Array<{
+    filename: string
+    content: string | Buffer
+    contentType?: string
+  }>
   /** Config SMTP (org) ; sinon env */
   smtp?: OrgSmtpSettings | null
   runtime?: SmtpRuntimeConfig | null
@@ -210,7 +216,11 @@ export async function sendMail(opts: {
   const transport = buildTransport(cfg)
   if (!transport || !cfg) {
     console.log(
-      `[opsgate-mail] LOG-ONLY → ${to}\n  Subject: ${opts.subject}\n  ${opts.text.slice(0, 400)}`
+      `[opsgate-mail] LOG-ONLY → ${to}\n  Subject: ${opts.subject}\n  ${opts.text.slice(0, 400)}${
+        opts.attachments?.length
+          ? `\n  Attachments: ${opts.attachments.map((a) => a.filename).join(", ")}`
+          : ""
+      }`
     )
     return { ok: true, delivery: "log" }
   }
@@ -221,7 +231,12 @@ export async function sendMail(opts: {
       to,
       subject: opts.subject,
       text: opts.text,
-      html: opts.html || plainToHtml(opts.text)
+      html: opts.html || plainToHtml(opts.text),
+      attachments: opts.attachments?.map((a) => ({
+        filename: a.filename,
+        content: a.content,
+        contentType: a.contentType
+      }))
     })
     console.log(
       `[opsgate-mail] SMTP ok (${cfg.source}) → ${maskEmail(to)} id=${info.messageId || "?"}`
@@ -556,6 +571,198 @@ export async function sendPasswordChangedNotice(opts: {
       title: "Notification de sécurité",
       bodyHtml
     }),
+    smtp: opts.smtp
+  })
+}
+
+/** Compte admin verrouillé (brute-force) */
+export async function sendAccountLockedEmail(opts: {
+  to: string
+  lockedEmail: string
+  lockedLabel?: string
+  failCount: number
+  threshold: number
+  orgName?: string
+  smtp?: OrgSmtpSettings | null
+}): Promise<SendMailResult> {
+  const subject = "OpsGate — compte administrateur verrouillé"
+  const text = [
+    "OpsGate — alerte sécurité",
+    "",
+    `Le compte admin ${opts.lockedEmail}${opts.lockedLabel ? ` (${opts.lockedLabel})` : ""} a été verrouillé.`,
+    `Échecs : ${opts.failCount} (seuil ${opts.threshold}).`,
+    opts.orgName ? `Organisation : ${opts.orgName}` : "",
+    "",
+    "Un administrateur principal doit déverrouiller le compte (Console → Admins).",
+    "",
+    "— DailyOps.Tech / OpsGate"
+  ]
+    .filter(Boolean)
+    .join("\n")
+  const bodyHtml = `
+    <p style="margin:0 0 12px">Le compte administrateur <strong>${escHtml(opts.lockedEmail)}</strong>${
+      opts.lockedLabel ? ` (${escHtml(opts.lockedLabel)})` : ""
+    } a été <strong style="color:#b91c1c">verrouillé</strong> après trop d’échecs de connexion.</p>
+    <p style="margin:0 0 12px">Échecs : <strong>${opts.failCount}</strong> (seuil ${opts.threshold}).</p>
+    ${opts.orgName ? `<p style="margin:0 0 12px">Organisation : <strong>${escHtml(opts.orgName)}</strong></p>` : ""}
+    <p style="margin:0 0 12px">Un administrateur principal doit déverrouiller le compte dans la console (Admins &amp; groupes).</p>
+    <p style="color:#64748b;font-size:13px;margin:16px 0 0;padding:12px;background:#fef2f2;border-radius:6px;border-left:3px solid #ef4444">
+      <strong>Sécurité :</strong> si cette alerte n’est pas attendue, vérifiez les journaux d’audit et les accès réseau.
+    </p>`
+  return sendMail({
+    to: opts.to,
+    subject,
+    text,
+    html: brandedEmailHtml({
+      title: "Compte verrouillé",
+      bodyHtml
+    }),
+    smtp: opts.smtp
+  })
+}
+
+/** Licence org proche de l’expiration ou expirée */
+export async function sendLicenseExpiringEmail(opts: {
+  to: string
+  orgName: string
+  orgCode?: string
+  expiresAt: string
+  daysLeft: number
+  smtp?: OrgSmtpSettings | null
+}): Promise<SendMailResult> {
+  const expired = opts.daysLeft < 0
+  const subject = expired
+    ? "OpsGate — licence expirée"
+    : `OpsGate — licence expire dans ${opts.daysLeft} j`
+  const exp = String(opts.expiresAt).slice(0, 10)
+  const text = [
+    expired ? "OpsGate — licence expirée" : "OpsGate — licence bientôt expirée",
+    "",
+    `Organisation : ${opts.orgName}${opts.orgCode ? ` (${opts.orgCode})` : ""}`,
+    `Expiration : ${exp}`,
+    expired
+      ? "La licence est expirée. Renouvelez-la pour éviter l’interruption de protection."
+      : `Il reste environ ${opts.daysLeft} jour(s). Planifiez le renouvellement.`,
+    "",
+    "— DailyOps.Tech / OpsGate"
+  ].join("\n")
+  const bodyHtml = `
+    <p style="margin:0 0 12px">Organisation : <strong>${escHtml(opts.orgName)}</strong>${
+      opts.orgCode ? ` <code>${escHtml(opts.orgCode)}</code>` : ""
+    }</p>
+    <p style="margin:0 0 12px">Date d’expiration : <strong>${escHtml(exp)}</strong></p>
+    <p style="margin:0 0 12px">${
+      expired
+        ? "La licence est <strong style=\"color:#b91c1c\">expirée</strong>. Renouvelez-la pour maintenir la protection des agents."
+        : `La licence expire dans <strong>${opts.daysLeft} jour(s)</strong>. Planifiez le renouvellement.`
+    }</p>
+    <p style="color:#64748b;font-size:13px;margin:16px 0 0;padding:12px;background:#fffbeb;border-radius:6px;border-left:3px solid #f59e0b">
+      Console → Gestion des licences / contactez DailyOps.Tech pour un renouvellement.
+    </p>`
+  return sendMail({
+    to: opts.to,
+    subject,
+    text,
+    html: brandedEmailHtml({
+      title: expired ? "Licence expirée" : "Licence bientôt expirée",
+      bodyHtml
+    }),
+    smtp: opts.smtp
+  })
+}
+
+/** Stock de codes recovery bas */
+export async function sendRecoveryLowStockEmail(opts: {
+  to: string
+  orgName: string
+  activeCount: number
+  threshold: number
+  smtp?: OrgSmtpSettings | null
+}): Promise<SendMailResult> {
+  const subject = "OpsGate — stock de codes recovery bas"
+  const text = [
+    "OpsGate — codes de récupération",
+    "",
+    `Organisation : ${opts.orgName}`,
+    `Codes actifs restants : ${opts.activeCount} (seuil d’alerte : ${opts.threshold}).`,
+    "Générez un nouveau pool dans la console (Admins → Recovery) pour éviter un blocage en situation d’urgence.",
+    "",
+    "— DailyOps.Tech / OpsGate"
+  ].join("\n")
+  const bodyHtml = `
+    <p style="margin:0 0 12px">Organisation : <strong>${escHtml(opts.orgName)}</strong></p>
+    <p style="margin:0 0 12px">Codes recovery <strong>actifs</strong> restants :
+      <strong style="color:#b91c1c">${opts.activeCount}</strong>
+      (seuil d’alerte : ${opts.threshold}).</p>
+    <p style="margin:0 0 12px">Générez un nouveau pool dans la console (Admins → Recovery) pour les situations d’urgence (désenrôlement offline, etc.).</p>`
+  return sendMail({
+    to: opts.to,
+    subject,
+    text,
+    html: brandedEmailHtml({
+      title: "Stock recovery bas",
+      bodyHtml
+    }),
+    smtp: opts.smtp
+  })
+}
+
+/** Export hebdo des logs — e-mail aux destinataires configurés par le client */
+export async function sendScheduledExportReadyEmail(opts: {
+  to: string
+  orgName: string
+  weekKey: string
+  filenames: string[]
+  eventCount: number
+  formats: string[]
+  /** Contenu à joindre (si attachFiles et taille OK) */
+  attachments?: Array<{
+    filename: string
+    content: string
+    contentType?: string
+  }>
+  smtp?: OrgSmtpSettings | null
+}): Promise<SendMailResult> {
+  const subject = `OpsGate — export logs ${opts.weekKey}`
+  const files = opts.filenames.join(", ")
+  const hasAttach = !!(opts.attachments && opts.attachments.length)
+  const text = [
+    "OpsGate — export automatique des logs",
+    "",
+    `Organisation : ${opts.orgName}`,
+    `Période (semaine ISO) : ${opts.weekKey}`,
+    `Événements : ${opts.eventCount}`,
+    `Formats : ${opts.formats.join(", ")}`,
+    `Fichiers : ${files}`,
+    "",
+    hasAttach
+      ? "Les fichiers sont joints à cet e-mail."
+      : "Téléchargez les archives dans la console : Paramètres → Rapports, ou Events → Archives.",
+    "",
+    "— DailyOps.Tech / OpsGate"
+  ].join("\n")
+  const bodyHtml = `
+    <p style="margin:0 0 12px">Organisation : <strong>${escHtml(opts.orgName)}</strong></p>
+    <p style="margin:0 0 12px">Période (semaine ISO) : <strong>${escHtml(opts.weekKey)}</strong></p>
+    <p style="margin:0 0 12px">Événements : <strong>${opts.eventCount}</strong></p>
+    <p style="margin:0 0 12px">Formats : ${escHtml(opts.formats.join(", "))}</p>
+    <p style="margin:0 0 12px">Fichiers : <code>${escHtml(files)}</code></p>
+    <p style="color:#64748b;font-size:13px;margin:16px 0 0;padding:12px;background:#f0fdfa;border-radius:6px;border-left:3px solid #2BD9C5">
+      ${
+        hasAttach
+          ? "Les fichiers d’export sont <strong>joints</strong> à ce message."
+          : "Téléchargez dans la console → <strong>Paramètres → Rapports</strong> ou <strong>Events → Archives</strong>."
+      }
+    </p>`
+  return sendMail({
+    to: opts.to,
+    subject,
+    text,
+    html: brandedEmailHtml({
+      title: "Export logs hebdomadaire",
+      bodyHtml
+    }),
+    attachments: opts.attachments,
     smtp: opts.smtp
   })
 }

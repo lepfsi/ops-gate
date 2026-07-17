@@ -111,16 +111,64 @@ export interface OrgLogCategories {
   proxyEvents?: boolean
 }
 
-/** Notifications org (console + audit) */
+/** Canaux d’alerte externes (email, Telegram, Slack, webhook générique) */
+export type NotificationChannelKind =
+  | "email"
+  | "telegram"
+  | "slack"
+  | "webhook"
+
+/**
+ * Un canal de notification configuré par le client.
+ * Secrets (bot token, webhooks) stockés dans monitoring org — protéger la DB.
+ */
+export interface OrgNotificationChannel {
+  id: string
+  kind: NotificationChannelKind
+  enabled: boolean
+  /** Libellé UI (ex. « SOC Telegram ») */
+  label?: string
+  /** email : destinataires de ce canal (sinon alertEmails global) */
+  emails?: string[]
+  /** telegram : token bot @BotFather */
+  botToken?: string
+  /** telegram : chat_id (groupe ou user) */
+  chatId?: string
+  /** slack Incoming Webhook URL ou webhook générique */
+  webhookUrl?: string
+}
+
+/**
+ * Notifications org — 100 % pilotées par le client (console Paramètres).
+ * OpsGate n’impose pas les destinataires : le client choisit événements,
+ * seuils, e-mails et canaux externes. Sans destinataire → pas d’envoi (audit seul).
+ */
 export interface OrgNotificationSettings {
   /** Alerte si licence / sièges proches de l’expiration */
   licenseExpiring: boolean
   /** Jours avant expiration pour notifier */
   licenseExpiringDays: number
-  /** Alerte après N échecs de mdp admin */
+  /** Alerte après N échecs de mdp admin (audit + option e-mail) */
   loginBruteForce: boolean
   /** Seuil d’échecs consécutifs (défaut 5) */
   loginBruteForceThreshold: number
+  /** E-mail quand un compte admin est verrouillé */
+  accountLockoutEmail: boolean
+  /** E-mail si stock recovery codes bas */
+  recoveryLowStock: boolean
+  /** Seuil codes recovery actifs (défaut 5) */
+  recoveryLowStockThreshold: number
+  /**
+   * Destinataires des alertes e-mail (un par ligne / virgule).
+   * Vide = aucun envoi e-mail automatique (le client doit les renseigner).
+   * Les canaux Telegram/Slack/webhook sont indépendants.
+   */
+  alertEmails: string[]
+  /**
+   * Canaux externes (Telegram, Slack, webhook…).
+   * L’e-mail reste le canal historique via alertEmails + SMTP.
+   */
+  channels?: OrgNotificationChannel[]
 }
 
 /** Infos licence affichées console (contrat / facturation) */
@@ -151,13 +199,33 @@ export interface OrgMonitoringSettings {
    * Au-delà, purge auto (export avant si weeklyExportEnabled).
    */
   logRetentionDays: number
-  /** Génère une archive téléchargeable chaque fin de semaine ISO */
+  /**
+   * @deprecated Préférer scheduledLogExport.enabled
+   * Conservé pour compat (miroir de scheduledLogExport.enabled).
+   */
   weeklyExportEnabled: boolean
-  /** Dernière archive hebdo générée (ISO) */
+  /** @deprecated → scheduledLogExport.formats */
+  weeklyExportFormats?: Array<"csv" | "json">
+  /** @deprecated → scheduledLogExport (e-mails dédiés) */
+  weeklyExportNotifyEmail?: boolean
+  /**
+   * Export automatique des logs events — 100 % configuré par le client :
+   * e-mails destinataires, jour, heure, fuseau, formats.
+   */
+  scheduledLogExport?: ScheduledLogExportSettings
+  /** Dernière archive hebdo générée (ISO + weekKey) */
   lastWeeklyExportAt?: string | null
   /** Quels types de logs garder (désactiver = plus d'écriture) */
   logCategories?: OrgLogCategories
   notifications?: OrgNotificationSettings
+  /**
+   * Rétention légale du journal d’audit admin (jours).
+   * Min 90 / défaut 365. Les audits ne sont pas purgés avant cette échéance.
+   * Indépendant de logRetentionDays (events détection).
+   */
+  auditLegalRetentionDays?: number
+  /** Toujours true en pratique — sceau hash chaîne WORM sur chaque entrée audit */
+  auditWormEnabled?: boolean
   /** Titulaire licence (entreprise) */
   licenseDisplay?: OrgLicenseDisplay
   /**
@@ -323,6 +391,39 @@ export interface RecoveryCode {
   active: boolean
 }
 
+/**
+ * Export planifié des logs (events) — choix client exclusif.
+ * Jour 1=lundi … 7=dimanche (ISO). Heure locale du fuseau IANA.
+ */
+export interface ScheduledLogExportSettings {
+  enabled: boolean
+  /** Destinataires admin qui reçoivent l’export chaque semaine */
+  recipientEmails: string[]
+  /** 1=lundi … 7=dimanche */
+  dayOfWeek: number
+  /** HH:mm local (ex. "08:00") */
+  timeLocal: string
+  /** IANA, ex. Europe/Paris */
+  timezone: string
+  /** Formats générés et joints si possible */
+  formats: Array<"csv" | "json">
+  /**
+   * Joindre les fichiers au mail si taille raisonnable.
+   * Sinon e-mail de notification + téléchargement console.
+   */
+  attachFiles: boolean
+}
+
+export const DEFAULT_SCHEDULED_LOG_EXPORT: ScheduledLogExportSettings = {
+  enabled: false,
+  recipientEmails: [],
+  dayOfWeek: 1,
+  timeLocal: "08:00",
+  timezone: "Europe/Paris",
+  formats: ["csv"],
+  attachFiles: true
+}
+
 /** Archive d’export logs (semaine / manuel) — téléchargeable avant purge */
 export interface LogExportRecord {
   id: string
@@ -367,7 +468,13 @@ export const DEFAULT_NOTIFICATION_SETTINGS: OrgNotificationSettings = {
   licenseExpiring: true,
   licenseExpiringDays: 30,
   loginBruteForce: true,
-  loginBruteForceThreshold: 5
+  loginBruteForceThreshold: 5,
+  /** Off par défaut tant que le client n’a pas listé de destinataires */
+  accountLockoutEmail: false,
+  recoveryLowStock: false,
+  recoveryLowStockThreshold: 5,
+  alertEmails: [],
+  channels: []
 }
 
 export const DEFAULT_MONITORING_SETTINGS: OrgMonitoringSettings = {
@@ -382,10 +489,15 @@ export const DEFAULT_MONITORING_SETTINGS: OrgMonitoringSettings = {
     breaks: [{ start: "12:00", end: "13:00" }]
   },
   logRetentionDays: 90,
-  weeklyExportEnabled: true,
+  weeklyExportEnabled: false,
+  weeklyExportFormats: ["csv"],
+  weeklyExportNotifyEmail: false,
+  scheduledLogExport: { ...DEFAULT_SCHEDULED_LOG_EXPORT },
   lastWeeklyExportAt: null,
   logCategories: { ...DEFAULT_LOG_CATEGORIES },
   notifications: { ...DEFAULT_NOTIFICATION_SETTINGS },
+  auditLegalRetentionDays: 365,
+  auditWormEnabled: true,
   licenseDisplay: {
     companyName: "",
     address: "",
@@ -434,8 +546,87 @@ export function mergeMonitoringSettings(
   ) {
     base.logRetentionDays = Math.floor(partial.logRetentionDays)
   }
+  if (typeof partial.auditLegalRetentionDays === "number") {
+    // 90 j min · 3650 max — rétention légale audit (indépendante des events)
+    const next = Math.min(
+      3650,
+      Math.max(90, Math.floor(partial.auditLegalRetentionDays))
+    )
+    base.auditLegalRetentionDays = next
+  }
+  // WORM audit : toujours actif (sceau hash chaîne)
+  base.auditWormEnabled = true
   if (typeof partial.weeklyExportEnabled === "boolean") {
     base.weeklyExportEnabled = partial.weeklyExportEnabled
+  }
+  if (Array.isArray(partial.weeklyExportFormats)) {
+    const formats = partial.weeklyExportFormats.filter(
+      (f): f is "csv" | "json" => f === "csv" || f === "json"
+    )
+    base.weeklyExportFormats = formats.length ? formats : ["csv"]
+  }
+  if (typeof partial.weeklyExportNotifyEmail === "boolean") {
+    base.weeklyExportNotifyEmail = partial.weeklyExportNotifyEmail
+  }
+  // Config planifiée dédiée (prioritaire)
+  {
+    const legEnabled = base.weeklyExportEnabled
+    const legFormats = base.weeklyExportFormats || ["csv"]
+    const fromPartial = partial.scheduledLogExport
+    const merged: ScheduledLogExportSettings = {
+      ...DEFAULT_SCHEDULED_LOG_EXPORT,
+      // legacy mirror
+      enabled: legEnabled,
+      formats: legFormats,
+      ...(fromPartial && typeof fromPartial === "object" ? fromPartial : {})
+    }
+    if (typeof fromPartial?.enabled === "boolean") {
+      merged.enabled = fromPartial.enabled
+      base.weeklyExportEnabled = fromPartial.enabled
+    } else if (typeof partial.weeklyExportEnabled === "boolean") {
+      merged.enabled = partial.weeklyExportEnabled
+    }
+    if (Array.isArray(fromPartial?.formats)) {
+      const formats = fromPartial!.formats.filter(
+        (f): f is "csv" | "json" => f === "csv" || f === "json"
+      )
+      merged.formats = formats.length ? formats : ["csv"]
+      base.weeklyExportFormats = merged.formats
+    } else if (Array.isArray(partial.weeklyExportFormats)) {
+      merged.formats = base.weeklyExportFormats || ["csv"]
+    }
+    if (Array.isArray(fromPartial?.recipientEmails)) {
+      merged.recipientEmails = fromPartial!.recipientEmails
+        .map((e) => String(e || "").trim().toLowerCase())
+        .filter((e) => e.includes("@"))
+        .slice(0, 20)
+    }
+    if (
+      typeof fromPartial?.dayOfWeek === "number" &&
+      fromPartial.dayOfWeek >= 1 &&
+      fromPartial.dayOfWeek <= 7
+    ) {
+      merged.dayOfWeek = Math.floor(fromPartial.dayOfWeek)
+    }
+    if (
+      typeof fromPartial?.timeLocal === "string" &&
+      /^\d{1,2}:\d{2}$/.test(fromPartial.timeLocal.trim())
+    ) {
+      const [hh, mm] = fromPartial.timeLocal.trim().split(":")
+      const h = Math.min(23, Math.max(0, Number(hh) || 0))
+      const m = Math.min(59, Math.max(0, Number(mm) || 0))
+      merged.timeLocal = `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`
+    }
+    if (
+      typeof fromPartial?.timezone === "string" &&
+      fromPartial.timezone.trim()
+    ) {
+      merged.timezone = fromPartial.timezone.trim()
+    }
+    if (typeof fromPartial?.attachFiles === "boolean") {
+      merged.attachFiles = fromPartial.attachFiles
+    }
+    base.scheduledLogExport = merged
   }
   if (partial.lastWeeklyExportAt !== undefined) {
     base.lastWeeklyExportAt = partial.lastWeeklyExportAt
@@ -468,6 +659,65 @@ export function mergeMonitoringSettings(
       base.notifications.loginBruteForceThreshold = Math.floor(
         partial.notifications.loginBruteForceThreshold
       )
+    }
+    if (
+      typeof partial.notifications.recoveryLowStockThreshold === "number" &&
+      partial.notifications.recoveryLowStockThreshold >= 1 &&
+      partial.notifications.recoveryLowStockThreshold <= 50
+    ) {
+      base.notifications.recoveryLowStockThreshold = Math.floor(
+        partial.notifications.recoveryLowStockThreshold
+      )
+    }
+    if (Array.isArray(partial.notifications.alertEmails)) {
+      base.notifications.alertEmails = partial.notifications.alertEmails
+        .map((e) => String(e || "").trim().toLowerCase())
+        .filter((e) => e.includes("@"))
+        .slice(0, 20)
+    }
+    if (Array.isArray(partial.notifications.channels)) {
+      base.notifications.channels = partial.notifications.channels
+        .filter((ch) => ch && typeof ch === "object")
+        .slice(0, 12)
+        .map((ch, i) => {
+          const kind = String(ch.kind || "").toLowerCase()
+          const k: NotificationChannelKind =
+            kind === "telegram" || kind === "slack" || kind === "webhook"
+              ? kind
+              : "email"
+          const id =
+            typeof ch.id === "string" && ch.id.trim()
+              ? ch.id.trim().slice(0, 64)
+              : `ch_${k}_${i}_${Date.now().toString(36)}`
+          const emails = Array.isArray(ch.emails)
+            ? ch.emails
+                .map((e) => String(e || "").trim().toLowerCase())
+                .filter((e) => e.includes("@"))
+                .slice(0, 20)
+            : undefined
+          return {
+            id,
+            kind: k,
+            enabled: ch.enabled !== false,
+            label:
+              typeof ch.label === "string"
+                ? ch.label.trim().slice(0, 80)
+                : undefined,
+            emails,
+            botToken:
+              typeof ch.botToken === "string"
+                ? ch.botToken.trim().slice(0, 200)
+                : undefined,
+            chatId:
+              typeof ch.chatId === "string"
+                ? ch.chatId.trim().slice(0, 80)
+                : undefined,
+            webhookUrl:
+              typeof ch.webhookUrl === "string"
+                ? ch.webhookUrl.trim().slice(0, 500)
+                : undefined
+          } satisfies OrgNotificationChannel
+        })
     }
   }
   if (partial.licenseDisplay && typeof partial.licenseDisplay === "object") {
@@ -742,6 +992,11 @@ export interface AdminSession {
   createdAt: number
   /** Dernière activité API (heartbeat) — idle serveur */
   lastActivityAt: number
+  /**
+   * Session concurrente en lecture seule (si une session pleine est déjà active).
+   * Interdit les mutations (POST/PUT/PATCH/DELETE hors logout).
+   */
+  readOnly?: boolean
 }
 
 /** Utilisateur logique (pré-LDAP) — lié à des groupes */
@@ -1027,6 +1282,40 @@ export type AdminAuditAction =
   | "login_brute_force"
   | "account_locked"
   | "account_unlocked"
+  | "inbox_reply"
+  | "inbox_close"
+  | "inbox_read"
+
+/** Message utilisateur → admin (inbox type Kaspersky) */
+export type InboxMessageStatus = "open" | "read" | "replied" | "closed"
+export type InboxMessageCategory =
+  | "question"
+  | "exception"
+  | "block_appeal"
+  | "other"
+
+export interface UserInboxMessage {
+  id: string
+  orgId: string
+  agentId: string
+  deviceLabel: string
+  hostName?: string | null
+  category: InboxMessageCategory
+  subject: string
+  body: string
+  contextUrl?: string | null
+  contextHostname?: string | null
+  status: InboxMessageStatus
+  createdAt: string
+  readAt?: string | null
+  repliedAt?: string | null
+  closedAt?: string | null
+  adminReply?: string | null
+  repliedByAdminId?: string | null
+  repliedByAdminLabel?: string | null
+  /** Agent a vu / acquitté la réponse admin (popup OK) */
+  userAckedAt?: string | null
+}
 
 export interface AdminAuditEvent {
   id: string
@@ -1038,15 +1327,23 @@ export interface AdminAuditEvent {
   detail?: string
   meta?: Record<string, unknown>
   createdAt: string
+  /** WORM : numéro de séquence monotony par org */
+  seq?: number
+  /** WORM : SHA-256 de l’entrée */
+  entryHash?: string
+  /** WORM : hash de l’entrée précédente (GENESIS pour la 1ʳᵉ) */
+  prevHash?: string
 }
 
 /**
  * Règle d'affectation automatique d'agents (inspiré Kaspersky « moving rules »).
  * Ex. : device_label starts_with "FIN" → groupe Finance (+ policy du groupe).
- * Plusieurs conditions = AND (toutes doivent matcher). Priorité plus petite = d'abord.
+ * Plusieurs conditions : AND (défaut) ou OR. Priorité plus petite = d'abord.
  */
 export type MovingMatchField = "device_label" | "host_name"
 export type MovingMatchOp = "starts_with" | "contains" | "equals" | "regex"
+/** Combinaison des conditions multi */
+export type MovingConditionLogic = "and" | "or"
 
 export interface MovingCondition {
   field: MovingMatchField
@@ -1059,8 +1356,10 @@ export interface MovingRule {
   orgId: string
   name: string
   enabled: boolean
-  /** Conditions AND — au moins une. Champs legacy ci-dessous = 1ère condition. */
+  /** Conditions multi — au moins une. */
   conditions: MovingCondition[]
+  /** and = toutes (défaut V1.x) · or = au moins une */
+  conditionLogic: MovingConditionLogic
   /** @deprecated use conditions[0] */
   matchField: MovingMatchField
   /** @deprecated use conditions[0] */
@@ -1071,8 +1370,13 @@ export interface MovingRule {
   targetGroupId: string
   /** Priorité : plus petit = évalué en premier (style firewall) */
   priority: number
-  /** true = n'applique que si l'agent n'a pas encore de profil/groupe (défaut) */
+  /** true = n'applique que si l'agent n'a pas encore de groupe (défaut) */
   onlyIfUnassigned: boolean
+  /**
+   * true = permanent : s’applique même si l’agent a déjà un groupe
+   * (écrase onlyIfUnassigned). Utile pour règles prioritaires.
+   */
+  permanent: boolean
   createdAt: string
   updatedAt: string
 }

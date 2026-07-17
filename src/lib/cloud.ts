@@ -411,6 +411,176 @@ export async function reportEvents(
   }
 }
 
+/** Envoyer un message à l’admin org (inbox) */
+export async function sendAdminMessage(input: {
+  subject: string
+  body: string
+  category?: "question" | "exception" | "block_appeal" | "other"
+  contextUrl?: string
+  contextHostname?: string
+}): Promise<{ ok: true; id: string } | { ok: false; error: string }> {
+  const settings = await getSettings()
+  if (!settings.agentToken || !settings.apiBaseUrl) {
+    return { ok: false, error: "not_enrolled" }
+  }
+  try {
+    const res = await fetch(
+      apiUrl(settings.apiBaseUrl, "/v1/agents/me/messages"),
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${settings.agentToken}`,
+          "content-type": "application/json",
+          accept: "application/json"
+        },
+        body: JSON.stringify({
+          subject: input.subject,
+          body: input.body,
+          category: input.category || "question",
+          context_url: input.contextUrl,
+          context_hostname: input.contextHostname
+        })
+      }
+    )
+    const data = (await res.json().catch(() => ({}))) as {
+      error?: string
+      message?: string | { id?: string }
+      ok?: boolean
+    }
+    if (!res.ok) {
+      const human =
+        typeof data.message === "string" ? data.message : undefined
+      return {
+        ok: false,
+        error: human || data.error || `http_${res.status}`
+      }
+    }
+    const id =
+      typeof data.message === "object" && data.message?.id
+        ? data.message.id
+        : "ok"
+    return { ok: true, id }
+  } catch (e) {
+    return { ok: false, error: String(e) }
+  }
+}
+
+export type AgentInboxMessage = {
+  id: string
+  subject: string
+  body: string
+  status: string
+  category: string
+  created_at: string
+  admin_reply?: string | null
+  replied_at?: string | null
+  replied_by_admin_label?: string | null
+  user_acked_at?: string | null
+  needs_user_ack?: boolean
+}
+
+/** Lister les messages de cet agent (+ réponses admin) */
+export async function listMyAdminMessages(limit = 10): Promise<{
+  ok: boolean
+  messages: AgentInboxMessage[]
+  pending_ack?: number
+  error?: string
+}> {
+  const settings = await getSettings()
+  if (!settings.agentToken || !settings.apiBaseUrl) {
+    return { ok: false, messages: [], error: "not_enrolled" }
+  }
+  try {
+    const res = await fetch(
+      apiUrl(
+        settings.apiBaseUrl,
+        `/v1/agents/me/messages?limit=${Math.min(50, limit)}`
+      ),
+      {
+        headers: {
+          Authorization: `Bearer ${settings.agentToken}`,
+          accept: "application/json"
+        }
+      }
+    )
+    if (!res.ok) {
+      return { ok: false, messages: [], error: `http_${res.status}` }
+    }
+    const data = (await res.json()) as {
+      messages?: AgentInboxMessage[]
+      pending_ack?: number
+    }
+    return {
+      ok: true,
+      messages: data.messages || [],
+      pending_ack: data.pending_ack || 0
+    }
+  } catch (e) {
+    return { ok: false, messages: [], error: String(e) }
+  }
+}
+
+/** Réponses admin non acquittées (popup bloquant) */
+export async function listPendingAdminReplies(): Promise<{
+  ok: boolean
+  messages: AgentInboxMessage[]
+  error?: string
+}> {
+  const settings = await getSettings()
+  if (!settings.agentToken || !settings.apiBaseUrl) {
+    return { ok: false, messages: [], error: "not_enrolled" }
+  }
+  try {
+    const res = await fetch(
+      apiUrl(settings.apiBaseUrl, "/v1/agents/me/messages?pending_ack=1"),
+      {
+        headers: {
+          Authorization: `Bearer ${settings.agentToken}`,
+          accept: "application/json"
+        }
+      }
+    )
+    if (!res.ok) {
+      return { ok: false, messages: [], error: `http_${res.status}` }
+    }
+    const data = (await res.json()) as { messages?: AgentInboxMessage[] }
+    return { ok: true, messages: data.messages || [] }
+  } catch (e) {
+    return { ok: false, messages: [], error: String(e) }
+  }
+}
+
+/** Acquitter une réponse admin (OK sur le popup) */
+export async function ackAdminReply(
+  messageId: string
+): Promise<{ ok: boolean; error?: string }> {
+  const settings = await getSettings()
+  if (!settings.agentToken || !settings.apiBaseUrl) {
+    return { ok: false, error: "not_enrolled" }
+  }
+  try {
+    const res = await fetch(
+      apiUrl(
+        settings.apiBaseUrl,
+        `/v1/agents/me/messages/${encodeURIComponent(messageId)}/ack`
+      ),
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${settings.agentToken}`,
+          accept: "application/json"
+        }
+      }
+    )
+    if (!res.ok) {
+      return { ok: false, error: `http_${res.status}` }
+    }
+    return { ok: true }
+  } catch (e) {
+    return { ok: false, error: String(e) }
+  }
+}
+
 /** Flush file d'attente events (auto-sync / alarm) */
 export async function flushEventQueue(
   settingsOverride?: OpsGateSettings

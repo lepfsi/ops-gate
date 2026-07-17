@@ -535,6 +535,134 @@ export function createApp() {
     })
   })
 
+  function serializeInboxMessage(m: import("./types").UserInboxMessage) {
+    return {
+      id: m.id,
+      org_id: m.orgId,
+      agent_id: m.agentId,
+      device_label: m.deviceLabel,
+      host_name: m.hostName ?? null,
+      category: m.category,
+      subject: m.subject,
+      body: m.body,
+      context_url: m.contextUrl ?? null,
+      context_hostname: m.contextHostname ?? null,
+      status: m.status,
+      created_at: m.createdAt,
+      read_at: m.readAt ?? null,
+      replied_at: m.repliedAt ?? null,
+      closed_at: m.closedAt ?? null,
+      admin_reply: m.adminReply ?? null,
+      replied_by_admin_id: m.repliedByAdminId ?? null,
+      replied_by_admin_label: m.repliedByAdminLabel ?? null,
+      user_acked_at: m.userAckedAt ?? null,
+      needs_user_ack: !!(m.adminReply && !m.userAckedAt)
+    }
+  }
+
+  /** Agent : envoyer un message à l’admin org (inbox) */
+  v1.post("/agents/me/messages", async (c) => {
+    const orgId = c.get("orgId")
+    const agentId = c.get("agentId")
+    const agents = await store.listAgents(orgId)
+    const agent = agents.find((a) => a.id === agentId)
+    let body: {
+      subject?: string
+      body?: string
+      category?: string
+      context_url?: string
+      context_hostname?: string
+    }
+    try {
+      body = await c.req.json()
+    } catch {
+      return c.json({ error: "invalid_json" }, 400)
+    }
+    const catRaw = (body.category || "question").trim()
+    const category = (
+      ["question", "exception", "block_appeal", "other"].includes(catRaw)
+        ? catRaw
+        : "question"
+    ) as import("./types").InboxMessageCategory
+    const result = await store.createInboxMessage({
+      orgId,
+      agentId,
+      deviceLabel: agent?.deviceLabel,
+      hostName: agent?.hostName,
+      category,
+      subject: body.subject || "",
+      body: body.body || "",
+      contextUrl: body.context_url,
+      contextHostname: body.context_hostname
+    })
+    if (!result.ok) {
+      const status =
+        result.error === "rate_limited"
+          ? 429
+          : result.error === "subject_too_short" ||
+              result.error === "body_too_short"
+            ? 400
+            : 400
+      return c.json(
+        {
+          error: result.error,
+          message:
+            result.error === "rate_limited"
+              ? "Trop de messages (max 15 / 24 h). Réessayez plus tard."
+              : result.error === "subject_too_short"
+                ? "Objet trop court (min. 3 caractères)."
+                : result.error === "body_too_short"
+                  ? "Message trop court (min. 5 caractères)."
+                  : result.error
+        },
+        status
+      )
+    }
+    return c.json(
+      { ok: true, message: serializeInboxMessage(result.message) },
+      201
+    )
+  })
+
+  /** Agent : lister ses messages (+ réponses admin) */
+  v1.get("/agents/me/messages", async (c) => {
+    const orgId = c.get("orgId")
+    const agentId = c.get("agentId")
+    const pendingOnly = c.req.query("pending_ack") === "1"
+    if (pendingOnly) {
+      const pending = await store.listPendingAdminReplies(orgId, agentId)
+      return c.json({
+        messages: pending.map(serializeInboxMessage),
+        pending_ack: pending.length
+      })
+    }
+    const limit = Math.min(
+      50,
+      Math.max(1, Number(c.req.query("limit") || 20) || 20)
+    )
+    const messages = await store.listInboxMessages(orgId, {
+      agentId,
+      limit
+    })
+    const pending = await store.listPendingAdminReplies(orgId, agentId)
+    return c.json({
+      messages: messages.map(serializeInboxMessage),
+      pending_ack: pending.length
+    })
+  })
+
+  /** Agent : acquitter la réponse admin (ferme le popup) */
+  v1.post("/agents/me/messages/:id/ack", async (c) => {
+    const orgId = c.get("orgId")
+    const agentId = c.get("agentId")
+    const id = c.req.param("id")
+    const msg = await store.ackInboxMessage(orgId, id, agentId)
+    if (!msg || msg.agentId !== agentId) {
+      return c.json({ error: "not_found" }, 404)
+    }
+    return c.json({ ok: true, message: serializeInboxMessage(msg) })
+  })
+
   v1.post("/events/batch", async (c) => {
     const header = c.req.header("Authorization") || ""
     const match = header.match(/^Bearer\s+(.+)$/i)
@@ -823,11 +951,15 @@ export function createApp() {
   /** Auth session Bearer ogs_… (console) */
   async function requireConsoleAuth(
     c: {
-      req: { header: (n: string) => string | undefined }
+      req: {
+        header: (n: string) => string | undefined
+        method?: string
+        path?: string
+      }
     },
     perm?: AdminPermission
   ): Promise<
-    | { ok: true; admin: OrgAdmin; orgId: string }
+    | { ok: true; admin: OrgAdmin; orgId: string; readOnly: boolean }
     | { ok: false; status: 401 | 403; error: string }
   > {
     const header = c.req.header("Authorization") || ""
@@ -843,19 +975,53 @@ export function createApp() {
         ? await store.getPrincipalAdmin(org.id)
         : undefined
       if (principal && org) {
-        return { ok: true, admin: principal, orgId: org.id }
+        return { ok: true, admin: principal, orgId: org.id, readOnly: false }
       }
     }
     if (!match) return { ok: false, status: 401, error: "unauthorized" }
     const resolved = await store.resolveAdminSession(match[1].trim())
     if (!resolved) return { ok: false, status: 401, error: "session_invalid" }
+    const readOnly = !!resolved.session.readOnly
+    if (readOnly) {
+      const method = String(
+        c.req.method ||
+          (c as { req?: { method?: string } }).req?.method ||
+          ""
+      ).toUpperCase()
+      const path = String(
+        c.req.path || (c as { req?: { path?: string } }).req?.path || ""
+      )
+      const allowedMut =
+        path.includes("/auth/logout") ||
+        path.includes("/auth/session/challenge")
+      // Si method connue et mutante → bloquer (sauf logout / challenge)
+      if (
+        method &&
+        method !== "GET" &&
+        method !== "HEAD" &&
+        method !== "OPTIONS" &&
+        !allowedMut
+      ) {
+        return { ok: false, status: 403, error: "read_only_session" }
+      }
+    }
     if (perm && !adminHas(resolved.admin, perm)) {
       return { ok: false, status: 403, error: "forbidden_permission" }
+    }
+    // Lecture seule : droits d’écriture bloqués même si principal
+    if (
+      readOnly &&
+      perm &&
+      perm !== "console_access" &&
+      perm !== "email_password_reset"
+    ) {
+      return { ok: false, status: 403, error: "read_only_session" }
     }
     return {
       ok: true,
       admin: resolved.admin,
-      orgId: resolved.session.orgId
+      orgId: resolved.session.orgId,
+      readOnly
     }
   }
 
@@ -901,6 +1067,8 @@ export function createApp() {
       email?: string
       password?: string
       force?: boolean
+      /** Session concurrente lecture seule (sans kick de la session ouverte) */
+      read_only?: boolean
       totp_code?: string
       org_id?: string
       org_code?: string
@@ -932,7 +1100,9 @@ export function createApp() {
       /* ignore */
     }
     const result = await store.createAdminSession(body.email, body.password, {
+      // force legacy encore accepté (claim challenge utilise issueAdminSessionDirect)
       force: !!body.force,
+      readOnly: !!body.read_only,
       totpCode: body.totp_code,
       orgId: body.org_id?.trim(),
       orgCode: body.org_code?.trim()
@@ -965,6 +1135,41 @@ export function createApp() {
             message: "Code MFA invalide ou expiré."
           },
           401
+        )
+      }
+      if (result.error === "session_already_active") {
+        // Challenge consentement (10 s) plutôt que force brute
+        const {
+          createSessionChallenge,
+          publicChallengeView,
+          SESSION_CHALLENGE_TIMEOUT_SEC
+        } = await import("./session-challenge")
+        if (result.orgId && result.adminId) {
+          const ch = createSessionChallenge({
+            orgId: result.orgId,
+            adminId: result.adminId,
+            adminEmail: result.adminEmail || emailKey,
+            requesterHint: ip
+          })
+          return c.json(
+            {
+              error: "session_challenge_required",
+              challenge_id: ch.id,
+              expires_in: SESSION_CHALLENGE_TIMEOUT_SEC,
+              challenge: publicChallengeView(ch),
+              message:
+                "Une session est déjà ouverte. La session active doit accepter, ou vous serez connecté après 10 s (ou en lecture seule)."
+            },
+            409
+          )
+        }
+        return c.json(
+          {
+            error: "session_already_active",
+            message:
+              "Une session est déjà active. Réessayez ou connectez-vous en lecture seule."
+          },
+          409
         )
       }
       if (result.error === "invalid_credentials") {
@@ -1001,6 +1206,27 @@ export function createApp() {
                   action: "account_locked",
                   detail: `Compte verrouillé après ${rec.count} échecs (seuil ${thr})`
                 })
+              }
+              // Alertes multi-canaux si le client a activé l’événement
+              if (mon.notifications?.accountLockoutEmail === true) {
+                try {
+                  const { dispatchOrgAlert } = await import("./notify-channels")
+                  void dispatchOrgAlert({
+                    notif: mon.notifications,
+                    smtp: mon.smtp || null,
+                    payload: {
+                      title: "Compte admin verrouillé",
+                      text: `Le compte ${hit.email} (${hit.label}) a été verrouillé après ${rec.count} échecs (seuil ${thr}).`,
+                      orgName: org?.name,
+                      orgCode: org?.orgCode
+                    }
+                  })
+                } catch (e) {
+                  console.warn(
+                    "[alerts] lockout notify failed:",
+                    e instanceof Error ? e.message : e
+                  )
+                }
               }
               return c.json(
                 {
@@ -1061,18 +1287,7 @@ export function createApp() {
           403
         )
       }
-      const status = result.error === "session_already_active" ? 409 : 401
-      return c.json(
-        {
-          error: result.error,
-          can_force: result.error === "session_already_active",
-          message:
-            result.error === "session_already_active"
-              ? "Ce compte a déjà une session active (autre navigateur / onglet). Utilisez « Forcer la déconnexion » pour prendre la main, ou attendez l’idle serveur (~10 min sans activité API)."
-              : undefined
-        },
-        status
-      )
+      return c.json({ error: result.error }, 401)
     }
     await audit(
       {
@@ -1080,9 +1295,11 @@ export function createApp() {
         orgId: result.session.orgId
       },
       "login",
-      result.forced
-        ? "Connexion console (prise de contrôle - session précédente révoquée)"
-        : "Connexion console"
+      result.session.readOnly
+        ? "Connexion console (lecture seule)"
+        : result.forced
+          ? "Connexion console (session précédente révoquée)"
+          : "Connexion console"
     )
     return c.json({
       ok: true,
@@ -1090,13 +1307,149 @@ export function createApp() {
       expires_at: result.session.expiresAt,
       admin: publicAdminView(result.admin),
       forced: !!result.forced,
+      read_only: !!result.session.readOnly,
       mfa_enabled: !!result.admin.totpEnabled,
       hint:
         result.admin.mustChangePassword
           ? "Changez le mot de passe par défaut (0000) dès que possible."
-          : result.forced
-            ? "L’autre session a été déconnectée."
-            : undefined
+          : result.session.readOnly
+            ? "Session lecture seule : consultation uniquement (l’autre session reste active)."
+            : result.forced
+              ? "L’autre session a été déconnectée."
+              : undefined
+    })
+  })
+
+  /**
+   * Poll statut d’un challenge de session (écran login, sans auth).
+   * GET /v1/auth/challenge/:id
+   */
+  v1.get("/auth/challenge/:id", async (c) => {
+    const { getSessionChallenge, publicChallengeView } = await import(
+      "./session-challenge"
+    )
+    const ch = getSessionChallenge(c.req.param("id"))
+    if (!ch) return c.json({ error: "challenge_not_found" }, 404)
+    return c.json({ ok: true, challenge: publicChallengeView(ch) })
+  })
+
+  /**
+   * Claim après acceptation / timeout → émet la session full (kick l’ancienne).
+   * POST /v1/auth/challenge/:id/claim
+   */
+  v1.post("/auth/challenge/:id/claim", async (c) => {
+    const {
+      getSessionChallenge,
+      markChallengeClaimed,
+      publicChallengeView
+    } = await import("./session-challenge")
+    const ch = getSessionChallenge(c.req.param("id"))
+    if (!ch) return c.json({ error: "challenge_not_found" }, 404)
+    if (ch.status === "refused") {
+      return c.json(
+        {
+          error: "challenge_refused",
+          message: "La session ouverte a refusé la prise de contrôle."
+        },
+        403
+      )
+    }
+    if (ch.status === "pending") {
+      return c.json(
+        {
+          error: "challenge_pending",
+          challenge: publicChallengeView(ch),
+          message: "En attente de la session ouverte…"
+        },
+        409
+      )
+    }
+    if (ch.status === "claimed" || ch.status === "expired") {
+      return c.json({ error: "challenge_expired" }, 410)
+    }
+    // accepted | timeout
+    const issued = await store.issueAdminSessionDirect({
+      orgId: ch.orgId,
+      adminId: ch.adminId,
+      force: true,
+      readOnly: false
+    })
+    if (!issued.ok) {
+      return c.json({ error: issued.error }, 400)
+    }
+    markChallengeClaimed(ch.id)
+    await audit(
+      { admin: issued.admin, orgId: issued.session.orgId },
+      "login",
+      ch.status === "timeout"
+        ? "Connexion après timeout challenge (10 s sans réponse)"
+        : "Connexion après acceptation de la session ouverte"
+    )
+    return c.json({
+      ok: true,
+      token: issued.session.token,
+      expires_at: issued.session.expiresAt,
+      admin: publicAdminView(issued.admin),
+      forced: true,
+      read_only: false,
+      hint:
+        ch.status === "timeout"
+          ? "Session ouverte déconnectée (aucune réponse en 10 s)."
+          : "Session ouverte a accepté — vous prenez le contrôle."
+    })
+  })
+
+  /**
+   * Session ouverte : challenge en attente (poll).
+   * GET /v1/auth/session/pending-challenge
+   */
+  v1.get("/auth/session/pending-challenge", async (c) => {
+    const gate = await requireConsoleAuth(c, "console_access")
+    if (!gate.ok) return c.json({ error: gate.error }, gate.status)
+    const {
+      getPendingChallengeForAdmin,
+      publicChallengeView
+    } = await import("./session-challenge")
+    const ch = getPendingChallengeForAdmin(gate.admin.id)
+    if (!ch) return c.json({ ok: true, challenge: null })
+    return c.json({ ok: true, challenge: publicChallengeView(ch) })
+  })
+
+  /**
+   * Session ouverte : accepter ou refuser le challenge.
+   * POST /v1/auth/session/challenge/:id/respond { action: accept|refuse }
+   */
+  v1.post("/auth/session/challenge/:id/respond", async (c) => {
+    const gate = await requireConsoleAuth(c, "console_access")
+    if (!gate.ok) return c.json({ error: gate.error }, gate.status)
+    let body: { action?: string }
+    try {
+      body = await c.req.json()
+    } catch {
+      return c.json({ error: "invalid_json" }, 400)
+    }
+    const action =
+      body.action === "refuse" ? "refuse" : body.action === "accept" ? "accept" : null
+    if (!action) return c.json({ error: "action_required" }, 400)
+    const { respondSessionChallenge, publicChallengeView } = await import(
+      "./session-challenge"
+    )
+    const r = respondSessionChallenge(
+      c.req.param("id"),
+      action,
+      gate.admin.id
+    )
+    if (!r.ok) return c.json({ error: r.error }, 400)
+    // Si accept : la session reste jusqu’au claim (qui kick)
+    // Si refuse : le demandeur ne peut pas claim
+    if (action === "accept") {
+      // Optionnel : se déconnecter immédiatement côté UI ; le claim fera le revoke
+    }
+    return c.json({
+      ok: true,
+      challenge: publicChallengeView(r.challenge),
+      /** UI session ouverte : se déconnecter si accept/timeout */
+      should_logout: action === "accept" || r.challenge.status === "timeout"
     })
   })
 
@@ -1159,10 +1512,21 @@ export function createApp() {
     return c.json({ ok: true, mfa_enabled: true })
   })
 
-  /** MFA TOTP — désactiver (mot de passe + code) */
+  /** MFA TOTP — désactiver (mot de passe + code). Interdit si multi-tenant. */
   v1.post("/org/admins/me/mfa/disable", async (c) => {
     const gate = await requireConsoleAuth(c, "console_access")
     if (!gate.ok) return c.json({ error: gate.error }, gate.status)
+    const accessible = await store.listAccessibleOrgsForEmail(gate.admin.email)
+    if (accessible.length > 1) {
+      return c.json(
+        {
+          error: "mfa_required_multi_org",
+          message:
+            "Les comptes multi-tenant ne peuvent pas désactiver le MFA. Il protège le basculement entre organisations."
+        },
+        403
+      )
+    }
     let body: { password?: string; code?: string }
     try {
       body = await c.req.json()
@@ -1921,6 +2285,39 @@ export function createApp() {
     const auth = await requireConsoleAuth(c, "console_access")
     if (!auth.ok) return c.json({ error: auth.error }, auth.status)
     const org = await store.getOrg(auth.orgId)
+    // Strict : uniquement les orgs où CET email a un compte admin console
+    let accessible = await store.listAccessibleOrgsForEmail(auth.admin.email)
+    // Garantir que l’org courante est présente si accessible
+    if (
+      org &&
+      !org.isPersonal &&
+      !accessible.some((o) => o.org_id === auth.orgId)
+    ) {
+      // Session valide sur cette org mais email non listé (edge) → org seule
+      accessible = [
+        {
+          org_id: org.id,
+          org_code: org.orgCode || org.id,
+          name: org.name || org.id,
+          is_principal: !!auth.admin.isPrincipal,
+          admin_id: auth.admin.id
+        }
+      ]
+    }
+    // Mono-tenant : forcer une seule entrée (l’org de session) pour l’UI
+    if (accessible.length <= 1) {
+      accessible = org
+        ? [
+            {
+              org_id: org.id,
+              org_code: org.orgCode || org.id,
+              name: org.name || org.id,
+              is_principal: !!auth.admin.isPrincipal,
+              admin_id: auth.admin.id
+            }
+          ]
+        : accessible
+    }
     return c.json({
       ok: true,
       admin: publicAdminView(auth.admin),
@@ -1931,7 +2328,177 @@ export function createApp() {
             org_code: org.orgCode,
             primary_email: org.primaryEmail
           }
-        : null
+        : null,
+      accessible_orgs: accessible.map((o) => ({
+        org_id: o.org_id,
+        org_code: o.org_code,
+        name: o.name,
+        is_principal: o.is_principal,
+        current: o.org_id === auth.orgId
+      })),
+      multi_org: accessible.length > 1,
+      /** Multi-tenant sans MFA → la console force la config Authenticator */
+      mfa_required_multi_org:
+        accessible.length > 1 && !auth.admin.totpEnabled,
+      mfa_enabled: !!auth.admin.totpEnabled,
+      read_only: !!auth.readOnly
+    })
+  })
+
+  /** Liste des tenants accessibles (même email admin) — MSP */
+  v1.get("/auth/accessible-orgs", async (c) => {
+    const auth = await requireConsoleAuth(c, "console_access")
+    if (!auth.ok) return c.json({ error: auth.error }, auth.status)
+    let list = await store.listAccessibleOrgsForEmail(auth.admin.email)
+    // Mono-tenant : renvoyer uniquement l’org de session
+    if (list.length <= 1) {
+      const org = await store.getOrg(auth.orgId)
+      list = org
+        ? [
+            {
+              org_id: org.id,
+              org_code: org.orgCode || org.id,
+              name: org.name || org.id,
+              is_principal: !!auth.admin.isPrincipal,
+              admin_id: auth.admin.id
+            }
+          ]
+        : list
+    }
+    return c.json({
+      org_id: auth.orgId,
+      multi_org: list.length > 1,
+      orgs: list.map((o) => ({
+        org_id: o.org_id,
+        org_code: o.org_code,
+        name: o.name,
+        is_principal: o.is_principal,
+        current: o.org_id === auth.orgId
+      }))
+    })
+  })
+
+  /**
+   * Bascule de tenant (session déjà auth, même email).
+   * Multi-tenant : MFA obligatoire (setup + code 6 chiffres à chaque bascule).
+   * body: { org_id, force?, totp_code? }
+   */
+  v1.post("/auth/switch-org", async (c) => {
+    const header = c.req.header("Authorization") || ""
+    const match = header.match(/^Bearer\s+(.+)$/i)
+    if (!match) return c.json({ error: "unauthorized" }, 401)
+    const token = match[1].trim()
+    const gate = await requireConsoleAuth(c, "console_access")
+    if (!gate.ok) return c.json({ error: gate.error }, gate.status)
+    let body: { org_id?: string; force?: boolean; totp_code?: string }
+    try {
+      body = await c.req.json()
+    } catch {
+      return c.json({ error: "invalid_json" }, 400)
+    }
+    const target = (body.org_id || "").trim()
+    if (!target) return c.json({ error: "org_id_required" }, 400)
+
+    const accessible = await store.listAccessibleOrgsForEmail(gate.admin.email)
+    const multiOrg = accessible.length > 1
+    // Changement réel de tenant + multi-org → MFA obligatoire
+    if (multiOrg && target !== gate.orgId) {
+      if (!gate.admin.totpEnabled || !gate.admin.totpSecret) {
+        return c.json(
+          {
+            error: "mfa_setup_required_multi_org",
+            message:
+              "Les comptes multi-tenant doivent activer le MFA (Authenticator) avant de changer d’organisation. Paramètres → Général → MFA."
+          },
+          403
+        )
+      }
+      const code = (body.totp_code || "").trim()
+      if (!code) {
+        return c.json(
+          {
+            error: "mfa_required",
+            message:
+              "Saisissez le code à 6 chiffres de votre application Authenticator pour basculer d’organisation."
+          },
+          401
+        )
+      }
+      const { verifyTotp } = await import("./totp")
+      if (!verifyTotp(gate.admin.totpSecret, code)) {
+        return c.json(
+          {
+            error: "mfa_invalid",
+            message: "Code MFA invalide ou expiré."
+          },
+          401
+        )
+      }
+    }
+
+    const result = await store.switchAdminOrg({
+      currentToken: token,
+      targetOrgId: target,
+      force: body.force !== false
+    })
+    if (!result.ok) {
+      const status =
+        result.error === "session_invalid"
+          ? 401
+          : result.error === "org_not_accessible"
+            ? 403
+            : result.error === "account_locked"
+              ? 403
+              : result.error === "session_already_active"
+                ? 409
+                : 400
+      return c.json(
+        {
+          error: result.error,
+          can_force: result.error === "session_already_active",
+          message:
+            result.error === "org_not_accessible"
+              ? "Cette organisation n’est pas accessible avec votre compte."
+              : result.error === "account_locked"
+                ? "Compte verrouillé sur cette organisation."
+                : undefined
+        },
+        status
+      )
+    }
+    const org = await store.getOrg(result.session.orgId)
+    await store.appendAdminAudit({
+      orgId: result.session.orgId,
+      adminId: result.admin.id,
+      adminEmail: result.admin.email,
+      adminLabel: result.admin.label,
+      action: "login",
+      detail: `Bascule multi-tenant → ${org?.orgCode || result.session.orgId}`
+    })
+    const accessibleAfter = await store.listAccessibleOrgsForEmail(
+      result.admin.email
+    )
+    return c.json({
+      ok: true,
+      token: result.session.token,
+      expires_at: result.session.expiresAt,
+      admin: publicAdminView(result.admin),
+      org: org
+        ? {
+            id: org.id,
+            name: org.name,
+            org_code: org.orgCode,
+            primary_email: org.primaryEmail
+          }
+        : null,
+      multi_org: accessibleAfter.length > 1,
+      accessible_orgs: accessibleAfter.map((o) => ({
+        org_id: o.org_id,
+        org_code: o.org_code,
+        name: o.name,
+        is_principal: o.is_principal,
+        current: o.org_id === result.session.orgId
+      }))
     })
   })
 
@@ -2083,50 +2650,8 @@ export function createApp() {
   })
 
   async function ensureWeeklyExportIfDue(orgId: string) {
-    const org = await store.getOrg(orgId)
-    if (!org) return
-    const { mergeMonitoringSettings } = await import("./types")
-    const mon = mergeMonitoringSettings(org.monitoring)
-    if (!mon.weeklyExportEnabled) return
-    const {
-      previousIsoWeekRange,
-      filterEventsRange,
-      eventsToCsv
-    } = await import("./events-export")
-    const { from, to, weekKey } = previousIsoWeekRange()
-    const last = mon.lastWeeklyExportAt
-      ? Date.parse(mon.lastWeeklyExportAt)
-      : 0
-    // Une archive max par semaine ISO (clé dans lastWeeklyExportAt weekKey)
-    if (last && mon.lastWeeklyExportAt?.includes(weekKey)) return
-    // Ne générer que si on est au-delà de la fin de la semaine précédente
-    if (Date.now() < to.getTime()) return
-    const all = await store.listEvents(orgId, 5000)
-    const slice = filterEventsRange(all, from.getTime(), to.getTime())
-    if (slice.length === 0) {
-      await store.updateOrgMonitoring(orgId, {
-        lastWeeklyExportAt: `${weekKey}:${new Date().toISOString()}`
-      })
-      return
-    }
-    const content = eventsToCsv(slice)
-    const filename = `opsgate-events-${weekKey}.csv`
-    const expires = new Date(
-      Date.now() + Math.max(mon.logRetentionDays, 30) * 86400000
-    ).toISOString()
-    await store.saveLogExport(orgId, {
-      kind: "week",
-      format: "csv",
-      filename,
-      content,
-      eventCount: slice.length,
-      fromTs: from.toISOString(),
-      toTs: to.toISOString(),
-      expiresAt: expires
-    })
-    await store.updateOrgMonitoring(orgId, {
-      lastWeeklyExportAt: `${weekKey}:${new Date().toISOString()}`
-    })
+    const { runWeeklyExportForOrg } = await import("./exports-cron")
+    await runWeeklyExportForOrg(store, orgId)
   }
 
   /** Paramètres monitoring (seuils offline + schedule) */
@@ -3202,37 +3727,86 @@ export function createApp() {
   }):
     | { ok: true }
     | { ok: false; status: 401 | 403 | 503; error: string } {
-    const secret = (
+    const current = (
       process.env.OPSGATE_VENDOR_LICENSE_SECRET ||
       process.env.OPSGATE_LICENSE_SECRET ||
       ""
     ).trim()
-    if (secret.length < 12) {
+    const previous = (
+      process.env.OPSGATE_VENDOR_LICENSE_SECRET_PREVIOUS ||
+      process.env.OPSGATE_LICENSE_SECRET_PREVIOUS ||
+      ""
+    ).trim()
+    if (current.length < 12) {
       return {
         ok: false,
         status: 503,
-        error: "vendor_secret_not_configured",
+        error: "vendor_secret_not_configured"
       }
     }
     const vendorKey = (c.req.header("X-OpsGate-Vendor-Key") || "").trim()
-    if (!vendorKey || vendorKey !== secret) {
+    const okKey =
+      !!vendorKey &&
+      (vendorKey === current ||
+        (previous.length >= 12 && vendorKey === previous))
+    if (!okKey) {
       return { ok: false, status: 401, error: "vendor_key_required" }
     }
     return { ok: true }
   }
 
+  // ── Billing Stripe (V2.1 fondations) ─────────────────────────
+  v1.get("/billing/status", async (c) => {
+    const { billingPublicStatus } = await import("./billing-stripe")
+    return c.json(billingPublicStatus())
+  })
+
+  v1.post("/billing/checkout", async (c) => {
+    const gate = await requireConsoleAuth(c, "console_access")
+    if (!gate.ok) return c.json({ error: gate.error }, gate.status)
+    if (!gate.admin.isPrincipal) {
+      return c.json({ error: "principal_only" }, 403)
+    }
+    const org = await store.getOrg(gate.orgId)
+    if (!org) return c.json({ error: "no_org" }, 404)
+    let body: { quantity?: number }
+    try {
+      body = await c.req.json()
+    } catch {
+      body = {}
+    }
+    const { createCheckoutSession } = await import("./billing-stripe")
+    const r = await createCheckoutSession({
+      orgId: org.id,
+      orgCode: org.orgCode || org.id,
+      customerEmail: gate.admin.email,
+      quantity: body.quantity ?? 1
+    })
+    if (!r.ok) return c.json({ error: r.error }, 503)
+    await store.appendAdminAudit({
+      orgId: org.id,
+      adminId: gate.admin.id,
+      adminEmail: gate.admin.email,
+      adminLabel: gate.admin.label,
+      action: "org_settings_update",
+      detail: `Stripe checkout session ${r.session_id}`
+    })
+    return c.json({ ok: true, url: r.url, session_id: r.session_id })
+  })
+
   /** Santé émission (scripts ops) — secret jamais renvoyé */
   v1.get("/vendor/status", async (c) => {
-    const secret = (
-      process.env.OPSGATE_VENDOR_LICENSE_SECRET ||
-      process.env.OPSGATE_LICENSE_SECRET ||
-      ""
-    ).trim()
+    const { vendorSecretStatus, vendorLicenseSecrets } = await import(
+      "./secret-rotation"
+    )
+    const { current } = vendorLicenseSecrets()
+    const st = vendorSecretStatus()
     return c.json({
       channel: "api_secret_or_cli",
       console_ui: false,
-      secret_configured: secret.length >= 12,
-      hint: "Émission hors console client : pnpm license:issue ou POST /v1/vendor/licenses + X-OpsGate-Vendor-Key."
+      secret_configured: current.length >= 12,
+      rotation: st.vendor_license,
+      hint: "Émission hors console client : pnpm license:issue ou POST /v1/vendor/licenses + X-OpsGate-Vendor-Key. Rotation dual-key : OPSGATE_VENDOR_LICENSE_SECRET_PREVIOUS."
     })
   })
 
@@ -4197,6 +4771,106 @@ export function createApp() {
     })
   })
 
+  /** Inbox admin : messages user → admin */
+  v1.get("/org/inbox", async (c) => {
+    const gate = await requireConsoleAuth(c, "console_access")
+    if (!gate.ok) return c.json({ error: gate.error }, gate.status)
+    const statusQ = (c.req.query("status") || "all").trim()
+    const status = (
+      ["all", "unread", "open", "read", "replied", "closed"].includes(statusQ)
+        ? statusQ
+        : "all"
+    ) as import("./types").InboxMessageStatus | "all" | "unread"
+    const limit = Math.min(
+      200,
+      Math.max(1, Number(c.req.query("limit") || 50) || 50)
+    )
+    const messages = await store.listInboxMessages(gate.orgId, {
+      status,
+      limit
+    })
+    const unread = await store.countInboxUnread(gate.orgId)
+    return c.json({
+      org_id: gate.orgId,
+      unread,
+      messages: messages.map(serializeInboxMessage)
+    })
+  })
+
+  v1.get("/org/inbox/unread-count", async (c) => {
+    const gate = await requireConsoleAuth(c, "console_access")
+    if (!gate.ok) return c.json({ error: gate.error }, gate.status)
+    const unread = await store.countInboxUnread(gate.orgId)
+    return c.json({ org_id: gate.orgId, unread })
+  })
+
+  v1.post("/org/inbox/:id/read", async (c) => {
+    const gate = await requireConsoleAuth(c, "console_access")
+    if (!gate.ok) return c.json({ error: gate.error }, gate.status)
+    const id = c.req.param("id")
+    const msg = await store.markInboxRead(gate.orgId, id)
+    if (!msg) return c.json({ error: "not_found" }, 404)
+    await store.appendAdminAudit({
+      orgId: gate.orgId,
+      adminId: gate.admin.id,
+      adminEmail: gate.admin.email,
+      adminLabel: gate.admin.label,
+      action: "inbox_read",
+      detail: `Message lu : ${msg.subject.slice(0, 80)}`,
+      meta: { message_id: id, agent_id: msg.agentId }
+    })
+    return c.json({ ok: true, message: serializeInboxMessage(msg) })
+  })
+
+  v1.post("/org/inbox/:id/reply", async (c) => {
+    const gate = await requireConsoleAuth(c, "console_access")
+    if (!gate.ok) return c.json({ error: gate.error }, gate.status)
+    const id = c.req.param("id")
+    let body: { reply?: string }
+    try {
+      body = await c.req.json()
+    } catch {
+      return c.json({ error: "invalid_json" }, 400)
+    }
+    const reply = (body.reply || "").trim()
+    if (reply.length < 1) {
+      return c.json({ error: "reply_required" }, 400)
+    }
+    const msg = await store.replyInboxMessage(gate.orgId, id, reply, {
+      id: gate.admin.id,
+      label: gate.admin.label || gate.admin.email
+    })
+    if (!msg) return c.json({ error: "not_found" }, 404)
+    await store.appendAdminAudit({
+      orgId: gate.orgId,
+      adminId: gate.admin.id,
+      adminEmail: gate.admin.email,
+      adminLabel: gate.admin.label,
+      action: "inbox_reply",
+      detail: `Réponse inbox → ${msg.deviceLabel || msg.agentId.slice(0, 12)} : ${msg.subject.slice(0, 60)}`,
+      meta: { message_id: id, agent_id: msg.agentId }
+    })
+    return c.json({ ok: true, message: serializeInboxMessage(msg) })
+  })
+
+  v1.post("/org/inbox/:id/close", async (c) => {
+    const gate = await requireConsoleAuth(c, "console_access")
+    if (!gate.ok) return c.json({ error: gate.error }, gate.status)
+    const id = c.req.param("id")
+    const msg = await store.closeInboxMessage(gate.orgId, id)
+    if (!msg) return c.json({ error: "not_found" }, 404)
+    await store.appendAdminAudit({
+      orgId: gate.orgId,
+      adminId: gate.admin.id,
+      adminEmail: gate.admin.email,
+      adminLabel: gate.admin.label,
+      action: "inbox_close",
+      detail: `Message fermé : ${msg.subject.slice(0, 80)}`,
+      meta: { message_id: id, agent_id: msg.agentId }
+    })
+    return c.json({ ok: true, message: serializeInboxMessage(msg) })
+  })
+
   /** Pool recovery one-time — liste (pas de clair) */
   v1.get("/org/recovery-codes", async (c) => {
     const _gate = await requireConsoleAuth(c, "console_access")
@@ -4343,7 +5017,143 @@ export function createApp() {
       limit: 150,
       action
     })
-    return c.json({ org_id: org.id, events })
+    const { mergeMonitoringSettings } = await import("./types")
+    const mon = mergeMonitoringSettings(org.monitoring)
+    return c.json({
+      org_id: org.id,
+      worm: true,
+      legal_retention_days: mon.auditLegalRetentionDays ?? 365,
+      events: events.map((e) => ({
+        id: e.id,
+        adminEmail: e.adminEmail,
+        adminLabel: e.adminLabel,
+        action: e.action,
+        detail: e.detail,
+        createdAt: e.createdAt,
+        seq: e.seq,
+        entry_hash: e.entryHash,
+        prev_hash: e.prevHash
+      }))
+    })
+  })
+
+  /** Vérification intégrité chaîne WORM du journal d’audit */
+  v1.get("/org/audit/integrity", async (c) => {
+    const _gate = await requireConsoleAuth(c, "console_access")
+    if (!_gate.ok) return c.json({ error: _gate.error }, _gate.status)
+    if (!_gate.admin.isPrincipal) {
+      return c.json({ error: "principal_only" }, 403)
+    }
+    const org = await store.getOrg(_gate.orgId)
+    if (!org) return c.json({ error: "no_org" }, 404)
+    const rows = await store.listAdminAuditAsc(org.id, 5000)
+    const { verifyAuditChain } = await import("./audit-worm")
+    const report = verifyAuditChain(
+      rows.map((e) => ({
+        id: e.id,
+        orgId: e.orgId,
+        action: e.action,
+        detail: e.detail,
+        adminId: e.adminId,
+        createdAt: e.createdAt,
+        seq: e.seq,
+        entryHash: e.entryHash,
+        prevHash: e.prevHash
+      }))
+    )
+    return c.json({
+      org_id: org.id,
+      worm: true,
+      ...report
+    })
+  })
+
+  /**
+   * Vue MSP multi-org — portfolio des tenants accessibles (même email admin).
+   * GET /v1/auth/msp-overview
+   */
+  v1.get("/auth/msp-overview", async (c) => {
+    const auth = await requireConsoleAuth(c, "console_access")
+    if (!auth.ok) return c.json({ error: auth.error }, auth.status)
+    const accessible = await store.listAccessibleOrgsForEmail(auth.admin.email)
+    if (accessible.length <= 1) {
+      return c.json({
+        multi_org: false,
+        org_count: accessible.length,
+        orgs: [],
+        totals: {
+          agents: 0,
+          online: 0,
+          seats: 0,
+          seats_used: 0,
+          expiring_licenses: 0
+        }
+      })
+    }
+    const { mergeMonitoringSettings } = await import("./types")
+    const orgs: Array<Record<string, unknown>> = []
+    let tAgents = 0
+    let tOnline = 0
+    let tSeats = 0
+    let tSeatsUsed = 0
+    let tExpiring = 0
+    for (const o of accessible) {
+      const org = await store.getOrg(o.org_id)
+      const mon = mergeMonitoringSettings(org?.monitoring)
+      let sum: Awaited<ReturnType<typeof store.summary>> | null = null
+      try {
+        sum = await store.summary(o.org_id)
+      } catch {
+        sum = null
+      }
+      const lic = mon.licenseDisplay
+      const expRaw = lic?.expiresAt
+      let daysLeft: number | null = null
+      if (expRaw) {
+        const expMs = Date.parse(expRaw)
+        if (Number.isFinite(expMs)) {
+          daysLeft = Math.ceil((expMs - Date.now()) / (24 * 3600_000))
+          if (daysLeft <= 30) tExpiring++
+        }
+      }
+      const agents = sum?.agents ?? 0
+      const online = sum?.connectivity?.online ?? 0
+      const seats = sum?.licenses?.seats ?? lic?.seats ?? 0
+      const seatsUsed = sum?.licenses?.seats_used ?? sum?.licenses?.licensed ?? 0
+      tAgents += agents
+      tOnline += online
+      tSeats += typeof seats === "number" ? seats : 0
+      tSeatsUsed += typeof seatsUsed === "number" ? seatsUsed : 0
+      orgs.push({
+        org_id: o.org_id,
+        org_code: o.org_code,
+        name: o.name,
+        is_principal: o.is_principal,
+        current: o.org_id === auth.orgId,
+        agents,
+        online,
+        offline_long: sum?.connectivity?.offline_long ?? 0,
+        seats,
+        seats_used: seatsUsed,
+        license_mode: lic?.mode || "trial",
+        license_expires_at: expRaw || null,
+        license_days_left: daysLeft,
+        company_name: lic?.companyName || o.name
+      })
+    }
+    return c.json({
+      multi_org: true,
+      org_count: orgs.length,
+      current_org_id: auth.orgId,
+      orgs,
+      totals: {
+        agents: tAgents,
+        online: tOnline,
+        seats: tSeats,
+        seats_used: tSeatsUsed,
+        expiring_licenses: tExpiring
+      }
+    })
   })
 
   // ── Moving rules (affectation auto agents → groupes) ──
@@ -4374,6 +5184,8 @@ export function createApp() {
       target_group_id?: string
       priority?: number
       only_if_unassigned?: boolean
+      condition_logic?: "and" | "or"
+      permanent?: boolean
     }
     try {
       body = await c.req.json()
@@ -4401,7 +5213,9 @@ export function createApp() {
       conditions,
       targetGroupId: body.target_group_id,
       priority: body.priority,
-      onlyIfUnassigned: body.only_if_unassigned
+      onlyIfUnassigned: body.only_if_unassigned,
+      conditionLogic: body.condition_logic === "or" ? "or" : "and",
+      permanent: body.permanent === true
     })
     // Appliquer immédiatement aux agents déjà enrollés
     let applied = 0
@@ -4476,7 +5290,15 @@ export function createApp() {
       onlyIfUnassigned:
         body.only_if_unassigned !== undefined
           ? !!body.only_if_unassigned
-          : existing.onlyIfUnassigned
+          : existing.onlyIfUnassigned,
+      conditionLogic:
+        body.condition_logic === "or" || body.condition_logic === "and"
+          ? (body.condition_logic as "and" | "or")
+          : existing.conditionLogic || "and",
+      permanent:
+        body.permanent !== undefined
+          ? !!body.permanent
+          : !!existing.permanent
     })
     let applied = 0
     if (rule?.enabled) {
@@ -4570,6 +5392,121 @@ export function createApp() {
       meta: body as Record<string, unknown>
     })
     return c.json({ ok: true, ...result })
+  })
+
+  /**
+   * Import CSV agents (assign groupe / profil / licence).
+   * Colonnes : agent_id | device_label | host_name | group | group_id | profile | profile_id | license
+   * POST { csv: string, dry_run?: boolean }
+   */
+  v1.post("/org/agents/import-csv", async (c) => {
+    const gate = await requireConsoleAuth(c, "manage_policies")
+    if (!gate.ok) return c.json({ error: gate.error }, gate.status)
+    if (gate.readOnly) return c.json({ error: "read_only_session" }, 403)
+    const org = await store.getOrg(gate.orgId)
+    if (!org) return c.json({ error: "no_org" }, 404)
+    let body: { csv?: string; dry_run?: boolean }
+    try {
+      body = await c.req.json()
+    } catch {
+      return c.json({ error: "invalid_json" }, 400)
+    }
+    const csv = (body.csv || "").trim()
+    if (!csv) return c.json({ error: "csv_required" }, 400)
+    const lines = csv
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .filter((l) => l && !l.startsWith("#"))
+    if (lines.length < 2) {
+      return c.json({ error: "csv_empty", message: "Header + au moins 1 ligne" }, 400)
+    }
+    const parseRow = (line: string): string[] => {
+      const cells: string[] = []
+      let cur = ""
+      let q = false
+      for (let i = 0; i < line.length; i++) {
+        const ch = line[i]!
+        if (ch === '"') {
+          if (q && line[i + 1] === '"') {
+            cur += '"'
+            i++
+          } else q = !q
+        } else if ((ch === "," || ch === ";") && !q) {
+          cells.push(cur.trim())
+          cur = ""
+        } else cur += ch
+      }
+      cells.push(cur.trim())
+      return cells
+    }
+    const header = parseRow(lines[0]!).map((h) =>
+      h.toLowerCase().replace(/\s+/g, "_")
+    )
+    const idx = (names: string[]) => {
+      for (const n of names) {
+        const i = header.indexOf(n)
+        if (i >= 0) return i
+      }
+      return -1
+    }
+    const iId = idx(["agent_id", "id", "agent"])
+    const iLabel = idx(["device_label", "label", "name", "device"])
+    const iHost = idx(["host_name", "hostname", "host"])
+    const iGroup = idx(["group", "group_name", "groupe"])
+    const iGroupId = idx(["group_id"])
+    const iProf = idx(["profile", "profile_name", "profil"])
+    const iProfId = idx(["profile_id", "policy_profile_id"])
+    const iLic = idx(["license", "licensed", "licence"])
+    if (iId < 0 && iLabel < 0 && iHost < 0) {
+      return c.json(
+        {
+          error: "csv_columns",
+          message:
+            "Colonnes requises : agent_id et/ou device_label et/ou host_name"
+        },
+        400
+      )
+    }
+    const rows = lines.slice(1).map((line) => {
+      const c = parseRow(line)
+      const licRaw = iLic >= 0 ? (c[iLic] || "").toLowerCase() : ""
+      let license: boolean | null = null
+      if (["1", "true", "yes", "y", "oui", "licensed"].includes(licRaw)) {
+        license = true
+      } else if (
+        ["0", "false", "no", "n", "non", "unlicensed"].includes(licRaw)
+      ) {
+        license = false
+      }
+      return {
+        agent_id: iId >= 0 ? c[iId] : undefined,
+        device_label: iLabel >= 0 ? c[iLabel] : undefined,
+        host_name: iHost >= 0 ? c[iHost] : undefined,
+        group_name: iGroup >= 0 ? c[iGroup] : undefined,
+        group_id: iGroupId >= 0 ? c[iGroupId] : undefined,
+        profile_name: iProf >= 0 ? c[iProf] : undefined,
+        profile_id: iProfId >= 0 ? c[iProfId] : undefined,
+        license
+      }
+    })
+    const result = await store.importAgentsCsv(org.id, rows, {
+      dryRun: body.dry_run === true
+    })
+    if (body.dry_run !== true) {
+      await store.appendAdminAudit({
+        orgId: org.id,
+        adminId: gate.admin.id,
+        adminEmail: gate.admin.email,
+        adminLabel: gate.admin.label,
+        action: "agent_assign",
+        detail: `Import CSV agents · matched=${result.matched} updated=${result.updated} skipped=${result.skipped}`
+      })
+    }
+    return c.json({
+      ok: true,
+      dry_run: body.dry_run === true,
+      ...result
+    })
   })
 
   v1.get("/org/events", async (c) => {
@@ -4731,6 +5668,167 @@ export function createApp() {
         )
       }))
     })
+  })
+
+  /**
+   * Lance immédiatement l’export planifié + e-mails (test / rattrapage).
+   * POST /v1/org/exports/run-now
+   */
+  v1.post("/org/exports/run-now", async (c) => {
+    const gate = await requireConsoleAuth(c, "console_access")
+    if (!gate.ok) return c.json({ error: gate.error }, gate.status)
+    if (gate.readOnly) {
+      return c.json({ error: "read_only_session" }, 403)
+    }
+    const org = await store.getOrg(gate.orgId)
+    if (!org) return c.json({ error: "no_org" }, 404)
+    const mon = (await import("./types")).mergeMonitoringSettings(
+      org.monitoring
+    )
+    const cfg = mon.scheduledLogExport
+    if (!cfg?.enabled && !mon.weeklyExportEnabled) {
+      return c.json(
+        {
+          error: "export_disabled",
+          message:
+            "Activez l’export automatique (Paramètres → Rapports) puis réessayez."
+        },
+        400
+      )
+    }
+    const emails = (cfg?.recipientEmails || []).filter((e) =>
+      String(e).includes("@")
+    )
+    if (!emails.length) {
+      return c.json(
+        {
+          error: "no_recipients",
+          message:
+            "Aucun destinataire e-mail configuré pour l’export automatique."
+        },
+        400
+      )
+    }
+    const { runWeeklyExportForOrg } = await import("./exports-cron")
+    const r = await runWeeklyExportForOrg(store, org.id, { force: true })
+    await store.appendAdminAudit({
+      orgId: org.id,
+      adminId: gate.admin.id,
+      adminEmail: gate.admin.email,
+      adminLabel: gate.admin.label,
+      action: "events_export",
+      detail: `Export planifié forcé (run-now) week=${r.weekKey || "?"} mails_ok=${r.mails_ok ?? 0}`
+    })
+    return c.json({
+      ok: true,
+      ...r,
+      smtp_configured: !!(mon.smtp?.enabled && mon.smtp?.host),
+      hint:
+        (r.mails_ok || 0) > 0
+          ? "E-mail(s) accepté(s) par le transport SMTP (ou log serveur si SMTP off)."
+          : (r.mails_fail || 0) > 0
+            ? "Échec envoi SMTP — vérifiez Paramètres → E-mail / SMTP (test d’envoi)."
+            : "Aucun envoi — vérifiez destinataires et logs API [exports]."
+    })
+  })
+
+  /** Statut export planifié (debug console) */
+  v1.get("/org/exports/status", async (c) => {
+    const gate = await requireConsoleAuth(c, "console_access")
+    if (!gate.ok) return c.json({ error: gate.error }, gate.status)
+    const org = await store.getOrg(gate.orgId)
+    if (!org) return c.json({ error: "no_org" }, 404)
+    const mon = (await import("./types")).mergeMonitoringSettings(
+      org.monitoring
+    )
+    const cfg = mon.scheduledLogExport
+    const { isExportScheduleDue } = await import("./exports-cron")
+    const due = cfg ? isExportScheduleDue(cfg) : false
+    return c.json({
+      enabled: !!(cfg?.enabled || mon.weeklyExportEnabled),
+      recipient_count: (cfg?.recipientEmails || []).length,
+      recipients_masked: (cfg?.recipientEmails || []).map((e) => {
+        const [u, d] = String(e).split("@")
+        return `${(u || "").slice(0, 2)}***@${d || "?"}`
+      }),
+      day_of_week: cfg?.dayOfWeek ?? 1,
+      time_local: cfg?.timeLocal || "08:00",
+      timezone: cfg?.timezone || "Europe/Paris",
+      formats: cfg?.formats || ["csv"],
+      attach_files: cfg?.attachFiles !== false,
+      last_weekly_export_at: mon.lastWeeklyExportAt || null,
+      due_now: due,
+      smtp_enabled: !!mon.smtp?.enabled,
+      smtp_host: mon.smtp?.host || null,
+      cron_env: process.env.OPSGATE_EXPORTS_CRON_MINUTES || "15"
+    })
+  })
+
+  /**
+   * Backup config org (JSON) — policy, profils, groupes, monitoring (sans secrets).
+   * GET /v1/org/backup
+   */
+  v1.get("/org/backup", async (c) => {
+    const gate = await requireConsoleAuth(c, "console_access")
+    if (!gate.ok) return c.json({ error: gate.error }, gate.status)
+    if (!gate.admin.isPrincipal) {
+      return c.json(
+        {
+          error: "principal_only",
+          message: "Export backup réservé au principal."
+        },
+        403
+      )
+    }
+    const { buildOrgBackup } = await import("./org-backup")
+    const payload = await buildOrgBackup(store, gate.orgId)
+    if (!payload) return c.json({ error: "no_org" }, 404)
+    await store.appendAdminAudit({
+      orgId: gate.orgId,
+      adminId: gate.admin.id,
+      adminEmail: gate.admin.email,
+      adminLabel: gate.admin.label,
+      action: "org_settings_update",
+      detail: "Export backup configuration org"
+    })
+    return c.json({ ok: true, backup: payload })
+  })
+
+  /**
+   * Import backup config (merge prudent).
+   * POST /v1/org/backup/import  body: backup JSON or { backup: ... }
+   */
+  v1.post("/org/backup/import", async (c) => {
+    const gate = await requireConsoleAuth(c, "console_access")
+    if (!gate.ok) return c.json({ error: gate.error }, gate.status)
+    if (gate.readOnly) return c.json({ error: "read_only_session" }, 403)
+    if (!gate.admin.isPrincipal) {
+      return c.json({ error: "principal_only" }, 403)
+    }
+    let body: unknown
+    try {
+      body = await c.req.json()
+    } catch {
+      return c.json({ error: "invalid_json" }, 400)
+    }
+    const raw =
+      body &&
+      typeof body === "object" &&
+      (body as { backup?: unknown }).backup
+        ? (body as { backup: unknown }).backup
+        : body
+    const { importOrgBackup } = await import("./org-backup")
+    const r = await importOrgBackup(store, gate.orgId, raw)
+    if (!r.ok) return c.json({ error: r.error }, 400)
+    await store.appendAdminAudit({
+      orgId: gate.orgId,
+      adminId: gate.admin.id,
+      adminEmail: gate.admin.email,
+      adminLabel: gate.admin.label,
+      action: "org_settings_update",
+      detail: `Import backup config · ${r.applied.join(", ")}`
+    })
+    return c.json({ ok: true, applied: r.applied })
   })
 
   v1.get("/org/events/exports/:exportId", async (c) => {

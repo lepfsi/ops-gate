@@ -86,7 +86,9 @@ CREATE TABLE IF NOT EXISTS admin_sessions (
   expires_at TIMESTAMPTZ NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   /** Heartbeat — idle serveur (ex. 10 min sans requête console) */
-  last_activity_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  last_activity_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  /** Session concurrente lecture seule (coexiste avec une full) */
+  read_only BOOLEAN NOT NULL DEFAULT FALSE
 );
 
 CREATE INDEX IF NOT EXISTS admin_sessions_admin_idx ON admin_sessions(admin_id);
@@ -214,6 +216,34 @@ CREATE TABLE IF NOT EXISTS recovery_codes (
 CREATE INDEX IF NOT EXISTS recovery_codes_org_active_idx
   ON recovery_codes(org_id) WHERE active = TRUE AND consumed_at IS NULL;
 
+-- ── Inbox user → admin (messages agents) ───────────────────────
+CREATE TABLE IF NOT EXISTS user_inbox_messages (
+  id TEXT PRIMARY KEY,
+  org_id TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  agent_id TEXT NOT NULL,
+  device_label TEXT NOT NULL DEFAULT '',
+  host_name TEXT,
+  category TEXT NOT NULL DEFAULT 'question',
+  subject TEXT NOT NULL,
+  body TEXT NOT NULL,
+  context_url TEXT,
+  context_hostname TEXT,
+  status TEXT NOT NULL DEFAULT 'open',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  read_at TIMESTAMPTZ,
+  replied_at TIMESTAMPTZ,
+  closed_at TIMESTAMPTZ,
+  admin_reply TEXT,
+  replied_by_admin_id TEXT,
+  replied_by_admin_label TEXT,
+  user_acked_at TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS user_inbox_org_created_idx
+  ON user_inbox_messages(org_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS user_inbox_org_status_idx
+  ON user_inbox_messages(org_id, status);
+
 -- ── Archives export logs (semaine / manuel) ────────────────────
 CREATE TABLE IF NOT EXISTS log_exports (
   id TEXT PRIMARY KEY,
@@ -241,7 +271,7 @@ CREATE TABLE IF NOT EXISTS password_reset_challenges (
   target_email TEXT
 );
 
--- ── Admin audit (console) ──────────────────────────────────────
+-- ── Admin audit (console) — WORM append-only + chaîne d’intégrité ──
 CREATE TABLE IF NOT EXISTS admin_audit_events (
   id TEXT PRIMARY KEY,
   org_id TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
@@ -251,11 +281,34 @@ CREATE TABLE IF NOT EXISTS admin_audit_events (
   action TEXT NOT NULL,
   detail TEXT,
   meta JSONB NOT NULL DEFAULT '{}',
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  /** WORM : séquence monotony par org */
+  seq BIGINT,
+  /** WORM : SHA-256 de l’entrée */
+  entry_hash TEXT,
+  /** WORM : hash de l’entrée précédente */
+  prev_hash TEXT
 );
 
 CREATE INDEX IF NOT EXISTS admin_audit_org_ts_idx
   ON admin_audit_events(org_id, created_at DESC);
+
+-- Index seq : créé après soft ALTER (installs pré-WORM n’ont pas encore la colonne)
+-- voir pg-store migrate → admin_audit_org_seq_idx
+
+-- WebAuthn passkeys (persistance multi-instance)
+CREATE TABLE IF NOT EXISTS webauthn_credentials (
+  credential_id TEXT PRIMARY KEY,
+  admin_id TEXT NOT NULL REFERENCES org_admins(id) ON DELETE CASCADE,
+  org_id TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  public_key_jwk JSONB NOT NULL,
+  counter BIGINT NOT NULL DEFAULT 0,
+  transports JSONB NOT NULL DEFAULT '[]',
+  label TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS webauthn_admin_idx ON webauthn_credentials(admin_id);
 
 -- ── Moving rules (auto-assign agents → groups) ─────────────────
 CREATE TABLE IF NOT EXISTS moving_rules (
@@ -266,11 +319,15 @@ CREATE TABLE IF NOT EXISTS moving_rules (
   match_field TEXT NOT NULL,
   match_op TEXT NOT NULL,
   match_value TEXT NOT NULL,
-  /** JSON array of {field,op,value} — AND logic; legacy match_* = first condition */
+  /** JSON array of {field,op,value} — multi-conditions */
   conditions_json TEXT NOT NULL DEFAULT '[]',
+  /** and | or */
+  condition_logic TEXT NOT NULL DEFAULT 'and',
   target_group_id TEXT NOT NULL,
   priority INT NOT NULL DEFAULT 100,
   only_if_unassigned BOOLEAN NOT NULL DEFAULT TRUE,
+  /** true = s’applique même si agent déjà groupé */
+  permanent BOOLEAN NOT NULL DEFAULT FALSE,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

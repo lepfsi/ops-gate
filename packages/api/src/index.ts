@@ -79,6 +79,28 @@ async function main() {
     )
   }
 
+  // Alertes e-mail : licence expire, recovery bas (lockout = immédiat au login)
+  try {
+    const { startSecurityAlertsCron } = await import("./security-alerts-cron")
+    startSecurityAlertsCron(store)
+  } catch (e) {
+    console.warn(
+      "[opsgate-api] Security alerts cron init skipped:",
+      e instanceof Error ? e.message : e
+    )
+  }
+
+  // Exports planifiés multi-formats (hebdo ISO — config client)
+  try {
+    const { startExportsCron } = await import("./exports-cron")
+    startExportsCron(store)
+  } catch (e) {
+    console.warn(
+      "[opsgate-api] Exports cron init skipped:",
+      e instanceof Error ? e.message : e
+    )
+  }
+
   serve({ fetch: app.fetch, port, hostname: "127.0.0.1" })
 }
 
