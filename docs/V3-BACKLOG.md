@@ -49,7 +49,7 @@ Socle déjà présent à réutiliser :
 |------|----------|---------------|------|--------|
 | **V3-A Secure Rewrite** | P0 | Moyen | [`FEATURE-SPEC-SECURE-REWRITE-v1.md`](./roadmap-v3/FEATURE-SPEC-SECURE-REWRITE-v1.md) | ◐ **livré engine + banner** (17/07) |
 | **V3-B Risk Score prompt + Simulation** | P0 | Faible–moyen | [`FEATURE-SPEC-RISK-SCORE-SIMULATION-v1.md`](./roadmap-v3/FEATURE-SPEC-RISK-SCORE-SIMULATION-v1.md) | ◐ **livré** (17/07) |
-| **V3-C Shadow AI + Risk Score utilisateur** | P0 | Moyen–élevé | [`SHADOW-AI-RISK-SCORE.md`](./roadmap-v3/SHADOW-AI-RISK-SCORE.md) + [wireframes](./roadmap-v3/SHADOW-AI-RISK-SCORE-WIREFRAMES.md) | ⬜ gelé |
+| **V3-C Shadow AI + Risk Score utilisateur** | P0 | Moyen–élevé | [`SHADOW-AI-RISK-SCORE.md`](./roadmap-v3/SHADOW-AI-RISK-SCORE.md) + [wireframes](./roadmap-v3/SHADOW-AI-RISK-SCORE-WIREFRAMES.md) | ◐ **livré** (17/07) |
 | **V3-D Dashboard Risk / Analytics** | P1 | Moyen | Wireframes § dashboard | ⬜ |
 | **V3-E AI Trust Score (par modèle)** | P1 | Moyen | Vision § Trust Score | ⬜ |
 | **V3-F Classification intelligente** | P2 | Élevé | Vision Phase 4 | ⬜ |
@@ -109,12 +109,12 @@ Alternative acceptable si besoin commercial RSSI d’abord : **V3-C avant V3-A**
 
 | Item | Notes | Done |
 |------|--------|------|
-| Migration PG adaptée (TEXT ids, RLS) | **Pas** le SQL draft UUID tel quel — voir note §6 | [ ] |
-| Table `org_ai_tools` + statut authorized/unauthorized | Agrégat hostnames events | [ ] |
-| Table / cache `user_risk_scores` + formule V1 | factors JSONB explicables | [ ] |
-| API `GET /org/risk/*`, `GET/PATCH /org/shadow-ai` | Principal / console_access | [ ] |
-| Job recalcul (cron ou on-read) | Périodes 7d / 30d / 90d | [ ] |
-| UI console : Risk overview, liste, détail, Shadow AI | Wireframes | [ ] |
+| Migration PG `org_ai_tools` + `user_risk_scores` | TEXT ids, soft ALTER migrate | [x] |
+| Formule V1 scores agent | `risk-shadow.ts` on-the-fly events | [x] |
+| API risk + shadow-ai | summary / users / detail / patch / recalculate | [x] |
+| UI console `#/risk` + `#/shadow` | KPI, liste, détail, inventaire tools | [x] |
+| Persist cache scores (job) | Calcul live suffit pour V1 | [ ] optional |
+| Alertes score > seuil + Grafana | Suite V3-D | [ ] |
 
 **Critères** : org consulte Risk ≥ 1×/semaine en pilote ; outils shadow découverts.
 

@@ -452,6 +452,29 @@ export class PgStore implements OpsGateStore {
       `ALTER TABLE organizations ADD COLUMN IF NOT EXISTS delete_purge_at TIMESTAMPTZ`,
       `ALTER TABLE organizations ADD COLUMN IF NOT EXISTS delete_reason TEXT`,
       `ALTER TABLE organizations ADD COLUMN IF NOT EXISTS delete_requested_by TEXT`,
+      `CREATE TABLE IF NOT EXISTS org_ai_tools (
+        org_id TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+        tool TEXT NOT NULL,
+        display_name TEXT,
+        status TEXT NOT NULL DEFAULT 'unknown',
+        first_seen_at TIMESTAMPTZ,
+        last_seen_at TIMESTAMPTZ,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_by TEXT,
+        PRIMARY KEY (org_id, tool)
+      )`,
+      `CREATE TABLE IF NOT EXISTS user_risk_scores (
+        id TEXT PRIMARY KEY,
+        org_id TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+        agent_id TEXT NOT NULL,
+        score INT NOT NULL DEFAULT 0,
+        score_previous INT,
+        factors JSONB NOT NULL DEFAULT '{}',
+        period_start TIMESTAMPTZ NOT NULL,
+        period_end TIMESTAMPTZ NOT NULL,
+        calculated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        UNIQUE (org_id, agent_id, period_end)
+      )`,
       `ALTER TABLE policies ADD COLUMN IF NOT EXISTS management_password_hash TEXT NOT NULL DEFAULT ''`,
       `ALTER TABLE policies ADD COLUMN IF NOT EXISTS config_epoch INT NOT NULL DEFAULT 1`,
       `ALTER TABLE policies ADD COLUMN IF NOT EXISTS protect_unenroll BOOLEAN NOT NULL DEFAULT FALSE`,
@@ -3666,6 +3689,76 @@ export class PgStore implements OpsGateStore {
       [orgId, limit]
     )
     return rows.map(rowEvent)
+  }
+
+  async listOrgAiTools(orgId: string) {
+    const { rows } = await this.pool.query(
+      `SELECT * FROM org_ai_tools WHERE org_id = $1 ORDER BY tool ASC`,
+      [orgId]
+    )
+    return rows.map((r) => ({
+      orgId: r.org_id as string,
+      tool: r.tool as string,
+      displayName: r.display_name || undefined,
+      status: (r.status || "unknown") as import("./types").OrgAiToolStatus,
+      firstSeenAt: r.first_seen_at
+        ? new Date(r.first_seen_at).toISOString()
+        : null,
+      lastSeenAt: r.last_seen_at
+        ? new Date(r.last_seen_at).toISOString()
+        : null,
+      updatedAt: r.updated_at ? new Date(r.updated_at).toISOString() : null,
+      updatedBy: r.updated_by || null
+    }))
+  }
+
+  async upsertOrgAiTool(
+    orgId: string,
+    input: {
+      tool: string
+      status: import("./types").OrgAiToolStatus
+      displayName?: string
+      updatedBy?: string
+      touchSeen?: boolean
+    }
+  ) {
+    const tool = String(input.tool || "")
+      .trim()
+      .toLowerCase()
+      .replace(/^www\./, "")
+    if (!tool) throw new Error("tool_required")
+    const status =
+      input.status === "authorized" || input.status === "unauthorized"
+        ? input.status
+        : "unknown"
+    const now = new Date().toISOString()
+    await this.pool.query(
+      `INSERT INTO org_ai_tools (org_id, tool, display_name, status, first_seen_at, last_seen_at, updated_at, updated_by)
+       VALUES ($1,$2,$3,$4,$5::timestamptz,$5::timestamptz,$5::timestamptz,$6)
+       ON CONFLICT (org_id, tool) DO UPDATE SET
+         status = EXCLUDED.status,
+         display_name = COALESCE(EXCLUDED.display_name, org_ai_tools.display_name),
+         updated_at = EXCLUDED.updated_at,
+         updated_by = EXCLUDED.updated_by,
+         last_seen_at = CASE
+           WHEN $7::boolean THEN EXCLUDED.last_seen_at
+           ELSE org_ai_tools.last_seen_at
+         END,
+         first_seen_at = COALESCE(org_ai_tools.first_seen_at, EXCLUDED.first_seen_at)`,
+      [
+        orgId,
+        tool,
+        input.displayName || null,
+        status,
+        now,
+        input.updatedBy || null,
+        !!input.touchSeen
+      ]
+    )
+    const list = await this.listOrgAiTools(orgId)
+    const hit = list.find((t) => t.tool === tool)
+    if (!hit) throw new Error("upsert_failed")
+    return hit
   }
 
   async purgeOldEvents(orgId: string, retentionDays: number) {

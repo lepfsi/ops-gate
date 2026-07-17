@@ -440,6 +440,18 @@ Env : `OPSGATE_GDPR_PURGE_DAYS` (30), `OPSGATE_GDPR_CRON_MINUTES` (60).
 
 ---
 
+## 30. V3-C Shadow AI + Risk Score utilisateur (17 juillet 2026)
+
+| Sujet | Détail | Fichiers |
+|-------|--------|---------|
+| Calcul | Formule V1 events + unauthorized tools | `risk-shadow.ts` |
+| Store | `org_ai_tools` list/upsert (PG + memory) | `pg-store`, `memory-store` |
+| API | `/org/risk/*`, `/org/shadow-ai` | `app.ts` |
+| Console | onglets Risk Score + Shadow AI | `RiskShadowViews.tsx` |
+| Deep-links | `#/risk`, `#/shadow` | `hash-route.ts` |
+
+---
+
 ## Convention pour les prochains changements
 
 Quand tu modifies le produit :

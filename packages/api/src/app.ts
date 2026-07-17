@@ -6093,6 +6093,186 @@ export function createApp() {
     })
   })
 
+  // ── V3 Shadow AI + Risk Score utilisateur ────────────────────
+  v1.get("/org/risk/summary", async (c) => {
+    const gate = await requireConsoleAuth(c, "console_access")
+    if (!gate.ok) return c.json({ error: gate.error }, gate.status)
+    const { parsePeriod, buildOrgRisk } = await import("./risk-shadow")
+    const period = parsePeriod(c.req.query("period"))
+    const { summary } = await buildOrgRisk(store, gate.orgId, period)
+    return c.json({ ok: true, ...summary })
+  })
+
+  v1.get("/org/risk/users", async (c) => {
+    const gate = await requireConsoleAuth(c, "console_access")
+    if (!gate.ok) return c.json({ error: gate.error }, gate.status)
+    const { parsePeriod, buildOrgRisk } = await import("./risk-shadow")
+    const period = parsePeriod(c.req.query("period"))
+    const minScore = Number(c.req.query("min_score") || 0)
+    const maxScore = Number(c.req.query("max_score") || 100)
+    const page = Math.max(1, Number(c.req.query("page") || 1))
+    const limit = Math.min(100, Math.max(1, Number(c.req.query("limit") || 50)))
+    const { users, summary } = await buildOrgRisk(store, gate.orgId, period)
+    let filtered = users.filter(
+      (u) =>
+        u.score >= (Number.isFinite(minScore) ? minScore : 0) &&
+        u.score <= (Number.isFinite(maxScore) ? maxScore : 100)
+    )
+    const sort = (c.req.query("sort") || "score_desc").toLowerCase()
+    if (sort === "score_asc") filtered.sort((a, b) => a.score - b.score)
+    else if (sort === "label")
+      filtered.sort((a, b) => a.label.localeCompare(b.label))
+    else filtered.sort((a, b) => b.score - a.score)
+    const total = filtered.length
+    const start = (page - 1) * limit
+    const slice = filtered.slice(start, start + limit)
+    return c.json({
+      ok: true,
+      period,
+      total,
+      page,
+      limit,
+      average_score: summary.average_score,
+      users: slice
+    })
+  })
+
+  v1.get("/org/risk/users/:agentId", async (c) => {
+    const gate = await requireConsoleAuth(c, "console_access")
+    if (!gate.ok) return c.json({ error: gate.error }, gate.status)
+    const agentId = c.req.param("agentId")
+    const { parsePeriod, buildOrgRisk } = await import("./risk-shadow")
+    const period = parsePeriod(c.req.query("period"))
+    const { users } = await buildOrgRisk(store, gate.orgId, period)
+    const row = users.find((u) => u.agent_id === agentId)
+    if (!row) return c.json({ error: "not_found" }, 404)
+    // Derniers events de l’agent
+    const events = (await store.listEvents(gate.orgId, 500)).filter(
+      (e) => e.agentId === agentId
+    )
+    return c.json({
+      ok: true,
+      period,
+      user: row,
+      recent_events: events.slice(0, 30).map((e) => ({
+        id: e.id,
+        ts: e.ts || e.receivedAt,
+        decision: e.decision,
+        hostname: e.hostname,
+        highest_severity: e.highest_severity,
+        detection_count: e.detection_count,
+        types: e.types
+      }))
+    })
+  })
+
+  v1.get("/org/shadow-ai", async (c) => {
+    const gate = await requireConsoleAuth(c, "console_access")
+    if (!gate.ok) return c.json({ error: gate.error }, gate.status)
+    const { parsePeriod, buildShadowAiInventory } = await import("./risk-shadow")
+    const period = parsePeriod(c.req.query("period"))
+    const statusRaw = (c.req.query("status") || "all").toLowerCase()
+    const status =
+      statusRaw === "authorized" ||
+      statusRaw === "unauthorized" ||
+      statusRaw === "unknown"
+        ? statusRaw
+        : "all"
+    const tools = await buildShadowAiInventory(
+      store,
+      gate.orgId,
+      period,
+      status
+    )
+    return c.json({
+      ok: true,
+      period,
+      tools,
+      counts: {
+        total: tools.length,
+        authorized: tools.filter((t) => t.status === "authorized").length,
+        unauthorized: tools.filter((t) => t.status === "unauthorized").length,
+        unknown: tools.filter((t) => t.status === "unknown").length
+      }
+    })
+  })
+
+  v1.patch("/org/shadow-ai/:tool", async (c) => {
+    const gate = await requireConsoleAuth(c, "manage_policies")
+    if (!gate.ok) return c.json({ error: gate.error }, gate.status)
+    if (gate.readOnly) return c.json({ error: "read_only_session" }, 403)
+    const toolParam = decodeURIComponent(c.req.param("tool") || "")
+    let body: { status?: string; display_name?: string }
+    try {
+      body = await c.req.json()
+    } catch {
+      body = {}
+    }
+    const status =
+      body.status === "authorized" || body.status === "unauthorized"
+        ? body.status
+        : body.status === "unknown"
+          ? "unknown"
+          : null
+    if (!status) {
+      return c.json(
+        { error: "status_required", hint: "authorized | unauthorized | unknown" },
+        400
+      )
+    }
+    try {
+      const row = await store.upsertOrgAiTool(gate.orgId, {
+        tool: toolParam,
+        status,
+        displayName: body.display_name,
+        updatedBy: gate.admin.email
+      })
+      await store.appendAdminAudit({
+        orgId: gate.orgId,
+        adminId: gate.admin.id,
+        adminEmail: gate.admin.email,
+        adminLabel: gate.admin.label,
+        action: "org_settings_update",
+        detail: `Shadow AI tool ${row.tool} → ${row.status}`
+      })
+      return c.json({ ok: true, tool: row })
+    } catch (e) {
+      return c.json(
+        { error: e instanceof Error ? e.message : "upsert_failed" },
+        400
+      )
+    }
+  })
+
+  v1.post("/org/risk/recalculate", async (c) => {
+    const gate = await requireConsoleAuth(c, "console_access")
+    if (!gate.ok) return c.json({ error: gate.error }, gate.status)
+    if (gate.readOnly) return c.json({ error: "read_only_session" }, 403)
+    const { parsePeriod, buildOrgRisk } = await import("./risk-shadow")
+    let body: { period?: string }
+    try {
+      body = await c.req.json()
+    } catch {
+      body = {}
+    }
+    const period = parsePeriod(body.period || c.req.query("period"))
+    const { summary, users } = await buildOrgRisk(store, gate.orgId, period)
+    await store.appendAdminAudit({
+      orgId: gate.orgId,
+      adminId: gate.admin.id,
+      adminEmail: gate.admin.email,
+      adminLabel: gate.admin.label,
+      action: "org_settings_update",
+      detail: `Risk recalculate period=${period} users=${users.length} avg=${summary.average_score}`
+    })
+    return c.json({
+      ok: true,
+      summary,
+      users_count: users.length,
+      note: "Scores calculés à la volée depuis les events (pas de cache obligatoire)."
+    })
+  })
+
   /**
    * Backup config org (JSON) — policy, profils, groupes, monitoring (sans secrets).
    * GET /v1/org/backup

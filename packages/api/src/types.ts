@@ -1304,6 +1304,20 @@ export interface StoredEvent extends DetectionEventInput {
   receivedAt: string
 }
 
+/** Shadow AI — statut d’un outil IA par organisation */
+export type OrgAiToolStatus = "authorized" | "unauthorized" | "unknown"
+
+export interface OrgAiTool {
+  orgId: string
+  tool: string
+  displayName?: string
+  status: OrgAiToolStatus
+  firstSeenAt?: string | null
+  lastSeenAt?: string | null
+  updatedAt?: string | null
+  updatedBy?: string | null
+}
+
 /** Journal d’audit console admin — toute mutation console doit logger */
 export type AdminAuditAction =
   | "login"

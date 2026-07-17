@@ -41,6 +41,7 @@ import {
 } from "./hash-route"
 import { AI_HOST_PRESETS, HostPicker } from "./HostPicker"
 import { getStoredLang, makeT, setStoredLang, type Lang } from "./i18n"
+import { RiskView, ShadowAiView } from "./RiskShadowViews"
 import {
   loadDashLayout,
   moveWidget,
@@ -1344,6 +1345,18 @@ export default function App() {
         </button>
         <button
           type="button"
+          className={`shell-nav-item ${tab === "risk" ? "active" : ""}`}
+          onClick={() => goTab("risk")}>
+          {t("nav.risk")}
+        </button>
+        <button
+          type="button"
+          className={`shell-nav-item ${tab === "shadow" ? "active" : ""}`}
+          onClick={() => goTab("shadow")}>
+          {t("nav.shadow")}
+        </button>
+        <button
+          type="button"
           className={`shell-nav-item ${tab === "audit" ? "active" : ""}`}
           onClick={() => goTab("audit")}>
           {t("nav.audit")}
@@ -1592,6 +1605,12 @@ export default function App() {
           setInfo={setInfo}
           t={t}
         />
+      )}
+      {tab === "risk" && (
+        <RiskView t={t} setError={setError} setInfo={setInfo} />
+      )}
+      {tab === "shadow" && (
+        <ShadowAiView t={t} setError={setError} setInfo={setInfo} />
       )}
       {tab === "moving" && (
         <MovingRulesView

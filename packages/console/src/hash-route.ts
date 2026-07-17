@@ -21,6 +21,8 @@ export type ConsoleTab =
   | "packs"
   | "agents"
   | "events"
+  | "risk"
+  | "shadow"
   | "audit"
   | "moving"
   | "settings"
@@ -58,6 +60,8 @@ const TABS = new Set<ConsoleTab>([
   "packs",
   "agents",
   "events",
+  "risk",
+  "shadow",
   "audit",
   "moving",
   "settings",
@@ -99,6 +103,10 @@ const TAB_ALIASES: Record<string, ConsoleTab> = {
   rules: "packs",
   agents: "agents",
   events: "events",
+  risk: "risk",
+  scores: "risk",
+  shadow: "shadow",
+  "shadow-ai": "shadow",
   audit: "audit",
   moving: "moving",
   "auto-rules": "moving",
