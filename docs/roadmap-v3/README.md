@@ -2,7 +2,7 @@
 
 **Dossier** : hors Grafana (observabilité) — ici = **vision produit / features différenciantes**.  
 **Origine** : commit `V3 Roadmap` (17/07/2026), initialement déposé par erreur dans `docs/grafana/`.  
-**Statut** : **documents de réflexion / specs draft** — pas encore le backlog d’implémentation V2 pre-GA.
+**Statut** : **specs draft** · backlog d’implémentation → [`../V3-BACKLOG.md`](../V3-BACKLOG.md) (**gelé** jusqu’à fin pre-GA V2).
 
 ---
 
@@ -52,6 +52,7 @@ Priorité d’impact commercial estimée :
 
 ## Liens utiles
 
-- Statut V2 : [`../STATUS-V2.md`](../STATUS-V2.md)  
-- Backlog V2 : [`../V2-BACKLOG.md`](../V2-BACKLOG.md)  
+- **Backlog V3 (priorités + gate)** : [`../V3-BACKLOG.md`](../V3-BACKLOG.md)  
+- Statut V2 pre-GA : [`../STATUS-V2.md`](../STATUS-V2.md)  
+- Backlog V2 (reste ops) : [`../V2-BACKLOG.md`](../V2-BACKLOG.md)  
 - Design historique : [`../architecture/PLATFORM-v2.md`](../architecture/PLATFORM-v2.md)  

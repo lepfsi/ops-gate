@@ -395,6 +395,16 @@ Env : `OPSGATE_GDPR_PURGE_DAYS` (30), `OPSGATE_GDPR_CRON_MINUTES` (60).
 
 ---
 
+## 26. Backlog V3 formalisé — gelé jusqu’à fin pre-GA (17 juillet 2026)
+
+| Sujet | Détail |
+|-------|--------|
+| Doc | `docs/V3-BACKLOG.md` — epics Secure Rewrite, Risk prompt, Shadow AI |
+| Specs | `docs/roadmap-v3/` (déplacées hors grafana) |
+| Règle | **Pas d’implémentation V3** tant que gate pre-GA (stores / pilote / billing) non ouverte |
+
+---
+
 ## Convention pour les prochains changements
 
 Quand tu modifies le produit :

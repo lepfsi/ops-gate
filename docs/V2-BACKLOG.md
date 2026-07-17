@@ -5,7 +5,8 @@
 
 Document de synthèse produit : [`STATUS-V2.md`](./STATUS-V2.md)  
 Traces techniques : [`CHANGELOG-TECHNIQUE.md`](./CHANGELOG-TECHNIQUE.md)  
-Design d’origine : [`architecture/PLATFORM-v2.md`](./architecture/PLATFORM-v2.md)
+Design d’origine : [`architecture/PLATFORM-v2.md`](./architecture/PLATFORM-v2.md)  
+**Suite différenciation (après pre-GA)** : [`V3-BACKLOG.md`](./V3-BACKLOG.md) — **gelé** pour l’instant
 
 ---
 
@@ -90,14 +91,21 @@ Design d’origine : [`architecture/PLATFORM-v2.md`](./architecture/PLATFORM-v2.
 
 ---
 
-## Suite recommandée (post-current)
+## Suite recommandée (post-current) — **finir le pre-GA V2**
 
 1. **Soumission** CWS / AMO / Apple (comptes + review — kit monorepo prêt via `pnpm store:all`)  
-2. **SAML** tests IdP clients réels (C14N exclusive améliorée dans le code)  
-3. ~~Stripe webhook + portal~~ → **livré** (reste : clés prod Dashboard)  
-4. **OCR** pack `fra` embarqué offline (aujourd’hui eng+fra si locale fr, download runtime)  
-5. **OIDC/SAML state** multi-instance (Redis)  
-6. ~~Soft-delete org GDPR full~~ → **livré** (`gdpr-org.ts`, doc `architecture/GDPR-SOFT-DELETE.md`)  
+2. **Pilote client** (checklist [`DEPLOIEMENT-CLIENT.md`](./DEPLOIEMENT-CLIENT.md) §11)  
+3. Clés **Stripe prod** + webhook Dashboard (ou process licence vendor stabilisé)  
+4. **SAML** tests IdP clients réels (C14N exclusive améliorée dans le code)  
+5. **OCR** pack `fra` embarqué offline (aujourd’hui eng+fra si locale fr, download runtime)  
+6. **OIDC/SAML state** multi-instance (Redis) — optionnel HA  
+
+~~Soft-delete org GDPR~~ → **livré** · ~~Stripe portal code~~ → **livré**
+
+### Après gate pre-GA → V3
+
+Ne pas mélanger avec la liste ci-dessus. Backlog différenciation : **[`V3-BACKLOG.md`](./V3-BACKLOG.md)**  
+(Secure Rewrite → Score prompt + Simulation → Shadow AI + Risk user).
 
 ---
 
