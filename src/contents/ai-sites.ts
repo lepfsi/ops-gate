@@ -17,6 +17,7 @@ import {
   detectTextSync,
   ensureRulesWarm,
   maskText,
+  promptRiskOf,
   secureRewriteText
 } from "~lib/detect"
 import {
@@ -519,11 +520,13 @@ function handlePotentialSend(event: Event, sourceEl?: Element | null): void {
   event.stopImmediatePropagation()
   pending = true
 
+  const pr = promptRiskOf(detections)
   console.log(
     "[OpsGate] Envoi bloqué —",
     detections.length,
     "détection(s):",
     detections.map((d) => d.type).join(", "),
+    `risk=${pr.score}/${pr.level}`,
     settings.rulesPackVersion ? `pack=${settings.rulesPackVersion}` : "pack=embedded"
   )
 
@@ -567,6 +570,7 @@ function handlePotentialSend(event: Event, sourceEl?: Element | null): void {
           rw.remainingRiskScore,
           fromPreview ? "(preview)" : ""
         )
+        // score prompt initial déjà loggé à l’intercept
         bypassOnce = true
         setTimeout(() => retriggerSend(sourceEl), 120)
         return

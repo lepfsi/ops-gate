@@ -69,7 +69,9 @@ function severityWeight(s: Severity): number {
   return 4
 }
 
+/** Délègue au score prompt V3-B (compat Secure Rewrite). */
 export function estimateRiskScore(detections: Detection[]): number {
+  // Import dynamique évité (cycle) — formule allégée alignée prompt-risk
   if (!detections.length) return 0
   let score = 0
   const cats = new Set(detections.map((d) => d.ruleId))

@@ -48,7 +48,7 @@ Socle déjà présent à réutiliser :
 | Epic | Priorité | Effort estimé | Spec | Statut |
 |------|----------|---------------|------|--------|
 | **V3-A Secure Rewrite** | P0 | Moyen | [`FEATURE-SPEC-SECURE-REWRITE-v1.md`](./roadmap-v3/FEATURE-SPEC-SECURE-REWRITE-v1.md) | ◐ **livré engine + banner** (17/07) |
-| **V3-B Risk Score prompt + Simulation** | P0 | Faible–moyen | [`FEATURE-SPEC-RISK-SCORE-SIMULATION-v1.md`](./roadmap-v3/FEATURE-SPEC-RISK-SCORE-SIMULATION-v1.md) | ⬜ gelé |
+| **V3-B Risk Score prompt + Simulation** | P0 | Faible–moyen | [`FEATURE-SPEC-RISK-SCORE-SIMULATION-v1.md`](./roadmap-v3/FEATURE-SPEC-RISK-SCORE-SIMULATION-v1.md) | ◐ **livré** (17/07) |
 | **V3-C Shadow AI + Risk Score utilisateur** | P0 | Moyen–élevé | [`SHADOW-AI-RISK-SCORE.md`](./roadmap-v3/SHADOW-AI-RISK-SCORE.md) + [wireframes](./roadmap-v3/SHADOW-AI-RISK-SCORE-WIREFRAMES.md) | ⬜ gelé |
 | **V3-D Dashboard Risk / Analytics** | P1 | Moyen | Wireframes § dashboard | ⬜ |
 | **V3-E AI Trust Score (par modèle)** | P1 | Moyen | Vision § Trust Score | ⬜ |
@@ -97,11 +97,11 @@ Alternative acceptable si besoin commercial RSSI d’abord : **V3-C avant V3-A**
 
 | Item | Notes | Done |
 |------|--------|------|
-| `calculatePromptRiskScore(detections)` | 0–100, factors, recommendation | [ ] |
-| Affichage score dans banner / modal | Niveau low/med/high/critical | [ ] |
-| Simulation Mode (liste fuites + impact) | Auto si score ≥ seuil configurable | [ ] |
-| Lien CTA → Secure Rewrite | Flux intégré | [ ] |
-| Journalisation `prompt_risk_score`, `simulation_shown` | Metadata only | [ ] |
+| `calculatePromptRiskScore(detections)` | 0–100, factors, recommendation | [x] |
+| Affichage score dans banner | Barre + niveau + reco | [x] |
+| Simulation Mode (liste fuites + impact) | Auto si score ≥ 40 ; bouton manuel | [x] |
+| Lien CTA → Secure Rewrite | Depuis simulation | [x] |
+| Journalisation `prompt_risk_score` dans events API | Types/log console — **API meta optionnelle suite** | [ ] |
 
 **Critères** : baisse « send_anyway » high ; clarté score en test user.
 

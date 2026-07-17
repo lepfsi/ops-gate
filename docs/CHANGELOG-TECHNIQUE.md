@@ -428,6 +428,18 @@ Env : `OPSGATE_GDPR_PURGE_DAYS` (30), `OPSGATE_GDPR_CRON_MINUTES` (60).
 
 ---
 
+## 29. V3-B Risk Score prompt + Simulation Mode (17 juillet 2026)
+
+| Sujet | Détail | Fichiers |
+|-------|--------|---------|
+| Score | `calculatePromptRiskScore` 0–100 + factors | `prompt-risk.ts` |
+| Simulation | `buildSimulation` liste fuites + impact | `prompt-risk.ts` |
+| Banner | Risk block + panneau Simulation auto ≥40 | `banner.ts` |
+| CTA | Sim → Secure Rewrite preview | flux intégré |
+| Smoke | `scripts/test-prompt-risk.mjs` | |
+
+---
+
 ## Convention pour les prochains changements
 
 Quand tu modifies le produit :
