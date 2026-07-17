@@ -40,10 +40,14 @@ pnpm build:chrome
 # ou : pnpm build
 ```
 
-1. Ouvrir `chrome://extensions` (ou `edge://extensions`)
-2. Mode développeur = ON
-3. **Charger l’extension non empaquetée**
-4. Dossier : `build/chrome-mv3-prod`
+1. Rebuild : `pnpm build:chrome` (puis `pnpm ext:validate` pour vérifier le package)
+2. Ouvrir `chrome://extensions` (ou `edge://extensions`)
+3. Mode développeur = ON
+4. **Charger l’extension non empaquetée**
+5. Dossier **exact** : `ops-gate\build\chrome-mv3-prod`  
+   ⚠️ Pas la racine du repo, pas un `.zip`, pas `build/` seul.
+
+Si « Impossible de charger l’extension » : relancer `pnpm build:chrome`, recharger ce dossier, regarder le détail d’erreur sous le bandeau rouge (CSP / fichier manquant).
 
 ### Firefox (121+)
 

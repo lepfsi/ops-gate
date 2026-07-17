@@ -9,9 +9,10 @@
     "dev": "plasmo dev",
     "dev:firefox": "plasmo dev --target=firefox-mv3",
     "build": "plasmo build",
-    "build:chrome": "plasmo build --target=chrome-mv3",
-    "build:firefox": "plasmo build --target=firefox-mv3",
-    "build:safari": "plasmo build --target=safari-mv3",
+    "build:chrome": "plasmo build --target=chrome-mv3 && node scripts/fix-extension-html-paths.mjs build/chrome-mv3-prod && node scripts/prune-extension-orphans.mjs build/chrome-mv3-prod",
+    "build:firefox": "plasmo build --target=firefox-mv3 && node scripts/fix-extension-html-paths.mjs build/firefox-mv3-prod && node scripts/prune-extension-orphans.mjs build/firefox-mv3-prod",
+    "build:safari": "plasmo build --target=safari-mv3 && node scripts/fix-extension-html-paths.mjs build/safari-mv3-prod && node scripts/prune-extension-orphans.mjs build/safari-mv3-prod",
+    "ext:validate": "node scripts/validate-extension-package.mjs build/chrome-mv3-prod",
     "package": "plasmo package",
     "package:chrome": "plasmo package --target=chrome-mv3",
     "package:firefox": "plasmo package --target=firefox-mv3",
@@ -137,7 +138,7 @@
       "alarms"
     ],
     "content_security_policy": {
-      "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'; worker-src 'self' blob:"
+      "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'; worker-src 'self'"
     },
     "browser_specific_settings": {
       "gecko": {
