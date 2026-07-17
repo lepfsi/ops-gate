@@ -338,3 +338,36 @@ CREATE TABLE IF NOT EXISTS moving_rules (
 );
 
 CREATE INDEX IF NOT EXISTS moving_rules_org_idx ON moving_rules(org_id);
+
+-- ── Shadow AI tools (V3) ───────────────────────────────────────
+CREATE TABLE IF NOT EXISTS org_ai_tools (
+  org_id TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  tool TEXT NOT NULL,
+  display_name TEXT,
+  status TEXT NOT NULL DEFAULT 'unknown'
+    CHECK (status IN ('authorized', 'unauthorized', 'unknown')),
+  first_seen_at TIMESTAMPTZ,
+  last_seen_at TIMESTAMPTZ,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_by TEXT,
+  PRIMARY KEY (org_id, tool)
+);
+
+CREATE INDEX IF NOT EXISTS org_ai_tools_status_idx ON org_ai_tools(org_id, status);
+
+-- ── User risk scores cache (V3, optionnel — calcul aussi à la volée) ──
+CREATE TABLE IF NOT EXISTS user_risk_scores (
+  id TEXT PRIMARY KEY,
+  org_id TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  agent_id TEXT NOT NULL,
+  score INT NOT NULL CHECK (score >= 0 AND score <= 100),
+  score_previous INT,
+  factors JSONB NOT NULL DEFAULT '{}',
+  period_start TIMESTAMPTZ NOT NULL,
+  period_end TIMESTAMPTZ NOT NULL,
+  calculated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (org_id, agent_id, period_end)
+);
+
+CREATE INDEX IF NOT EXISTS user_risk_scores_org_score_idx
+  ON user_risk_scores(org_id, score DESC);

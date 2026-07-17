@@ -1340,6 +1340,80 @@ export const api = {
       body: JSON.stringify({ confirm })
     }),
 
+  riskSummary: (period: "7d" | "30d" | "90d" = "30d") =>
+    request<Record<string, unknown>>(
+      `/v1/org/risk/summary?period=${encodeURIComponent(period)}`
+    ),
+
+  riskUsers: (opts?: {
+    period?: "7d" | "30d" | "90d"
+    min_score?: number
+    max_score?: number
+    page?: number
+    limit?: number
+    sort?: string
+  }) => {
+    const q = new URLSearchParams()
+    q.set("period", opts?.period || "30d")
+    if (opts?.min_score != null) q.set("min_score", String(opts.min_score))
+    if (opts?.max_score != null) q.set("max_score", String(opts.max_score))
+    if (opts?.page != null) q.set("page", String(opts.page))
+    if (opts?.limit != null) q.set("limit", String(opts.limit))
+    if (opts?.sort) q.set("sort", opts.sort)
+    return request<{
+      ok: boolean
+      users: unknown[]
+      total: number
+      average_score?: number
+    }>(`/v1/org/risk/users?${q.toString()}`)
+  },
+
+  riskUserDetail: (agentId: string, period: "7d" | "30d" | "90d" = "30d") =>
+    request<Record<string, unknown>>(
+      `/v1/org/risk/users/${encodeURIComponent(agentId)}?period=${encodeURIComponent(period)}`
+    ),
+
+  riskRecalculate: (period: "7d" | "30d" | "90d" = "30d") =>
+    request<{ ok: boolean; summary: unknown; users_count: number }>(
+      "/v1/org/risk/recalculate",
+      {
+        method: "POST",
+        body: JSON.stringify({ period })
+      }
+    ),
+
+  shadowAi: (opts?: {
+    period?: "7d" | "30d" | "90d"
+    status?: "all" | "authorized" | "unauthorized" | "unknown"
+  }) => {
+    const q = new URLSearchParams()
+    q.set("period", opts?.period || "30d")
+    q.set("status", opts?.status || "all")
+    return request<{
+      ok: boolean
+      tools: unknown[]
+      counts: {
+        total: number
+        authorized: number
+        unauthorized: number
+        unknown: number
+      }
+    }>(`/v1/org/shadow-ai?${q.toString()}`)
+  },
+
+  patchShadowAi: (
+    tool: string,
+    status: "authorized" | "unauthorized" | "unknown",
+    display_name?: string
+  ) =>
+    request<{ ok: boolean; tool: unknown }>(
+      `/v1/org/shadow-ai/${encodeURIComponent(tool)}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({ status, display_name })
+      }
+    ),
+
   eventsByDecision: (decision: string) =>
     request<{ org_id: string; decision: string; events: EventRow[] }>(
       `/v1/org/events/by-decision/${encodeURIComponent(decision)}`

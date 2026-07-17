@@ -71,6 +71,7 @@ export class MemoryStore implements OpsGateStore {
   private logExports = new Map<string, import("./types").LogExportRecord[]>()
   private recoveryCodes = new Map<string, import("./types").RecoveryCode[]>()
   private inboxMessages: import("./types").UserInboxMessage[] = []
+  private orgAiTools = new Map<string, import("./types").OrgAiTool[]>()
 
   constructor() {
     this.seed()
@@ -443,6 +444,7 @@ export class MemoryStore implements OpsGateStore {
     this.logExports.delete(orgId)
     this.recoveryCodes.delete(orgId)
     this.inboxMessages = this.inboxMessages.filter((m) => m.orgId !== orgId)
+    this.orgAiTools.delete(orgId)
     // sessions
     for (const [tok, s] of [...this.sessions.entries()]) {
       if (s.orgId === orgId) this.sessions.delete(tok)
@@ -2416,6 +2418,51 @@ export class MemoryStore implements OpsGateStore {
       .filter((e) => e.orgId === orgId)
       .slice(-limit)
       .reverse()
+  }
+
+  async listOrgAiTools(orgId: string) {
+    return [...(this.orgAiTools.get(orgId) || [])].sort((a, b) =>
+      a.tool.localeCompare(b.tool)
+    )
+  }
+
+  async upsertOrgAiTool(
+    orgId: string,
+    input: {
+      tool: string
+      status: import("./types").OrgAiToolStatus
+      displayName?: string
+      updatedBy?: string
+      touchSeen?: boolean
+    }
+  ) {
+    const tool = String(input.tool || "")
+      .trim()
+      .toLowerCase()
+      .replace(/^www\./, "")
+    if (!tool) throw new Error("tool_required")
+    const status =
+      input.status === "authorized" || input.status === "unauthorized"
+        ? input.status
+        : "unknown"
+    const now = new Date().toISOString()
+    const list = this.orgAiTools.get(orgId) || []
+    const idx = list.findIndex((t) => t.tool === tool)
+    const prev = idx >= 0 ? list[idx] : undefined
+    const row: import("./types").OrgAiTool = {
+      orgId,
+      tool,
+      displayName: input.displayName || prev?.displayName,
+      status,
+      firstSeenAt: prev?.firstSeenAt || now,
+      lastSeenAt: input.touchSeen ? now : prev?.lastSeenAt || now,
+      updatedAt: now,
+      updatedBy: input.updatedBy || null
+    }
+    if (idx >= 0) list[idx] = row
+    else list.push(row)
+    this.orgAiTools.set(orgId, list)
+    return row
   }
 
   async purgeOldEvents(orgId: string, retentionDays: number) {

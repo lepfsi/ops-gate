@@ -553,6 +553,20 @@ export interface OpsGateStore {
     events: DetectionEventInput[]
   ): Promise<AppendEventsResult>
   listEvents(orgId: string, limit?: number): Promise<StoredEvent[]>
+
+  /** Shadow AI — inventaire outils IA (statut authorized/unauthorized) */
+  listOrgAiTools(orgId: string): Promise<import("./types").OrgAiTool[]>
+  upsertOrgAiTool(
+    orgId: string,
+    input: {
+      tool: string
+      status: import("./types").OrgAiToolStatus
+      displayName?: string
+      updatedBy?: string
+      touchSeen?: boolean
+    }
+  ): Promise<import("./types").OrgAiTool>
+
   /** Purge events plus vieux que retentionDays (défini par l’entreprise) */
   purgeOldEvents(
     orgId: string,
