@@ -3320,7 +3320,7 @@ export function createApp() {
       years?: number
       provision_org?: boolean
       kind?: "full" | "seat_topup"
-      /** Envoyer l’e-mail brandé au contact (défaut: true) */
+      /** Envoyer l’e-mail au contact (défaut: false — PDF manuel pour l’instant) */
       send_email?: boolean
     }
     try {
@@ -3400,8 +3400,8 @@ export function createApp() {
       `[vendor] license issued key=${maskLicenseKey(issued.licenseKey)} kind=${kind} org=${orgCode} seats=${seats} company=${companyName}`
     )
 
-    // E-mail brandé au contact (SMTP plateforme env — pas le SMTP client)
-    const sendEmail = body.send_email !== false
+    // E-mail auto désactivé par défaut (PDF manuel). send_email: true pour activer plus tard.
+    const sendEmail = body.send_email === true
     let mailResult: {
       ok: boolean
       delivery?: string
@@ -3420,7 +3420,6 @@ export function createApp() {
           expiresAt,
           kind,
           tenantCreated: !!provision?.created,
-          // Nouveau client (tenant créé) : login = e-mail licence + 0000
           initialPassword: provision?.created
             ? provision.tempPassword || PRINCIPAL_DEFAULT_PASSWORD
             : null,
@@ -3429,7 +3428,11 @@ export function createApp() {
         mailResult = {
           ok: mailed.ok,
           delivery: mailed.delivery,
-          error: mailed.ok ? undefined : "error" in mailed ? mailed.error : undefined
+          error: mailed.ok
+            ? undefined
+            : "error" in mailed
+              ? mailed.error
+              : undefined
         }
       } catch (e) {
         mailResult = {
