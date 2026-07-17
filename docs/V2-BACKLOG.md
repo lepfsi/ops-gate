@@ -84,7 +84,7 @@ Design d’origine : [`architecture/PLATFORM-v2.md`](./architecture/PLATFORM-v2.
 | Export logs planifié + run-now | ✅ | |
 | Inbox user → admin | ✅ | |
 | Deep-links console | ✅ | |
-| Portal personnel / billing Stripe | ◐ | Checkout API fondations · UI portal V2.1 |
+| Portal personnel / billing Stripe | ✅ | Checkout + Customer Portal UI + webhook sièges (`billing-stripe.ts`) |
 | Vendor desk polish | ✅ | Stats, recherche |
 
 ---
@@ -92,9 +92,9 @@ Design d’origine : [`architecture/PLATFORM-v2.md`](./architecture/PLATFORM-v2.
 ## Suite recommandée (post-current)
 
 1. **Publication** CWS / AMO / Apple (comptes et process métier)  
-2. **SAML** C14N exclusive stricte + tests IdP clients  
-3. **Stripe** webhook → sièges auto + page portal  
-4. **OCR** pack `fra` optionnel / perf worker  
+2. **SAML** tests IdP clients réels (C14N exclusive améliorée dans le code)  
+3. ~~Stripe webhook + portal~~ → **livré** (reste : clés prod Dashboard)  
+4. **OCR** pack `fra` embarqué offline (aujourd’hui eng+fra si locale fr, download runtime)  
 5. **OIDC/SAML state** multi-instance (Redis)  
 6. Soft-delete org GDPR full  
 

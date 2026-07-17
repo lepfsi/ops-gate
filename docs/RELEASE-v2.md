@@ -20,7 +20,7 @@ Après la V1 (extension + control plane + Postgres), la **V2** ajoute la couche 
 | **V2-C MFA** | TOTP + multi-tenant + session challenge + WebAuthn UI/PG | ✅ **Livré** |
 | **V2-D Multi-tenant** | Isolation org, quotas, rate limits, MSP, backups | ✅ **Livré** |
 | **V2-E Store** | Package CWS/AMO + MDM policies | ✅ **Artefacts** · publication compte = ops |
-| **V2-F Compléments** | Audit WORM, CSV import, notif webhooks, exports, inbox | ✅ **Livré** · Stripe portal = ◐ fondations |
+| **V2-F Compléments** | Audit WORM, CSV import, notif webhooks, exports, inbox, **Stripe portal** | ✅ **Livré** |
 
 ## Compléments livrés hors plan initial (valeur terrain)
 
@@ -37,10 +37,10 @@ Après la V1 (extension + control plane + Postgres), la **V2** ajoute la couche 
 | Sujet | Notes |
 |-------|--------|
 | Publication CWS / AMO / App Store | Process éditeur, pas seulement code |
-| Portal personnel + billing Stripe complet | Checkout API présent ; webhook/UI à finaliser |
-| SAML C14N exclusive stricte | Signature IdP déjà exigée en prod |
+| Clés Stripe **production** + webhook Dashboard | Code portal livré (checkout/portal/webhook) |
+| Validation SAML IdP clients | C14N exclusive améliorée dans le code |
 | HA multi-région / multi-AZ | Infra client |
-| OCR pack français embarqué | eng par défaut (poids) |
+| OCR pack français **offline** embarqué | eng+fra si locale fr (download runtime Tesseract) |
 
 ## Prérequis pour annoncer « V2.0 GA »
 

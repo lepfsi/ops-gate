@@ -37,7 +37,7 @@ Il reste surtout la **publication store** réelle, le **billing Stripe GA** et q
 | Moving rules OR/permanent | **Livré** | |
 | Package CWS/AMO/MDM | **Livré (artefacts)** | pas la soumission compte |
 | Safari App Store | **Build only** | packaging Apple à faire |
-| Billing Stripe portal | **Fondations** | checkout API, pas portal UX complet |
+| Billing Stripe portal | **Livré** | Checkout + Customer Portal UI + webhook sièges |
 
 Légende : **Livré** = dans le monorepo et utilisable · **Fondations** = API/config sans parcours produit complet · **Build only** = artefact sans distribution officielle.
 
@@ -60,9 +60,9 @@ Légende : **Livré** = dans le monorepo et utilisable · **Fondations** = API/c
 |-------|----------|
 | Listing CWS/AMO live | Compte éditeur + process review Google/Mozilla |
 | Safari public | Process Apple / Xcode ship |
-| Stripe self-serve complet | Webhook sièges + UI portal personnel |
-| SAML tous IdP | C14N exclusive non stricte partout |
-| OCR multilingue fr | Pack eng par défaut (poids) |
+| Stripe live (clés prod + webhook Dashboard) | Config ops, pas code monorepo |
+| SAML tous IdP en prod | C14N exclusive améliorée ; valider par IdP client |
+| OCR fr offline embarqué | eng+fra si navigateur fr (télécharge pack Tesseract) |
 | HA multi-région | Hors scope actuel |
 
 ---
@@ -74,9 +74,10 @@ Légende : **Livré** = dans le monorepo et utilisable · **Fondations** = API/c
 - [x] Multi-tenant isolé (RLS) + MSP  
 - [x] Audit immuable + backup documenté  
 - [x] Doc déploiement client + guides PDF  
+- [x] Portal personnel Stripe (UI + checkout + portal + webhook sièges)  
 - [ ] Au moins un canal store (CWS unlisted **publié**)  
 - [ ] Pilote client réel validé (checklist DEPLOIEMENT §11)  
-- [ ] Billing ou process licence vendor stabilisé  
+- [ ] Clés Stripe **prod** + webhook Dashboard branché (ou process licence vendor)  
 
 ---
 

@@ -229,6 +229,19 @@ export interface OrgMonitoringSettings {
   /** Titulaire licence (entreprise) */
   licenseDisplay?: OrgLicenseDisplay
   /**
+   * Snapshot billing Stripe (portal personnel / sièges).
+   * Mis à jour par webhooks — pas via PATCH monitoring client.
+   */
+  stripeBilling?: {
+    customerId?: string | null
+    subscriptionId?: string | null
+    subscriptionStatus?: string | null
+    quantity?: number | null
+    lastSessionId?: string | null
+    lastEventAt?: string | null
+    priceId?: string | null
+  }
+  /**
    * Proxy local org (P3 foundations).
    * mode observe = events only ; enforce = futur mask/block (stub P3).
    */
@@ -508,6 +521,15 @@ export const DEFAULT_MONITORING_SETTINGS: OrgMonitoringSettings = {
     activatedAt: null,
     licenseKeyFingerprint: null
   },
+  stripeBilling: {
+    customerId: null,
+    subscriptionId: null,
+    subscriptionStatus: null,
+    quantity: null,
+    lastSessionId: null,
+    lastEventAt: null,
+    priceId: null
+  },
   proxy: {
     enabled: true,
     /** enforce = le proxy coupe les flux medium/high (filtre, y compris uploads textuels) */
@@ -755,6 +777,39 @@ export function mergeMonitoringSettings(
         partial.licenseDisplay.licenseKeyFingerprint !== undefined
           ? partial.licenseDisplay.licenseKeyFingerprint
           : base.licenseDisplay!.licenseKeyFingerprint
+    }
+  }
+  if (partial.stripeBilling && typeof partial.stripeBilling === "object") {
+    const sb = partial.stripeBilling
+    base.stripeBilling = {
+      customerId:
+        sb.customerId !== undefined
+          ? sb.customerId
+          : base.stripeBilling?.customerId ?? null,
+      subscriptionId:
+        sb.subscriptionId !== undefined
+          ? sb.subscriptionId
+          : base.stripeBilling?.subscriptionId ?? null,
+      subscriptionStatus:
+        sb.subscriptionStatus !== undefined
+          ? sb.subscriptionStatus
+          : base.stripeBilling?.subscriptionStatus ?? null,
+      quantity:
+        sb.quantity !== undefined
+          ? sb.quantity
+          : base.stripeBilling?.quantity ?? null,
+      lastSessionId:
+        sb.lastSessionId !== undefined
+          ? sb.lastSessionId
+          : base.stripeBilling?.lastSessionId ?? null,
+      lastEventAt:
+        sb.lastEventAt !== undefined
+          ? sb.lastEventAt
+          : base.stripeBilling?.lastEventAt ?? null,
+      priceId:
+        sb.priceId !== undefined
+          ? sb.priceId
+          : base.stripeBilling?.priceId ?? null
     }
   }
   if (partial.siem && typeof partial.siem === "object") {

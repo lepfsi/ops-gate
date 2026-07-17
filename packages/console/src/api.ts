@@ -1262,6 +1262,37 @@ export const api = {
       body: "{}"
     }),
 
+  billingStatus: () =>
+    request<{
+      enabled: boolean
+      publishable_key: string | null
+      price_seat_configured: boolean
+      webhook_configured?: boolean
+      portal_available?: boolean
+      subscription_status?: string | null
+      subscription_quantity?: number | null
+      has_customer?: boolean
+      org_id?: string | null
+      org_seats?: number
+      is_personal?: boolean
+      note?: string
+    }>("/v1/billing/status"),
+
+  billingCheckout: (quantity: number) =>
+    request<{ ok: boolean; url: string; session_id: string }>(
+      "/v1/billing/checkout",
+      {
+        method: "POST",
+        body: JSON.stringify({ quantity })
+      }
+    ),
+
+  billingPortal: () =>
+    request<{ ok: boolean; url: string }>("/v1/billing/portal", {
+      method: "POST",
+      body: "{}"
+    }),
+
   eventsByDecision: (decision: string) =>
     request<{ org_id: string; decision: string; events: EventRow[] }>(
       `/v1/org/events/by-decision/${encodeURIComponent(decision)}`
