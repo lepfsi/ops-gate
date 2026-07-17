@@ -365,6 +365,22 @@ Détail vivant : `docs/STATUS-V2.md` · `docs/V2-BACKLOG.md` · `docs/architectu
 
 ---
 
+## 24. Soft-delete org GDPR (17 juillet 2026)
+
+| Sujet | Détail | Fichiers |
+|-------|--------|---------|
+| Soft-delete | `deleted_at` + `delete_purge_at` · sessions + agents révoqués | `gdpr-org.ts`, stores |
+| Export DSAR | JSON portabilité (admins, agents, backup config) | `GET /org/gdpr/export` |
+| Restore | Phrase `RESTORE MY ORG` avant purge | `POST /org/gdpr/restore` |
+| Hard purge | Cron CASCADE | `gdpr-cron.ts` |
+| Guards | Enroll / config agent / console hors `/gdpr` | `app.ts` |
+| UI | Paramètres → Général + shell restore login | `App.tsx`, i18n |
+| Doc | `architecture/GDPR-SOFT-DELETE.md` | |
+
+Env : `OPSGATE_GDPR_PURGE_DAYS` (30), `OPSGATE_GDPR_CRON_MINUTES` (60).
+
+---
+
 ## Convention pour les prochains changements
 
 Quand tu modifies le produit :

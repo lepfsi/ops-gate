@@ -31,6 +31,7 @@
 | SSO OIDC/SAML | ✅ | |
 | LDAP + cron | ✅ | |
 | Doc déploiement client | ✅ | `DEPLOIEMENT-CLIENT*.md/.pdf` |
+| Soft-delete org GDPR | ✅ | export + soft-delete + restore + hard purge |
 
 ---
 

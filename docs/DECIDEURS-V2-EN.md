@@ -137,7 +137,7 @@ User ──► AI website (browser)
 |----------------------------|---------------------|
 | Multi-browser, proxy, SSO, multi-tenant MFA, passkeys, LDAP, SIEM, MSI | Real store listing (CWS/AMO/Apple), customer pilot |
 | PDF/DOCX/PPTX/XLSX scan + image OCR | Offline FR OCR pack, public Safari App Store |
-| WORM audit, backup, multi-channel alerts, MSP, **Stripe portal** (checkout/seats) | Production Stripe keys + full GDPR org soft-delete |
+| WORM audit, backup, multi-channel alerts, MSP, **Stripe portal**, **GDPR soft-delete** | Production Stripe keys, store listings, customer pilot |
 
 **Deployment**: integrator guide [`DEPLOIEMENT-CLIENT-EN.md`](./DEPLOIEMENT-CLIENT-EN.md) (+ PDF).  
 **Progress detail**: [`STATUS-V2.md`](./STATUS-V2.md) · [`V2-BACKLOG.md`](./V2-BACKLOG.md).

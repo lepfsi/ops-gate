@@ -101,6 +101,17 @@ async function main() {
     )
   }
 
+  // Soft-delete RGPD → hard purge après délai de grâce
+  try {
+    const { startGdprCron } = await import("./gdpr-cron")
+    startGdprCron(store)
+  } catch (e) {
+    console.warn(
+      "[opsgate-api] GDPR cron init skipped:",
+      e instanceof Error ? e.message : e
+    )
+  }
+
   serve({ fetch: app.fetch, port, hostname: "127.0.0.1" })
 }
 

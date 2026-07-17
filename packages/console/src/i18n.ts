@@ -223,6 +223,29 @@ const fr: Dict = {
   "settings.tab.general": "Général",
   "settings.tab.logs": "Gestion des logs",
   "settings.tab.license": "Gestion des licences",
+  "gdpr.title": "RGPD — Données & suppression",
+  "gdpr.hint":
+    "Export de portabilité, puis soft-delete de l’organisation. Après le délai de grâce, purge définitive (CASCADE). Les agents doivent être ré-enrôlés si vous restaurez.",
+  "gdpr.export": "Exporter mes données (JSON)",
+  "gdpr.exported": "Export RGPD téléchargé",
+  "gdpr.softDelete": "Supprimer l’organisation (soft-delete)",
+  "gdpr.deleteConfirm": "Tapez exactement la phrase de confirmation",
+  "gdpr.restoreConfirm": "Tapez la phrase de restauration",
+  "gdpr.reason": "Motif (optionnel)",
+  "gdpr.reasonPh": "ex. fin de contrat, demande DPO…",
+  "gdpr.deleteWarn":
+    "Confirmer la suppression ? Sessions coupées, agents révoqués, enroll bloqué. Restauration possible pendant le délai de grâce.",
+  "gdpr.deleted": "Organisation en cours de suppression",
+  "gdpr.deletedOk": "Soft-delete enregistré — reconnectez-vous pour restaurer si besoin",
+  "gdpr.purgeAt": "Purge définitive prévue",
+  "gdpr.days": "j restants",
+  "gdpr.restore": "Restaurer l’organisation",
+  "gdpr.restored": "Organisation restaurée — ré-enrôlez les agents",
+  "gdpr.protected":
+    "Org DEMO protégée : soft-delete désactivé (OPSGATE_ALLOW_DEMO_DELETE=1 + force pour lab).",
+  "gdpr.shellTitle": "Organisation en suppression (RGPD)",
+  "gdpr.shellHint":
+    "Cette organisation est soft-deleted. Vous pouvez exporter vos données ou la restaurer avant la purge définitive. Les agents doivent être ré-enrôlés après restauration.",
   "settings.tab.mail": "E-mail / SMTP",
   "mail.title": "Serveur SMTP",
   "mail.help":
@@ -897,6 +920,29 @@ const en: Dict = {
   "settings.tab.general": "General",
   "settings.tab.logs": "Log management",
   "settings.tab.license": "License management",
+  "gdpr.title": "GDPR — Data & deletion",
+  "gdpr.hint":
+    "Portability export, then org soft-delete. After the grace period, hard purge (CASCADE). Re-enroll agents if you restore.",
+  "gdpr.export": "Export my data (JSON)",
+  "gdpr.exported": "GDPR export downloaded",
+  "gdpr.softDelete": "Delete organization (soft-delete)",
+  "gdpr.deleteConfirm": "Type the confirmation phrase exactly",
+  "gdpr.restoreConfirm": "Type the restore phrase",
+  "gdpr.reason": "Reason (optional)",
+  "gdpr.reasonPh": "e.g. end of contract, DPO request…",
+  "gdpr.deleteWarn":
+    "Confirm deletion? Sessions killed, agents revoked, enroll blocked. Restore possible during the grace window.",
+  "gdpr.deleted": "Organization scheduled for deletion",
+  "gdpr.deletedOk": "Soft-delete saved — sign in again to restore if needed",
+  "gdpr.purgeAt": "Hard purge scheduled",
+  "gdpr.days": "days left",
+  "gdpr.restore": "Restore organization",
+  "gdpr.restored": "Organization restored — re-enroll agents",
+  "gdpr.protected":
+    "DEMO org is protected: soft-delete disabled (set OPSGATE_ALLOW_DEMO_DELETE=1 + force for lab).",
+  "gdpr.shellTitle": "Organization pending deletion (GDPR)",
+  "gdpr.shellHint":
+    "This organization is soft-deleted. Export your data or restore before hard purge. Re-enroll agents after restore.",
   "settings.tab.mail": "Email / SMTP",
   "mail.title": "SMTP server",
   "mail.help":
