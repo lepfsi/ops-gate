@@ -57,6 +57,22 @@ JOBS = [
         "lang": "FR",
         "footer": "Guide de test V2",
     },
+    {
+        "md": ROOT / "docs" / "DEPLOIEMENT-CLIENT.md",
+        "out": ROOT / "docs" / "DEPLOIEMENT-CLIENT.pdf",
+        "title": "OpsGate — Installation & deploiement client",
+        "subtitle": "Integrateurs · Admin systeme · Pilote DSI/RSSI",
+        "lang": "FR",
+        "footer": "Deploiement client",
+    },
+    {
+        "md": ROOT / "docs" / "DEPLOIEMENT-CLIENT-EN.md",
+        "out": ROOT / "docs" / "DEPLOIEMENT-CLIENT-EN.pdf",
+        "title": "OpsGate — Customer installation & deployment",
+        "subtitle": "Integrators · System admins · Pilot CIO/CISO teams",
+        "lang": "EN",
+        "footer": "Customer deployment",
+    },
 ]
 
 
