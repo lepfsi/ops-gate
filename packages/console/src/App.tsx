@@ -2457,7 +2457,7 @@ function SummaryView({
                       <td>
                         <strong>
                           {(e.device_label || "")
-                            .replace(/^OpsGate\s+Proxy\s*[-:--]?\s*/i, "")
+                            .replace(/^OpsGate\s+Proxy\s*[-:]?\s*/i, "")
                             .trim() || " - "}
                         </strong>
                       </td>
@@ -10582,7 +10582,7 @@ function EventsView({
                       <td>
                         <strong>
                           {(e.device_label || "")
-                            .replace(/^OpsGate\s+Proxy\s*[-:--]?\s*/i, "")
+                            .replace(/^OpsGate\s+Proxy\s*[-:]?\s*/i, "")
                             .trim() || " - "}
                         </strong>
                         {e.source === "proxy" ? (
