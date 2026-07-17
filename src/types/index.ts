@@ -10,7 +10,11 @@ export type {
   Detection
 } from "@opsgate/engine"
 
-export type UserDecision = "mask_send" | "send_anyway" | "cancel"
+export type UserDecision =
+  | "mask_send"
+  | "secure_rewrite"
+  | "send_anyway"
+  | "cancel"
 export type DetectionSource = "prompt" | "file"
 export type AgentMode = "local_only" | "org_managed" | "org_managed_strict"
 export type DefaultAction = "warn" | "mask_recommend" | "mask_force" | "block"
@@ -25,11 +29,14 @@ export interface PolicyUserMessages {
   maskForceTitle: string
   maskForceBody: string
   btnMask: string
+  /** Secure Rewrite — action principale recommandée */
+  btnSecureRewrite: string
   btnSendAnyway: string
   btnCancel: string
   btnBlockAck: string
   toastCancel: string
   toastMask: string
+  toastSecureRewrite: string
   toastSendAnyway: string
   toastBlocked: string
   alertTitleFile: string
@@ -48,12 +55,15 @@ export const DEFAULT_USER_MESSAGES: PolicyUserMessages = {
   maskForceTitle: "Masquage obligatoire (politique admin)",
   maskForceBody:
     "Votre administrateur impose le masquage des données sensibles avant tout envoi. L’envoi « tel quel » n’est pas autorisé.",
-  btnMask: "Masquer & Envoyer",
+  btnMask: "Masquer simplement",
+  btnSecureRewrite: "Secure Rewrite & envoyer",
   btnSendAnyway: "Envoyer quand même",
   btnCancel: "Annuler",
   btnBlockAck: "Compris — ne pas envoyer",
   toastCancel: "Envoi annulé — vos données n’ont pas été transmises à l’IA.",
   toastMask: "Données masquées selon la politique — envoi en cours…",
+  toastSecureRewrite:
+    "Version sécurisée appliquée (Secure Rewrite) — envoi en cours…",
   toastSendAnyway:
     "Envoi sans masquage — action journalisée pour votre administrateur.",
   toastBlocked:

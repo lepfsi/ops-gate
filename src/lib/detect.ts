@@ -1,8 +1,11 @@
 import {
   detectSensitiveData,
   maskSensitiveData,
+  secureRewrite,
   type Detection,
-  type DetectionRule
+  type DetectionRule,
+  type RewriteResult,
+  type SecureRewriteOptions
 } from "@opsgate/engine"
 
 import {
@@ -33,6 +36,15 @@ export function maskText(
   rules: DetectionRule[] | null
 ): string {
   return maskSensitiveData(text, detections, rules)
+}
+
+/** Secure Rewrite (V3) — anonymisation intelligente */
+export function secureRewriteText(
+  text: string,
+  detections: Detection[],
+  options?: SecureRewriteOptions
+): RewriteResult {
+  return secureRewrite(text, detections, options)
 }
 
 /** Sync path after ensureRulesWarm() — critical for preventDefault */

@@ -70,7 +70,7 @@ async function maybeReport(entry: JournalEntry) {
       ts: new Date(entry.timestamp).toISOString(),
       source,
       hostname: entry.hostname || "unknown",
-      decision: entry.decision, // mask_send | send_anyway | cancel
+      decision: entry.decision, // mask_send | secure_rewrite | send_anyway | cancel
       detection_count: entry.detectionCount ?? 0,
       highest_severity: severity,
       rule_ids: entry.ruleIds?.length
@@ -81,7 +81,8 @@ async function maybeReport(entry: JournalEntry) {
       types: entry.types?.length
         ? entry.types
         : [entry.decision],
-      masked: !!entry.masked,
+      // secure_rewrite compte comme contenu neutralisé (masked=true)
+      masked: !!entry.masked || entry.decision === "secure_rewrite",
       file_names: entry.fileNames ?? null,
       // Identifiant appareil (label enroll) — pas le hostname du site IA
       device_label: settings.deviceLabel || undefined
