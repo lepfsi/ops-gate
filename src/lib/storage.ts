@@ -41,8 +41,9 @@ export async function appendJournal(
   const next = [full, ...journal].slice(0, MAX_JOURNAL)
   await ext.storage.local.set({ [JOURNAL_KEY]: next })
 
-  // Fire-and-forget cloud event (metadata only) + file d'attente si échec
-  void maybeReport(full)
+  // Attendre le report (ou mise en file) pour garder le SW MV3 vivant
+  // jusqu’à la fin du POST — sinon Chrome tue le worker et l’event est perdu.
+  await maybeReport(full)
 
   return full
 }
@@ -50,12 +51,27 @@ export async function appendJournal(
 async function maybeReport(entry: JournalEntry) {
   try {
     const settings = await getSettings()
-    if (settings.mode === "local_only" || !settings.agentToken) return
+    if (settings.mode === "local_only" || !settings.agentToken) {
+      console.warn(
+        "[OpsGate] event not reported (not enrolled / local_only)",
+        entry.decision
+      )
+      return
+    }
     // Mode personnel : pas d’events cloud (privacy)
-    if (settings.personalAccount === true) return
+    if (settings.personalAccount === true) {
+      console.warn("[OpsGate] event not reported (personal account)", entry.decision)
+      return
+    }
     // Org enrollée : envoyer sauf si policy a coupé explicitement le reporting.
     // Ne pas bloquer sur licence/security — une décision utilisateur doit remonter.
-    if (settings.eventReporting === false) return
+    if (settings.eventReporting === false) {
+      console.warn(
+        "[OpsGate] event not reported (eventReporting=false)",
+        entry.decision
+      )
+      return
+    }
 
     // cancel → severity low (spec console)
     const severity =
@@ -91,6 +107,8 @@ async function maybeReport(entry: JournalEntry) {
     const ok = await reportEvents([payload])
     if (!ok) {
       console.warn("[OpsGate] event report failed (queued)", entry.decision)
+    } else {
+      console.log("[OpsGate] event reported", entry.decision, entry.id)
     }
   } catch (e) {
     console.warn("[OpsGate] event report error", e)

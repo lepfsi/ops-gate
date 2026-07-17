@@ -50,25 +50,67 @@ export function isFirefox(): boolean {
 
 /**
  * sendMessage promisifié (Firefox browser.* + Chrome).
+ * Utiliser systématiquement cette forme (callback) pour réveiller le SW MV3
+ * et récupérer lastError — le fire-and-forget perd des messages.
  */
 export function sendMessage<T = unknown>(message: unknown): Promise<T> {
   const api = ext
   return new Promise((resolve, reject) => {
+    let settled = false
+    const finish = (fn: () => void) => {
+      if (settled) return
+      settled = true
+      fn()
+    }
     try {
-      const ret = api.runtime.sendMessage(message, (response: T) => {
-        const err = api.runtime.lastError
-        if (err) {
-          reject(new Error(err.message || String(err)))
-          return
+      // Chrome callback style (MV3) — réveille le service worker
+      const maybePromise = api.runtime.sendMessage(
+        message,
+        (response: T) => {
+          const err = api.runtime.lastError
+          if (err) {
+            finish(() =>
+              reject(new Error(err.message || String(err)))
+            )
+            return
+          }
+          finish(() => resolve(response))
         }
-        resolve(response)
-      })
-      // Promise-based browser API
-      if (ret && typeof (ret as Promise<T>).then === "function") {
-        ;(ret as Promise<T>).then(resolve, reject)
+      ) as unknown
+      // Firefox browser.* : renvoie souvent une Promise (sans callback fiable)
+      if (
+        maybePromise &&
+        typeof (maybePromise as Promise<T>).then === "function"
+      ) {
+        ;(maybePromise as Promise<T>).then(
+          (v) => finish(() => resolve(v)),
+          (e) => finish(() => reject(e))
+        )
       }
     } catch (e) {
-      reject(e)
+      finish(() => reject(e))
     }
   })
+}
+
+/** sendMessage avec retries (SW endormi / extension reload). */
+export async function sendMessageWithRetry<T = unknown>(
+  message: unknown,
+  attempts = 3,
+  baseDelayMs = 120
+): Promise<T> {
+  let lastErr: unknown
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await sendMessage<T>(message)
+    } catch (e) {
+      lastErr = e
+      if (i < attempts - 1) {
+        await new Promise((r) => setTimeout(r, baseDelayMs * (i + 1)))
+      }
+    }
+  }
+  throw lastErr instanceof Error
+    ? lastErr
+    : new Error(String(lastErr || "sendMessage_failed"))
 }

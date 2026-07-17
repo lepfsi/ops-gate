@@ -375,15 +375,26 @@ export async function reportEvents(
   const settings = await getSettings()
   if (events.length === 0) return false
   if (settings.mode === "local_only" || !settings.agentToken) {
+    await setSettings({ lastEventError: "not_enrolled_or_local_only" })
     return false
   }
   // Personnel : pas de télémétrie cloud
-  if (settings.personalAccount === true) return false
+  if (settings.personalAccount === true) {
+    await setSettings({ lastEventError: "personal_no_telemetry" })
+    return false
+  }
   // Org : envoyer sauf coupure explicite policy (false).
   // undefined / true → on envoie (évite sticky false avant 1er sync).
-  if (settings.eventReporting === false) return false
+  if (settings.eventReporting === false) {
+    await setSettings({ lastEventError: "event_reporting_disabled" })
+    return false
+  }
 
   try {
+    // File d’abord (persistance SW) puis POST — si le worker est tué
+    // entre enqueue et réponse, le flush auto-sync récupère les events.
+    await enqueueEvents(events)
+
     const res = await fetch(apiUrl(settings.apiBaseUrl, "/v1/events/batch"), {
       method: "POST",
       headers: {
@@ -395,17 +406,39 @@ export async function reportEvents(
     })
     if (!res.ok) {
       const text = await res.text().catch(() => "")
-      await enqueueEvents(events)
       await setSettings({
         lastEventError: `http_${res.status}${text ? ":" + text.slice(0, 120) : ""}`
       })
       return false
     }
+    // Retirer de la file les client_event_id acceptés (idempotent côté API)
+    try {
+      const q = await getEventQueue()
+      const sent = new Set(
+        events
+          .map((e) => String((e as { client_event_id?: string }).client_event_id || ""))
+          .filter(Boolean)
+      )
+      if (sent.size > 0) {
+        await setEventQueue(
+          q.filter(
+            (e) =>
+              !sent.has(
+                String((e as { client_event_id?: string }).client_event_id || "")
+              )
+          )
+        )
+      }
+    } catch {
+      /* ignore queue prune */
+    }
     // Même si accepted partiel, on considère le batch OK
     await setSettings({ lastEventError: undefined })
+    // Tenter le reste de la file
+    void flushEventQueue(settings)
     return true
   } catch (e) {
-    await enqueueEvents(events)
+    // Déjà enqueued ci-dessus
     await setSettings({ lastEventError: String(e) })
     return false
   }
