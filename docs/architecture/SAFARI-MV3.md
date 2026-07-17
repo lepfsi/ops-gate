@@ -2,11 +2,15 @@
 
 ## Statut
 
-Plasmo génère une cible **`safari-mv3`** :
+Plasmo génère une cible **`safari-mv3`**.  
+**Prep store** : `pnpm store:safari` → `dist/safari-store/` (+ guide [`PUBLICATION-STORES.md`](../PUBLICATION-STORES.md)).
 
 ```powershell
 pnpm build:safari
 # → build/safari-mv3-prod/
+
+pnpm store:safari
+# → dist/safari-store/extension/ + convert-on-macos.sh
 ```
 
 Safari Web Extensions (macOS / iOS) nécessitent en plus :

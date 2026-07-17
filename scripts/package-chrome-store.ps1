@@ -38,8 +38,26 @@ if (-not $SkipBuild) {
   }
 }
 
-if (-not (Test-Path (Join-Path $BuildDir "manifest.json"))) {
+$manifestPath = Join-Path $BuildDir "manifest.json"
+if (-not (Test-Path $manifestPath)) {
   Write-Error "Build manquant: $BuildDir — lancez pnpm build:chrome"
+}
+
+# Validate manifest (MV3 + version)
+$man = Get-Content $manifestPath -Raw | ConvertFrom-Json
+if ($man.manifest_version -ne 3) {
+  Write-Error "manifest_version must be 3 (got $($man.manifest_version))"
+}
+Write-Host "Manifest v$($man.manifest_version) name=$($man.name) version=$($man.version)" -ForegroundColor DarkCyan
+# Refuse accidental source maps / secrets in package tree
+$bad = Get-ChildItem $BuildDir -Recurse -File -ErrorAction SilentlyContinue |
+  Where-Object {
+    $_.Name -match '\.map$' -or
+    $_.Name -match '^\.env' -or
+    $_.FullName -match '\\node_modules\\'
+  }
+if ($bad) {
+  Write-Warning "Fichiers inhabituels dans le build (non bloquant) : $($bad.Name -join ', ')"
 }
 
 if (Test-Path $OutRoot) {
@@ -151,6 +169,19 @@ if (Test-Path $mdmSrc) {
   Copy-Item -Recurse -Force (Join-Path $mdmSrc "*") $mdmOut
 }
 
+# Common store materials
+$common = Join-Path $Root "packaging\store-common"
+if (Test-Path $common) {
+  Copy-Item (Join-Path $common "review-notes-en.txt") (Join-Path $listing "review-notes-en.txt") -ErrorAction SilentlyContinue
+  Copy-Item (Join-Path $common "privacy-policy-hosting.md") (Join-Path $listing "privacy-policy-hosting.md") -ErrorAction SilentlyContinue
+}
+
+# Icons snapshot for store upload convenience
+$icon128 = Join-Path $Root "assets\icons\icon-128.png"
+if (Test-Path $icon128) {
+  Copy-Item $icon128 (Join-Path $listing "icon-128.png")
+}
+
 Write-Host @"
 
 === Chrome Store package ready ===
@@ -161,5 +192,6 @@ Write-Host @"
 
 Upload ZIP to https://chrome.google.com/webstore/devconsole
 Then configure ExtensionInstallForcelist with the published Extension ID.
+Full guide: docs/PUBLICATION-STORES.md
 
 "@ -ForegroundColor Green

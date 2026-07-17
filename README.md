@@ -57,23 +57,19 @@ pnpm build:firefox
 
 Doc détaillée : [`docs/architecture/FIREFOX-MV3.md`](docs/architecture/FIREFOX-MV3.md)
 
-### Chrome Web Store + MDM
+### Publication stores (Chrome · Firefox · Safari)
 
 ```bash
-pnpm store:chrome
-# → dist/chrome-store/opsgate-*-chrome.zip + policies MDM
+pnpm store:all
+# → dist/chrome-store/ · dist/firefox-amo/ · dist/safari-store/ · dist/STORES-INDEX.md
+
+pnpm store:chrome    # CWS + MDM
+pnpm store:firefox   # AMO + policies
+pnpm store:safari    # prep Xcode / App Store
 ```
 
-Voir [`docs/architecture/CHROME-WEB-STORE-MDM.md`](docs/architecture/CHROME-WEB-STORE-MDM.md).
-
-### Firefox AMO + enterprise
-
-```bash
-pnpm store:firefox
-# → dist/firefox-amo/opsgate-*-firefox.zip + policies.json template
-```
-
-Voir [`docs/architecture/FIREFOX-AMO.md`](docs/architecture/FIREFOX-AMO.md).
+Guide unifié : [`docs/PUBLICATION-STORES.md`](docs/PUBLICATION-STORES.md)  
+MDM Chrome : [`docs/architecture/CHROME-WEB-STORE-MDM.md`](docs/architecture/CHROME-WEB-STORE-MDM.md) · Firefox : [`docs/architecture/FIREFOX-AMO.md`](docs/architecture/FIREFOX-AMO.md)
 
 > Ne chargez **pas** la racine du repo.
 

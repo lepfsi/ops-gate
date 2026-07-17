@@ -17,6 +17,8 @@
     "package:firefox": "plasmo package --target=firefox-mv3",
     "store:chrome": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-chrome-store.ps1",
     "store:firefox": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-firefox-amo.ps1",
+    "store:safari": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-safari-store.ps1",
+    "store:all": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-all-stores.ps1",
     "build:load": "plasmo build",
     "build:all": "plasmo build --target=chrome-mv3 && plasmo build --target=firefox-mv3 && plasmo build --target=safari-mv3",
     "docs:pdf:v2": "python scripts/build-v2-docs-pdf.py",

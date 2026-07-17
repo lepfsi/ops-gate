@@ -5,7 +5,8 @@
 1. Publier l’extension sur **[addons.mozilla.org](https://addons.mozilla.org)** (listed ou **unlisted**).  
 2. Distribuer en entreprise via **XPI signé** + `policies.json` (force-install).
 
-Complète le build MV3 : [`FIREFOX-MV3.md`](./FIREFOX-MV3.md).
+Complète le build MV3 : [`FIREFOX-MV3.md`](./FIREFOX-MV3.md).  
+**Guide multi-canal** : [`../PUBLICATION-STORES.md`](../PUBLICATION-STORES.md).
 
 ## Package
 
@@ -13,6 +14,7 @@ Complète le build MV3 : [`FIREFOX-MV3.md`](./FIREFOX-MV3.md).
 cd ops-gate
 pnpm store:firefox
 # ou
+pnpm store:all
 .\scripts\package-firefox-amo.ps1
 ```
 

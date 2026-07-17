@@ -5,11 +5,15 @@
 1. **Publier** l’extension sur le Chrome Web Store (ou Edge Add-ons).  
 2. **Forcer l’install** sur le parc via GPO / Intune / Chrome Enterprise (non désinstallable par l’utilisateur).
 
+**Guide publication multi-canal** : [`../PUBLICATION-STORES.md`](../PUBLICATION-STORES.md).
+
 ## Package store
 
 ```powershell
 cd ops-gate
 pnpm store:chrome
+# ou tous les stores :
+pnpm store:all
 # ou
 .\scripts\package-chrome-store.ps1
 ```

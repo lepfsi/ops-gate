@@ -19,7 +19,7 @@ Après la V1 (extension + control plane + Postgres), la **V2** ajoute la couche 
 | **V2-B SSO** | OIDC (JWKS, JIT, enforce) + SAML SP | ✅ **Livré** (C14N strict = suite) |
 | **V2-C MFA** | TOTP + multi-tenant + session challenge + WebAuthn UI/PG | ✅ **Livré** |
 | **V2-D Multi-tenant** | Isolation org, quotas, rate limits, MSP, backups | ✅ **Livré** |
-| **V2-E Store** | Package CWS/AMO + MDM policies | ✅ **Artefacts** · publication compte = ops |
+| **V2-E Store** | Package CWS/AMO/Safari + MDM + runbook | ✅ **Kit monorepo** · soumission compte = ops |
 | **V2-F Compléments** | Audit WORM, CSV import, notif webhooks, exports, inbox, **Stripe portal** | ✅ **Livré** |
 
 ## Compléments livrés hors plan initial (valeur terrain)
