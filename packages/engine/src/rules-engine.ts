@@ -122,9 +122,18 @@ function shouldApplyRule(rule: DetectionRule, text: string): boolean {
   return true
 }
 
-function truncateMatch(match: string, max = 48): string {
+/**
+ * Aperçu UI uniquement. Ne pas utiliser pour rewrite/mask :
+ * la troncature cassait Secure Rewrite (match absent du texte source).
+ */
+export function truncateMatchPreview(match: string, max = 48): string {
   const cleaned = match.replace(/\s+/g, " ").trim()
   return cleaned.length > max ? cleaned.slice(0, max) + "…" : cleaned
+}
+
+/** @deprecated utiliser truncateMatchPreview pour l’affichage */
+function truncateMatch(match: string, max = 48): string {
+  return truncateMatchPreview(match, max)
 }
 
 export function isValidLuhn(num: string): boolean {
@@ -382,7 +391,9 @@ export function runRulesEngine(
           type: rule.name,
           category: rule.category,
           severity: rule.severity,
-          match: truncateMatch(raw),
+          // Match complet requis pour Secure Rewrite / re-apply.
+          // Tronquer uniquement à l’affichage (banner, toast).
+          match: raw.replace(/\s+/g, " ").trim() || raw,
           description: rule.description,
           actionDefault: rule.action_default ?? "warn"
         })

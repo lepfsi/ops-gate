@@ -966,16 +966,18 @@ export function showAlertBanner(
   const details = root.querySelector("#og-details") as HTMLElement
   details.innerHTML = detections
     .slice(0, 40)
-    .map(
-      (d) => `
+    .map((d) => {
+      const preview =
+        d.match.length > 64 ? d.match.slice(0, 64) + "…" : d.match
+      return `
       <div class="item">
         <span class="sev" style="background:${SEVERITY_COLOR[d.severity] ?? "#64748b"}">${d.severity}</span>
         <div>
           <div class="item-type">${escapeHtml(d.type)}${d.category === "infra" ? " · infra" : ""}</div>
-          <div class="item-match">${escapeHtml(d.match)}</div>
+          <div class="item-match">${escapeHtml(preview)}</div>
         </div>
       </div>`
-    )
+    })
     .join("")
   if (detections.length > 40) {
     details.innerHTML += `<div class="sub" style="padding:6px 10px">… et ${detections.length - 40} de plus</div>`
