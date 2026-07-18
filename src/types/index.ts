@@ -44,26 +44,30 @@ export interface PolicyUserMessages {
 }
 
 export const DEFAULT_USER_MESSAGES: PolicyUserMessages = {
-  adminNotice: "Politique de sécurité de votre organisation.",
+  adminNotice:
+    "Restriction appliquée par la politique de sécurité de votre organisation (OpsGate).",
   alertTitle: "Données sensibles détectées",
-  alertBody: "Choisissez une action avant l'envoi.",
+  alertBody:
+    "Protection active avant envoi vers l'IA. Choisissez une action autorisée.",
   blockTitle: "Envoi non autorisé",
   blockBody:
-    "La politique bloque cet envoi. Contactez votre administrateur si besoin.",
+    "La politique de votre organisation bloque cet envoi. Contactez l'administrateur si vous avez besoin d'une exception.",
   maskForceTitle: "Masquage obligatoire",
-  maskForceBody: "L'envoi sans masquage n'est pas autorisé.",
-  btnMask: "Masquer",
-  btnSecureRewrite: "Secure Rewrite",
+  maskForceBody:
+    "Votre administrateur impose le masquage des données sensibles avant tout envoi.",
+  btnMask: "Masquer simplement",
+  btnSecureRewrite: "Secure Rewrite & envoyer",
   btnSendAnyway: "Envoyer quand même",
   btnCancel: "Annuler",
   btnBlockAck: "Compris",
-  toastCancel: "Envoi annulé.",
+  toastCancel: "Envoi annulé. Aucune donnée transmise.",
   toastMask: "Données masquées. Envoi en cours…",
   toastSecureRewrite: "Secure Rewrite appliqué. Envoi en cours…",
-  toastSendAnyway: "Envoi journalisé.",
+  toastSendAnyway: "Envoi journalisé pour votre administrateur.",
   toastBlocked: "Envoi bloqué. Aucune donnée transmise.",
   alertTitleFile: "Fichier : données sensibles",
-  alertBodyFile: "Choisissez une action avant de joindre le fichier."
+  alertBodyFile:
+    "Analyse du fichier avant envoi à l'IA. Choisissez une action autorisée."
 }
 
 export function mergeUserMessages(

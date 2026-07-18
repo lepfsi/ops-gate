@@ -1643,6 +1643,35 @@ html[data-theme="dark"] .dash-context-panel {
   margin-bottom: 8px;
 }
 
+.dash-add-metric {
+  margin: 4px 0 20px;
+  display: flex;
+  justify-content: center;
+}
+.dash-add-metric-btn {
+  min-width: 220px;
+  border-style: dashed !important;
+  border-width: 1.5px !important;
+  padding: 12px 20px !important;
+  font-weight: 700;
+}
+.dash-add-metric-panel {
+  width: min(640px, 100%);
+  margin: 0 auto;
+  padding: 16px 18px;
+}
+.dash-add-metric-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 10px;
+}
+.dash-add-metric-item {
+  justify-content: flex-start;
+  text-align: left;
+  padding: 12px 14px !important;
+  min-height: 48px;
+}
+
 .dash-widget {
   margin-bottom: 0;
   min-height: 140px;
