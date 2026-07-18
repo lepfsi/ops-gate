@@ -122,6 +122,8 @@ C. Suite V3 (après GA)
 | [`RELEASE-v3.md`](./RELEASE-v3.md) | Cut V3 P0 |
 | [`V2-BACKLOG.md`](./V2-BACKLOG.md) | Reste V2 |
 | [`V3-BACKLOG.md`](./V3-BACKLOG.md) | Epics V3 |
+| **[`BACKLOG-90J-P0-P2.md`](./BACKLOG-90J-P0-P2.md)** | **Tickets actionnables 90 j (P0–P2)** |
+| [`BACKLOG-90J-import.csv`](./BACKLOG-90J-import.csv) | Import Linear / CSV |
 | [`DEPLOIEMENT-CLIENT.md`](./DEPLOIEMENT-CLIENT.md) | Livrable client |
 | [`DECIDEURS-V2-FR.md`](./DECIDEURS-V2-FR.md) | Pitch décideurs |
 
