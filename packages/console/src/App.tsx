@@ -7177,6 +7177,11 @@ function PolicyView({
   const [profHosts, setProfHosts] = useState(AI_HOST_PRESETS.join("\n"))
   // HostPicker edits via setProfHosts(hosts.join("\n"))
   const [profScan, setProfScan] = useState(true)
+  const [profScanConfigs, setProfScanConfigs] = useState(true)
+  const [profScanDatabases, setProfScanDatabases] = useState(true)
+  const [profScanOffice, setProfScanOffice] = useState(true)
+  const [profScanImages, setProfScanImages] = useState(false)
+  const [profWarnMedia, setProfWarnMedia] = useState(true)
   const [profEvents, setProfEvents] = useState(true)
   const [profProtect, setProfProtect] = useState(false)
   const [profAction, setProfAction] = useState("mask_recommend")
@@ -7647,7 +7652,26 @@ function PolicyView({
                         {(p.enabledHosts || []).length} {t("policy.sites")}
                       </span>
                     </td>
-                    <td>{p.scanUploads ? t("common.yes") : t("common.no")}</td>
+                    <td>
+                      {p.scanUploads ? (
+                        <span
+                          className="mono"
+                          style={{ fontSize: 10 }}
+                          title="configs / DB / office / OCR / media">
+                          {[
+                            p.fileScan?.configs !== false ? "cfg" : null,
+                            p.fileScan?.databases !== false ? "db" : null,
+                            p.fileScan?.office !== false ? "pdf" : null,
+                            p.fileScan?.images === true ? "ocr" : null,
+                            p.fileScan?.media_warn !== false ? "av" : null
+                          ]
+                            .filter(Boolean)
+                            .join(" · ") || t("common.yes")}
+                        </span>
+                      ) : (
+                        t("common.no")
+                      )}
+                    </td>
                     <td>
                       <button
                         className="btn secondary btn-sm"
@@ -7685,6 +7709,12 @@ function PolicyView({
                           setProfDept(p.department || "")
                           setProfHosts((p.enabledHosts || []).join("\n"))
                           setProfScan(!!p.scanUploads)
+                          const pfs = p.fileScan
+                          setProfScanConfigs(pfs?.configs !== false)
+                          setProfScanDatabases(pfs?.databases !== false)
+                          setProfScanOffice(pfs?.office !== false)
+                          setProfScanImages(pfs?.images === true)
+                          setProfWarnMedia(pfs?.media_warn !== false)
                           setProfEvents(!!p.eventReporting)
                           setProfProtect(!!p.protectUnenroll)
                           setProfAction(p.defaultAction || "mask_recommend")
@@ -7790,14 +7820,6 @@ function PolicyView({
           <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
             <input
               type="checkbox"
-              checked={profScan}
-              onChange={(e) => setProfScan(e.target.checked)}
-            />
-            {t("policy.scanFiles")}
-          </label>
-          <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
-            <input
-              type="checkbox"
               checked={profEvents}
               onChange={(e) => setProfEvents(e.target.checked)}
             />
@@ -7843,6 +7865,51 @@ function PolicyView({
             />
             Profil actif
           </label>
+        </div>
+
+        <div className="pol-section-l" style={{ marginTop: 14 }}>
+          {t("policy.fileScanTitle") || "Analyse des fichiers"}
+        </div>
+        <label className="pol-toggle pol-toggle-main">
+          <input
+            type="checkbox"
+            checked={profScan}
+            onChange={(e) => setProfScan(e.target.checked)}
+          />
+          <span>
+            <strong>{t("policy.scanFiles") || t("policy.scanUploads")}</strong>
+            <em>{t("policy.scanHint")}</em>
+          </span>
+        </label>
+        <div
+          className={`pol-toggles pol-toggles-sub${profScan ? "" : " is-off"}`}>
+          {(
+            [
+              [
+                profScanConfigs,
+                setProfScanConfigs,
+                t("policy.scanConfigs")
+              ],
+              [
+                profScanDatabases,
+                setProfScanDatabases,
+                t("policy.scanDatabases")
+              ],
+              [profScanOffice, setProfScanOffice, t("policy.scanOffice")],
+              [profScanImages, setProfScanImages, t("policy.scanImages")],
+              [profWarnMedia, setProfWarnMedia, t("policy.warnMedia")]
+            ] as const
+          ).map(([val, setVal, label], i) => (
+            <label key={i} className="pol-toggle">
+              <input
+                type="checkbox"
+                checked={!!val}
+                disabled={!profScan}
+                onChange={(e) => setVal(e.target.checked)}
+              />
+              <span>{label}</span>
+            </label>
+          ))}
         </div>
         <div className="policy-block">
           <button
@@ -8054,6 +8121,13 @@ function PolicyView({
                     .map((l) => l.trim())
                     .filter(Boolean),
                   scan_uploads: profScan,
+                  file_scan: {
+                    configs: profScanConfigs,
+                    databases: profScanDatabases,
+                    images: profScanImages,
+                    office: profScanOffice,
+                    media_warn: profWarnMedia
+                  },
                   event_reporting: profEvents,
                   protect_unenroll: profProtect,
                   default_action: profAction,
@@ -8079,6 +8153,12 @@ function PolicyView({
                 }
                 setProfName("")
                 setProfGroups([])
+                setProfScan(true)
+                setProfScanConfigs(true)
+                setProfScanDatabases(true)
+                setProfScanOffice(true)
+                setProfScanImages(false)
+                setProfWarnMedia(true)
                 setProfMsgNotice("")
                 setProfMsgAlertTitle("")
                 setProfMsgAlertBody("")
