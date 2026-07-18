@@ -224,6 +224,8 @@ export type SecurityReport = {
     risky_sends: number
     blocks: number
     masks: number
+    secure_rewrites?: number
+    secure_rewrite_share_pct?: number
     observes: number
     cancels: number
   }

@@ -3401,6 +3401,7 @@ function SecurityReportPanel({
                 ["Events", k.events_total],
                 ["Blocks", k.blocks],
                 ["Mask", k.masks],
+                ["Rewrite", k.secure_rewrites ?? 0],
                 ["Risky", k.risky_sends],
                 ["Observe", k.observes],
                 ["Agents", k.agents_total],
@@ -3601,6 +3602,8 @@ function SystemSettingsView({
   const [gdprConfirmInput, setGdprConfirmInput] = useState("")
   const [gdprReason, setGdprReason] = useState("")
   const [agentUiLang, setAgentUiLang] = useState<"fr" | "en" | "auto">("fr")
+  const [proxyEnabled, setProxyEnabled] = useState(true)
+  const [proxyMode, setProxyMode] = useState<"observe" | "enforce">("enforce")
   const [onlineMin, setOnlineMin] = useState(15)
   const [offlineMin, setOfflineMin] = useState(120)
   const [schedOn, setSchedOn] = useState(false)
@@ -3760,6 +3763,8 @@ function SystemSettingsView({
             ? m.agentUiLang
             : "fr"
         )
+        setProxyEnabled(m.proxy?.enabled !== false)
+        setProxyMode(m.proxy?.mode === "observe" ? "observe" : "enforce")
         setOnlineMin(Math.round((m.onlineMs || 900000) / 60000))
         setOfflineMin(Math.round((m.offlineLongMs || 7200000) / 60000))
         setSchedOn(!!m.schedule?.enabled)
@@ -3979,6 +3984,10 @@ function SystemSettingsView({
       setAuditLegalDays(legalClamped)
       await api.updateMonitoring({
         agentUiLang,
+        proxy: {
+          enabled: proxyEnabled,
+          mode: proxyMode
+        },
         onlineMs: onlineMin * 60 * 1000,
         offlineLongMs: offlineMin * 60 * 1000,
         logRetentionDays: daysClamped,
@@ -5677,6 +5686,40 @@ function SystemSettingsView({
         <div className="settings-section">
           <h3>{t("settings.tab.monitoring")}</h3>
           <div className="form-stack" style={{ maxWidth: 520 }}>
+            <h3 style={{ marginTop: 0, fontSize: 15 }}>{t("proxy.title")}</h3>
+            <p className="muted" style={{ fontSize: 12, margin: 0 }}>
+              {t("proxy.hint")}
+            </p>
+            <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <input
+                type="checkbox"
+                checked={proxyEnabled}
+                onChange={(e) => setProxyEnabled(e.target.checked)}
+              />
+              {t("proxy.enabled")}
+            </label>
+            <label className="field-label">{t("proxy.mode")}</label>
+            <select
+              className="input"
+              value={proxyMode}
+              disabled={!proxyEnabled}
+              onChange={(e) =>
+                setProxyMode(
+                  e.target.value === "observe" ? "observe" : "enforce"
+                )
+              }>
+              <option value="observe">{t("proxy.mode.observe")}</option>
+              <option value="enforce">{t("proxy.mode.enforce")}</option>
+            </select>
+            <p className="muted" style={{ fontSize: 11, margin: 0 }}>
+              {proxyMode === "observe"
+                ? t("proxy.mode.observeHint")
+                : t("proxy.mode.enforceHint")}
+            </p>
+            <p className="muted" style={{ fontSize: 11, margin: 0 }}>
+              {t("proxy.monitorHint")}
+            </p>
+            <hr style={{ border: "none", borderTop: "1px solid var(--line)", margin: "12px 0" }} />
             <label className="field-label">{t("mon.online")}</label>
             <input
               className="input"
