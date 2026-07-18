@@ -1,5 +1,5 @@
 /**
- * Risk Score + Shadow AI Discovery (wireframes V3)
+ * Risk Score + Shadow AI Discovery — UI console pro (dense, soignée)
  */
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { api } from "./api"
@@ -47,9 +47,9 @@ type ShadowTool = {
 }
 
 function scoreClass(score: number): string {
-  if (score >= 70) return "risk-high"
-  if (score >= 40) return "risk-med"
-  return "risk-low"
+  if (score >= 70) return "rs-high"
+  if (score >= 40) return "rs-med"
+  return "rs-low"
 }
 
 function trendGlyph(t: string): string {
@@ -80,6 +80,328 @@ const FACTOR_LABELS: Record<string, string> = {
   shadow_unauthorized: "Shadow non autorisé",
   recurrence_days: "Récurrence"
 }
+
+const SHARED_CSS = `
+  .rs-page {
+    background: var(--surface, #fff);
+    border: 1px solid var(--line, #e2e8f0);
+    border-radius: 10px;
+    padding: 14px 16px 16px;
+    margin-bottom: 16px;
+  }
+  .rs-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 12px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--line, #e2e8f0);
+  }
+  .rs-head h2 {
+    margin: 0;
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    color: var(--text, #0f172a);
+  }
+  .rs-tools {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+  .rs-tools .input,
+  .rs-tools select.input {
+    height: 30px;
+    min-height: 30px;
+    padding: 0 8px;
+    font-size: 12px;
+    border-radius: 6px;
+  }
+  .rs-tools .btn {
+    height: 30px;
+    padding: 0 10px;
+    font-size: 12px;
+    border-radius: 6px;
+  }
+  .rs-kpis {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+  @media (max-width: 900px) {
+    .rs-kpis { grid-template-columns: repeat(2, 1fr); }
+  }
+  .rs-kpi {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 8px 10px;
+    border-radius: 8px;
+    border: 1px solid var(--line, #e2e8f0);
+    background: var(--surface-2, #f8fafc);
+    min-height: 0;
+  }
+  .rs-kpi.rs-high { border-color: #fecaca; background: #fef2f2; }
+  .rs-kpi.rs-med { border-color: #fde68a; background: #fffbeb; }
+  .rs-kpi.rs-low { border-color: #a7f3d0; background: #ecfdf5; }
+  .rs-kpi-l {
+    font-size: 10px;
+    font-weight: 600;
+    color: #64748b;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
+  .rs-kpi-v {
+    font-size: 18px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    line-height: 1.2;
+    color: var(--text, #0f172a);
+  }
+  .rs-kpi-v span {
+    font-size: 11px;
+    font-weight: 600;
+    color: #94a3b8;
+    margin-left: 2px;
+  }
+  .rs-kpi-s {
+    font-size: 11px;
+    color: #64748b;
+    font-weight: 500;
+  }
+  .rs-grid2 {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin-bottom: 10px;
+  }
+  @media (max-width: 960px) {
+    .rs-grid2 { grid-template-columns: 1fr; }
+  }
+  .rs-panel {
+    border: 1px solid var(--line, #e2e8f0);
+    border-radius: 8px;
+    background: var(--surface, #fff);
+    overflow: hidden;
+  }
+  .rs-panel-h {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 7px 10px;
+    border-bottom: 1px solid var(--line, #e2e8f0);
+    background: var(--surface-2, #f8fafc);
+  }
+  .rs-panel-h strong {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: #475569;
+  }
+  .rs-panel-b { padding: 0; }
+  .rs-dist { padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; }
+  .rs-dist-row {
+    display: grid;
+    grid-template-columns: 56px 1fr 28px;
+    gap: 8px;
+    align-items: center;
+  }
+  .rs-dist-l { font-size: 11px; font-weight: 600; color: #475569; }
+  .rs-dist-t {
+    height: 6px;
+    border-radius: 99px;
+    background: #e2e8f0;
+    overflow: hidden;
+  }
+  .rs-dist-f { height: 100%; border-radius: 99px; min-width: 2px; }
+  .rs-dist-f.rs-low { background: #34d399; }
+  .rs-dist-f.rs-med { background: #fbbf24; }
+  .rs-dist-f.rs-high { background: #f87171; }
+  .rs-dist-n {
+    font-size: 11px;
+    font-weight: 700;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    color: #334155;
+  }
+  .rs-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+  }
+  .rs-table th {
+    text-align: left;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: #64748b;
+    padding: 6px 10px;
+    border-bottom: 1px solid var(--line, #e2e8f0);
+    background: transparent;
+    white-space: nowrap;
+  }
+  .rs-table td {
+    padding: 6px 10px;
+    border-bottom: 1px solid #f1f5f9;
+    vertical-align: middle;
+    color: var(--text, #0f172a);
+    font-variant-numeric: tabular-nums;
+  }
+  .rs-table tr:last-child td { border-bottom: none; }
+  .rs-table tbody tr { cursor: pointer; transition: background 0.1s; }
+  .rs-table tbody tr:hover { background: #f8fafc; }
+  .rs-table tbody tr.is-on { background: rgba(45, 212, 191, 0.1); }
+  .rs-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 28px;
+    padding: 1px 6px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+  }
+  .rs-badge.rs-high { background: #fee2e2; color: #b91c1c; }
+  .rs-badge.rs-med { background: #fef3c7; color: #b45309; }
+  .rs-badge.rs-low { background: #d1fae5; color: #047857; }
+  .rs-dot {
+    display: inline-block;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    vertical-align: middle;
+  }
+  .rs-dot.rs-high { background: #ef4444; }
+  .rs-dot.rs-med { background: #f59e0b; }
+  .rs-dot.rs-low { background: #10b981; }
+  .rs-muted { color: #94a3b8; font-size: 11px; }
+  .rs-link {
+    border: none;
+    background: transparent;
+    color: #0f766e;
+    font-size: 11px;
+    font-weight: 650;
+    cursor: pointer;
+    padding: 0;
+  }
+  .rs-link:hover { text-decoration: underline; }
+  .rs-split {
+    display: grid;
+    grid-template-columns: minmax(0, 1.35fr) minmax(260px, 0.9fr);
+    gap: 10px;
+    align-items: start;
+  }
+  @media (max-width: 1000px) {
+    .rs-split { grid-template-columns: 1fr; }
+  }
+  .rs-detail {
+    border: 1px solid var(--line, #e2e8f0);
+    border-radius: 8px;
+    background: var(--surface-2, #f8fafc);
+    padding: 10px 12px;
+    min-height: 120px;
+  }
+  .rs-detail-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+    flex-wrap: wrap;
+  }
+  .rs-detail-title strong {
+    font-size: 13px;
+    font-weight: 700;
+  }
+  .rs-section {
+    margin-top: 10px;
+  }
+  .rs-section > .rs-sec-l {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: #64748b;
+    margin-bottom: 5px;
+  }
+  .rs-factors {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    border: 1px solid var(--line, #e2e8f0);
+    border-radius: 6px;
+    background: #fff;
+    overflow: hidden;
+  }
+  .rs-factors li {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 5px 8px;
+    font-size: 11px;
+    border-bottom: 1px solid #f1f5f9;
+  }
+  .rs-factors li:last-child { border-bottom: none; }
+  .rs-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+  .rs-chip {
+    font-size: 10px;
+    font-weight: 600;
+    padding: 2px 7px;
+    border-radius: 999px;
+    background: #e2e8f0;
+    color: #334155;
+  }
+  .rs-empty {
+    padding: 16px 10px;
+    text-align: center;
+    color: #94a3b8;
+    font-size: 12px;
+  }
+  .rs-status {
+    display: inline-flex;
+    align-items: center;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+    padding: 2px 7px;
+    border-radius: 999px;
+  }
+  .rs-status.authorized { background: #d1fae5; color: #047857; }
+  .rs-status.unauthorized { background: #fee2e2; color: #b91c1c; }
+  .rs-status.unknown { background: #e2e8f0; color: #475569; }
+  .rs-select-sm {
+    height: 28px !important;
+    min-height: 28px !important;
+    padding: 0 6px !important;
+    font-size: 11px !important;
+    border-radius: 6px !important;
+    max-width: 132px;
+  }
+  .rs-bulk {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    padding: 6px 10px;
+    margin-bottom: 8px;
+    border-radius: 6px;
+    border: 1px solid var(--line, #e2e8f0);
+    background: var(--surface-2, #f8fafc);
+    font-size: 12px;
+  }
+  .rs-legend {
+    margin: 6px 0 0;
+    font-size: 10px;
+    color: #94a3b8;
+  }
+`
 
 export function RiskView({
   t,
@@ -170,15 +492,15 @@ export function RiskView({
       : null
 
   return (
-    <div className="card risk-page">
-      <div className="risk-toolbar">
-        <h2 style={{ margin: 0 }}>{t("risk.title")}</h2>
-        <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+    <div className="rs-page">
+      <div className="rs-head">
+        <h2>{t("risk.title")}</h2>
+        <div className="rs-tools">
           <select
             className="input"
             value={period}
             onChange={(e) => setPeriod(e.target.value as Period)}
-            style={{ width: 110 }}>
+            style={{ width: 84 }}>
             <option value="7d">7 j</option>
             <option value="30d">30 j</option>
             <option value="90d">90 j</option>
@@ -187,7 +509,7 @@ export function RiskView({
             className="input"
             value={minScore}
             onChange={(e) => setMinScore(Number(e.target.value))}
-            style={{ width: 130 }}>
+            style={{ width: 110 }}>
             <option value={0}>{t("risk.filterAll")}</option>
             <option value={40}>{t("risk.filterMed")}</option>
             <option value={70}>{t("risk.filterHigh")}</option>
@@ -222,87 +544,96 @@ export function RiskView({
 
       {summary && (
         <>
-          <div className="risk-kpi-row">
-            <div className={`risk-kpi ${scoreClass(summary.average_score)}`}>
-              <div className="risk-kpi-label">{t("risk.avgScore")}</div>
-              <div className="risk-kpi-value">
+          <div className="rs-kpis">
+            <div className={`rs-kpi ${scoreClass(summary.average_score)}`}>
+              <div className="rs-kpi-l">{t("risk.avgScore")}</div>
+              <div className="rs-kpi-v">
                 {summary.average_score}
-                <span className="risk-kpi-unit">/100</span>
+                <span>/100</span>
               </div>
             </div>
-            <div className="risk-kpi risk-high">
-              <div className="risk-kpi-label">{t("risk.highUsers")}</div>
-              <div className="risk-kpi-value">{summary.high_risk_users}</div>
+            <div className="rs-kpi rs-high">
+              <div className="rs-kpi-l">{t("risk.highUsers")}</div>
+              <div className="rs-kpi-v">{summary.high_risk_users}</div>
             </div>
-            <div className="risk-kpi">
-              <div className="risk-kpi-label">Tendance</div>
-              <div className="risk-kpi-value risk-kpi-trend">
+            <div className="rs-kpi">
+              <div className="rs-kpi-l">Tendance</div>
+              <div className="rs-kpi-v">
                 {trendGlyph(summary.trend)}
                 {trendPts != null ? (
-                  <span className="risk-kpi-sub">
+                  <span>
                     {trendPts > 0 ? "+" : ""}
-                    {trendPts} pts
+                    {trendPts}
                   </span>
                 ) : null}
               </div>
             </div>
-            <div className="risk-kpi">
-              <div className="risk-kpi-label">Shadow</div>
-              <div className="risk-kpi-value">{shadowUnauth}</div>
-              <div className="risk-kpi-sub muted">non autorisés</div>
+            <div className="rs-kpi">
+              <div className="rs-kpi-l">Shadow</div>
+              <div className="rs-kpi-v">{shadowUnauth}</div>
+              <div className="rs-kpi-s">non autorisés</div>
             </div>
           </div>
 
-          <div className="risk-dist">
-            <div className="risk-dist-title">Répartition</div>
-            {(
-              [
-                ["Low", summary.low_risk_users, "risk-low"],
-                ["Medium", summary.medium_risk_users, "risk-med"],
-                ["High", summary.high_risk_users, "risk-high"]
-              ] as const
-            ).map(([label, n, cls]) => (
-              <div key={label} className="risk-dist-row">
-                <span className="risk-dist-label">{label}</span>
-                <div className="risk-dist-track">
-                  <div
-                    className={`risk-dist-fill ${cls}`}
-                    style={{ width: `${Math.round((n / maxBucket) * 100)}%` }}
-                  />
-                </div>
-                <span className="risk-dist-n">{n}</span>
+          <div className="rs-grid2">
+            <div className="rs-panel">
+              <div className="rs-panel-h">
+                <strong>Répartition</strong>
+                <span className="rs-muted">{summary.users_count} users</span>
               </div>
-            ))}
-          </div>
+              <div className="rs-dist">
+                {(
+                  [
+                    ["Low", summary.low_risk_users, "rs-low"],
+                    ["Medium", summary.medium_risk_users, "rs-med"],
+                    ["High", summary.high_risk_users, "rs-high"]
+                  ] as const
+                ).map(([label, n, cls]) => (
+                  <div key={label} className="rs-dist-row">
+                    <span className="rs-dist-l">{label}</span>
+                    <div className="rs-dist-t">
+                      <div
+                        className={`rs-dist-f ${cls}`}
+                        style={{
+                          width: `${Math.round((n / maxBucket) * 100)}%`
+                        }}
+                      />
+                    </div>
+                    <span className="rs-dist-n">{n}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
 
-          <div className="risk-top">
-            <div className="risk-section-title">Top risque</div>
-            <div className="table-wrap">
-              <table className="data-table">
+            <div className="rs-panel">
+              <div className="rs-panel-h">
+                <strong>Top risque</strong>
+              </div>
+              <table className="rs-table">
                 <thead>
                   <tr>
-                    <th>#</th>
+                    <th style={{ width: 28 }}>#</th>
                     <th>{t("risk.colUser")}</th>
-                    <th>{t("risk.colScore")}</th>
-                    <th>{t("risk.colTrend")}</th>
-                    <th />
+                    <th style={{ width: 56 }}>{t("risk.colScore")}</th>
+                    <th style={{ width: 40 }} />
+                    <th style={{ width: 40 }} />
                   </tr>
                 </thead>
                 <tbody>
                   {top5.map((u, i) => (
                     <tr key={u.agent_id}>
-                      <td className="muted">{i + 1}</td>
+                      <td className="rs-muted">{i + 1}</td>
                       <td>{u.label}</td>
                       <td>
-                        <span className={`risk-badge ${scoreClass(u.score)}`}>
+                        <span className={`rs-badge ${scoreClass(u.score)}`}>
                           {u.score}
                         </span>
                       </td>
-                      <td>{trendGlyph(u.trend)}</td>
+                      <td className="rs-muted">{trendGlyph(u.trend)}</td>
                       <td>
                         <button
                           type="button"
-                          className="btn secondary btn-sm"
+                          className="rs-link"
                           onClick={() => {
                             const full =
                               users.find((x) => x.agent_id === u.agent_id) ||
@@ -326,7 +657,7 @@ export function RiskView({
                   ))}
                   {!top5.length && (
                     <tr>
-                      <td colSpan={5} className="muted">
+                      <td colSpan={5} className="rs-empty">
                         {t("risk.emptyUsers")}
                       </td>
                     </tr>
@@ -338,76 +669,75 @@ export function RiskView({
         </>
       )}
 
-      <div className="risk-split">
-        <div>
-          <div className="risk-section-title">{t("risk.usersList")}</div>
-          <div className="table-wrap">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th />
-                  <th>{t("risk.colUser")}</th>
-                  <th>{t("risk.colScore")}</th>
-                  <th>{t("risk.colTrend")}</th>
-                  <th>Activité</th>
-                  <th>Shadow</th>
-                </tr>
-              </thead>
-              <tbody>
-                {users.map((u) => (
-                  <tr
-                    key={u.agent_id}
-                    className={
-                      selected?.agent_id === u.agent_id ? "row-active" : ""
-                    }
-                    style={{ cursor: "pointer" }}
-                    onClick={() => void openDetail(u)}>
-                    <td>
-                      <span
-                        className={`risk-dot ${scoreClass(u.score)}`}
-                        title={scoreClass(u.score)}
-                      />
-                    </td>
-                    <td>{u.label}</td>
-                    <td>
-                      <span className={`risk-badge ${scoreClass(u.score)}`}>
-                        {u.score}
-                      </span>
-                    </td>
-                    <td>{trendGlyph(u.trend)}</td>
-                    <td className="muted" style={{ fontSize: 12 }}>
-                      {relativeTime(u.last_event_at)}
-                    </td>
-                    <td>{u.tools?.length || 0}</td>
-                  </tr>
-                ))}
-                {!users.length && (
-                  <tr>
-                    <td colSpan={6} className="muted">
-                      {t("risk.emptyUsers")}
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
+      <div className="rs-split">
+        <div className="rs-panel">
+          <div className="rs-panel-h">
+            <strong>{t("risk.usersList")}</strong>
+            <span className="rs-muted">{users.length}</span>
           </div>
-          <p className="muted" style={{ fontSize: 11, marginTop: 8 }}>
+          <table className="rs-table">
+            <thead>
+              <tr>
+                <th style={{ width: 22 }} />
+                <th>{t("risk.colUser")}</th>
+                <th style={{ width: 52 }}>{t("risk.colScore")}</th>
+                <th style={{ width: 36 }}>{t("risk.colTrend")}</th>
+                <th style={{ width: 64 }}>Activité</th>
+                <th style={{ width: 48 }}>Shadow</th>
+              </tr>
+            </thead>
+            <tbody>
+              {users.map((u) => (
+                <tr
+                  key={u.agent_id}
+                  className={
+                    selected?.agent_id === u.agent_id ? "is-on" : undefined
+                  }
+                  onClick={() => void openDetail(u)}>
+                  <td>
+                    <span className={`rs-dot ${scoreClass(u.score)}`} />
+                  </td>
+                  <td>{u.label}</td>
+                  <td>
+                    <span className={`rs-badge ${scoreClass(u.score)}`}>
+                      {u.score}
+                    </span>
+                  </td>
+                  <td className="rs-muted">{trendGlyph(u.trend)}</td>
+                  <td className="rs-muted">{relativeTime(u.last_event_at)}</td>
+                  <td className="rs-muted">{u.tools?.length || 0}</td>
+                </tr>
+              ))}
+              {!users.length && (
+                <tr>
+                  <td colSpan={6} className="rs-empty">
+                    {t("risk.emptyUsers")}
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+          <p className="rs-legend" style={{ padding: "0 10px 8px" }}>
             ● High (≥70) · Medium (40–69) · Low (&lt;40)
           </p>
         </div>
 
-        <div className="risk-detail-panel">
-          <div className="risk-section-title">{t("risk.detail")}</div>
+        <div className="rs-detail">
+          <div className="rs-sec-l rs-section" style={{ marginTop: 0 }}>
+            <span className="rs-kpi-l">{t("risk.detail")}</span>
+          </div>
           {!detail ? (
-            <p className="muted">{t("risk.pickUser")}</p>
+            <p className="rs-empty" style={{ paddingTop: 24 }}>
+              {t("risk.pickUser")}
+            </p>
           ) : (
-            <div className="form-stack" style={{ gap: 12 }}>
-              <div className="row" style={{ gap: 10, alignItems: "center" }}>
-                <strong style={{ fontSize: 15 }}>{detail.user.label}</strong>
-                <span className={`risk-badge ${scoreClass(detail.user.score)}`}>
-                  {detail.user.score}/100
+            <>
+              <div className="rs-detail-title">
+                <strong>{detail.user.label}</strong>
+                <span className={`rs-badge ${scoreClass(detail.user.score)}`}>
+                  {detail.user.score}
                 </span>
-                <span className="muted" style={{ fontSize: 12 }}>
+                <span className="rs-muted">
                   {trendGlyph(detail.user.trend)}
                   {detail.user.score_previous != null
                     ? ` vs ${detail.user.score_previous}`
@@ -415,11 +745,9 @@ export function RiskView({
                 </span>
               </div>
 
-              <div>
-                <div className="risk-section-title" style={{ marginBottom: 6 }}>
-                  {t("risk.whyScore")}
-                </div>
-                <ul className="risk-factors">
+              <div className="rs-section">
+                <div className="rs-sec-l">{t("risk.whyScore")}</div>
+                <ul className="rs-factors">
                   {Object.entries(detail.user.factors || {})
                     .filter(([, v]) => v)
                     .map(([k, v]) => (
@@ -429,19 +757,17 @@ export function RiskView({
                       </li>
                     ))}
                   {!Object.values(detail.user.factors || {}).some(Boolean) && (
-                    <li className="muted">Aucun facteur sur la période</li>
+                    <li className="rs-muted">Aucun facteur</li>
                   )}
                 </ul>
               </div>
 
-              <div>
-                <div className="risk-section-title" style={{ marginBottom: 6 }}>
-                  {t("risk.toolsUsed")}
-                </div>
-                <div className="risk-tools">
+              <div className="rs-section">
+                <div className="rs-sec-l">{t("risk.toolsUsed")}</div>
+                <div className="rs-chips">
                   {(detail.user.tools || []).length
                     ? detail.user.tools.map((tool) => (
-                        <span key={tool} className="risk-tool-chip">
+                        <span key={tool} className="rs-chip">
                           {tool}
                         </span>
                       ))
@@ -449,12 +775,12 @@ export function RiskView({
                 </div>
               </div>
 
-              <div>
-                <div className="risk-section-title" style={{ marginBottom: 6 }}>
-                  {t("risk.recentEvents")}
-                </div>
-                <div className="table-wrap" style={{ maxHeight: 220, overflow: "auto" }}>
-                  <table className="data-table">
+              <div className="rs-section">
+                <div className="rs-sec-l">{t("risk.recentEvents")}</div>
+                <div
+                  className="rs-panel"
+                  style={{ maxHeight: 160, overflow: "auto" }}>
+                  <table className="rs-table">
                     <thead>
                       <tr>
                         <th>Date</th>
@@ -465,152 +791,31 @@ export function RiskView({
                     </thead>
                     <tbody>
                       {(detail.recent_events || []).map((e) => (
-                        <tr key={e.id}>
-                          <td className="mono" style={{ fontSize: 11 }}>
+                        <tr key={e.id} style={{ cursor: "default" }}>
+                          <td className="rs-muted">
                             {(e.ts || "").slice(0, 16).replace("T", " ")}
                           </td>
                           <td>{e.decision}</td>
-                          <td>{e.hostname}</td>
-                          <td>{e.highest_severity}</td>
+                          <td className="rs-muted">{e.hostname}</td>
+                          <td className="rs-muted">{e.highest_severity}</td>
                         </tr>
                       ))}
+                      {!(detail.recent_events || []).length && (
+                        <tr>
+                          <td colSpan={4} className="rs-empty">
+                            —
+                          </td>
+                        </tr>
+                      )}
                     </tbody>
                   </table>
                 </div>
               </div>
-            </div>
+            </>
           )}
         </div>
       </div>
-
-      <style>{`
-        .risk-page { padding: 4px 2px 16px; }
-        .risk-toolbar {
-          display: flex; justify-content: space-between; align-items: center;
-          flex-wrap: wrap; gap: 16px; margin-bottom: 22px;
-        }
-        .risk-toolbar .input { min-height: 38px; }
-        .risk-kpi-row {
-          display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
-          gap: 16px; margin-bottom: 24px;
-        }
-        @media (max-width: 900px) {
-          .risk-kpi-row { grid-template-columns: repeat(2, 1fr); }
-        }
-        .risk-kpi {
-          padding: 18px 20px; border-radius: 12px;
-          border: 1px solid var(--line, #e2e8f0);
-          background: var(--surface-2, #f8fafc);
-          min-height: 100px;
-          box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
-        }
-        .risk-kpi-label {
-          font-size: 11px; font-weight: 700; color: #64748b;
-          text-transform: uppercase; letter-spacing: 0.05em;
-        }
-        .risk-kpi-value {
-          font-size: 30px; font-weight: 800; margin-top: 10px; line-height: 1.1;
-        }
-        .risk-kpi-unit { font-size: 14px; font-weight: 650; color: #94a3b8; margin-left: 2px; }
-        .risk-kpi-sub { display: block; font-size: 12px; font-weight: 600; margin-top: 6px; color: #64748b; }
-        .risk-kpi-trend { display: flex; align-items: baseline; gap: 10px; }
-        .risk-high { border-color: #fecaca; background: #fef2f2; }
-        .risk-med { border-color: #fde68a; background: #fffbeb; }
-        .risk-low { border-color: #a7f3d0; background: #ecfdf5; }
-        .risk-dist {
-          margin-bottom: 24px; padding: 18px 20px; border-radius: 12px;
-          border: 1px solid var(--line, #e2e8f0); background: #fff;
-        }
-        .risk-dist-title, .risk-section-title {
-          font-size: 12px; font-weight: 750; color: #475569;
-          text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 14px;
-        }
-        .risk-dist-row {
-          display: grid; grid-template-columns: 72px 1fr 40px;
-          gap: 14px; align-items: center; margin-bottom: 12px;
-        }
-        .risk-dist-label { font-size: 13px; font-weight: 650; color: #334155; }
-        .risk-dist-track {
-          height: 12px; border-radius: 999px; background: #f1f5f9; overflow: hidden;
-        }
-        .risk-dist-fill { height: 100%; border-radius: 999px; min-width: 2px; }
-        .risk-dist-fill.risk-low { background: #34d399; }
-        .risk-dist-fill.risk-med { background: #fbbf24; }
-        .risk-dist-fill.risk-high { background: #f87171; }
-        .risk-dist-n { font-size: 13px; font-weight: 700; text-align: right; }
-        .risk-top {
-          margin-bottom: 28px; padding: 18px 20px; border-radius: 12px;
-          border: 1px solid var(--line, #e2e8f0); background: #fff;
-        }
-        .risk-top .data-table th,
-        .risk-top .data-table td,
-        .risk-split .data-table th,
-        .risk-split .data-table td {
-          padding: 12px 16px;
-          vertical-align: middle;
-        }
-        .risk-top .data-table th:nth-child(1),
-        .risk-top .data-table td:nth-child(1) { width: 48px; }
-        .risk-top .data-table th:nth-child(3),
-        .risk-top .data-table td:nth-child(3) { width: 88px; text-align: center; }
-        .risk-top .data-table th:nth-child(4),
-        .risk-top .data-table td:nth-child(4) { width: 80px; text-align: center; }
-        .risk-top .data-table th:nth-child(5),
-        .risk-top .data-table td:nth-child(5) { width: 100px; text-align: right; }
-        .risk-split {
-          display: grid; grid-template-columns: 1.2fr 0.9fr; gap: 24px;
-          align-items: start;
-        }
-        @media (max-width: 1000px) {
-          .risk-split { grid-template-columns: 1fr; }
-        }
-        .risk-split > div {
-          padding: 18px 20px; border-radius: 12px;
-          border: 1px solid var(--line, #e2e8f0); background: #fff;
-          min-height: 280px;
-        }
-        .risk-detail-panel {
-          padding: 18px 20px !important; border-radius: 12px;
-          border: 1px solid var(--line, #e2e8f0); background: #f8fafc !important;
-        }
-        .risk-split .data-table th:nth-child(1) { width: 36px; }
-        .risk-split .data-table th:nth-child(3),
-        .risk-split .data-table td:nth-child(3) { width: 88px; text-align: center; }
-        .risk-split .data-table th:nth-child(4),
-        .risk-split .data-table td:nth-child(4) { width: 72px; text-align: center; }
-        .risk-split .data-table th:nth-child(5),
-        .risk-split .data-table td:nth-child(5) { width: 100px; }
-        .risk-split .data-table th:nth-child(6),
-        .risk-split .data-table td:nth-child(6) { width: 72px; text-align: center; }
-        .risk-badge {
-          display: inline-block; padding: 4px 10px; border-radius: 999px;
-          font-weight: 800; font-size: 12px; min-width: 36px; text-align: center;
-        }
-        .risk-badge.risk-high { background: #fee2e2; color: #b91c1c; }
-        .risk-badge.risk-med { background: #fef3c7; color: #b45309; }
-        .risk-badge.risk-low { background: #d1fae5; color: #047857; }
-        .risk-dot {
-          display: inline-block; width: 9px; height: 9px; border-radius: 50%;
-        }
-        .risk-dot.risk-high { background: #ef4444; }
-        .risk-dot.risk-med { background: #f59e0b; }
-        .risk-dot.risk-low { background: #10b981; }
-        .row-active { background: rgba(45, 212, 191, 0.12); }
-        .risk-factors {
-          list-style: none; margin: 0; padding: 0;
-          border: 1px solid #e2e8f0; border-radius: 10px; background: #fff;
-        }
-        .risk-factors li {
-          display: flex; justify-content: space-between; gap: 14px;
-          padding: 10px 14px; border-bottom: 1px solid #f1f5f9; font-size: 13px;
-        }
-        .risk-factors li:last-child { border-bottom: none; }
-        .risk-tools { display: flex; flex-wrap: wrap; gap: 8px; }
-        .risk-tool-chip {
-          font-size: 11px; font-weight: 650; padding: 5px 10px;
-          border-radius: 999px; background: #e2e8f0; color: #334155;
-        }
-      `}</style>
+      <style>{SHARED_CSS}</style>
     </div>
   )
 }
@@ -712,15 +917,15 @@ export function ShadowAiView({
   }
 
   return (
-    <div className="card shadow-page">
-      <div className="risk-toolbar">
-        <h2 style={{ margin: 0 }}>{t("shadow.title")}</h2>
-        <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+    <div className="rs-page">
+      <div className="rs-head">
+        <h2>{t("shadow.title")}</h2>
+        <div className="rs-tools">
           <select
             className="input"
             value={period}
             onChange={(e) => setPeriod(e.target.value as Period)}
-            style={{ width: 100 }}>
+            style={{ width: 84 }}>
             <option value="7d">7 j</option>
             <option value="30d">30 j</option>
             <option value="90d">90 j</option>
@@ -729,7 +934,7 @@ export function ShadowAiView({
             className="input"
             value={status}
             onChange={(e) => setStatus(e.target.value as typeof status)}
-            style={{ width: 140 }}>
+            style={{ width: 120 }}>
             <option value="all">{t("shadow.filterAll")}</option>
             <option value="unauthorized">{t("shadow.filterUnauth")}</option>
             <option value="authorized">{t("shadow.filterAuth")}</option>
@@ -740,7 +945,7 @@ export function ShadowAiView({
             placeholder="Rechercher…"
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            style={{ width: 160 }}
+            style={{ width: 140 }}
           />
           <button
             type="button"
@@ -752,30 +957,28 @@ export function ShadowAiView({
         </div>
       </div>
 
-      <div className="shadow-kpis">
-        <div className="shadow-kpi">
-          <span className="muted">{t("shadow.total")}</span>
-          <strong>{counts.total}</strong>
+      <div className="rs-kpis">
+        <div className="rs-kpi">
+          <div className="rs-kpi-l">{t("shadow.total")}</div>
+          <div className="rs-kpi-v">{counts.total}</div>
         </div>
-        <div className="shadow-kpi risk-high">
-          <span className="muted">{t("shadow.unauth")}</span>
-          <strong>{counts.unauthorized}</strong>
+        <div className="rs-kpi rs-high">
+          <div className="rs-kpi-l">{t("shadow.unauth")}</div>
+          <div className="rs-kpi-v">{counts.unauthorized}</div>
         </div>
-        <div className="shadow-kpi risk-low">
-          <span className="muted">{t("shadow.auth")}</span>
-          <strong>{counts.authorized}</strong>
+        <div className="rs-kpi rs-low">
+          <div className="rs-kpi-l">{t("shadow.auth")}</div>
+          <div className="rs-kpi-v">{counts.authorized}</div>
         </div>
-        <div className="shadow-kpi">
-          <span className="muted">{t("shadow.unknown")}</span>
-          <strong>{counts.unknown}</strong>
+        <div className="rs-kpi">
+          <div className="rs-kpi-l">{t("shadow.unknown")}</div>
+          <div className="rs-kpi-v">{counts.unknown}</div>
         </div>
       </div>
 
       {selected.size > 0 && (
-        <div className="shadow-bulk row" style={{ gap: 8, marginBottom: 12 }}>
-          <span className="muted" style={{ fontSize: 13 }}>
-            {selected.size} sélectionné(s)
-          </span>
+        <div className="rs-bulk">
+          <span className="rs-muted">{selected.size} sélectionné(s)</span>
           <button
             type="button"
             className="btn secondary btn-sm"
@@ -793,21 +996,21 @@ export function ShadowAiView({
         </div>
       )}
 
-      <div className="table-wrap">
-        <table className="data-table">
+      <div className="rs-panel">
+        <table className="rs-table">
           <thead>
             <tr>
-              <th style={{ width: 36 }} />
+              <th style={{ width: 32 }} />
               <th>{t("shadow.colTool")}</th>
-              <th>{t("shadow.colAgents")}</th>
-              <th>{t("shadow.colEvents")}</th>
-              <th>{t("shadow.colLast")}</th>
-              <th>{t("shadow.colStatus")}</th>
+              <th style={{ width: 72 }}>{t("shadow.colAgents")}</th>
+              <th style={{ width: 72 }}>{t("shadow.colEvents")}</th>
+              <th style={{ width: 88 }}>{t("shadow.colLast")}</th>
+              <th style={{ width: 140 }}>{t("shadow.colStatus")}</th>
             </tr>
           </thead>
           <tbody>
             {filtered.map((tool) => (
-              <tr key={tool.tool}>
+              <tr key={tool.tool} style={{ cursor: "default" }}>
                 <td>
                   <input
                     type="checkbox"
@@ -817,22 +1020,19 @@ export function ShadowAiView({
                   />
                 </td>
                 <td>
-                  <div style={{ fontWeight: 650 }}>
+                  <div style={{ fontWeight: 650, fontSize: 12 }}>
                     {tool.display_name || tool.tool}
                   </div>
-                  <div className="mono muted" style={{ fontSize: 11 }}>
+                  <div className="rs-muted" style={{ fontFamily: "ui-monospace, monospace" }}>
                     {tool.tool}
                   </div>
                 </td>
                 <td>{tool.agents_count}</td>
                 <td>{tool.events_count}</td>
-                <td className="muted" style={{ fontSize: 12 }}>
-                  {relativeTime(tool.last_seen_at)}
-                </td>
+                <td className="rs-muted">{relativeTime(tool.last_seen_at)}</td>
                 <td>
                   <select
-                    className="input"
-                    style={{ width: 140, fontSize: 12 }}
+                    className="input rs-select-sm"
                     value={tool.status}
                     disabled={busy}
                     onChange={(e) =>
@@ -850,7 +1050,7 @@ export function ShadowAiView({
             ))}
             {!filtered.length && (
               <tr>
-                <td colSpan={6} className="muted">
+                <td colSpan={6} className="rs-empty">
                   {t("shadow.empty")}
                 </td>
               </tr>
@@ -858,71 +1058,7 @@ export function ShadowAiView({
           </tbody>
         </table>
       </div>
-      <style>{`
-        .shadow-page { padding: 4px 2px 16px; }
-        .shadow-page .risk-toolbar {
-          display: flex; justify-content: space-between; align-items: center;
-          flex-wrap: wrap; gap: 16px; margin-bottom: 20px;
-        }
-        .shadow-page .risk-toolbar .input,
-        .shadow-page .risk-toolbar select {
-          min-height: 38px;
-          margin: 0;
-        }
-        .shadow-page .risk-toolbar .row { gap: 12px !important; }
-        .shadow-kpis {
-          display: grid; grid-template-columns: repeat(4, minmax(0,1fr));
-          gap: 16px; margin-bottom: 22px;
-        }
-        @media (max-width: 800px) {
-          .shadow-kpis { grid-template-columns: repeat(2, 1fr); }
-        }
-        .shadow-kpi {
-          padding: 16px 18px; border-radius: 12px;
-          border: 1px solid var(--line, #e2e8f0); background: #f8fafc;
-          display: flex; flex-direction: column; gap: 8px;
-          min-height: 88px;
-          box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
-        }
-        .shadow-kpi strong { font-size: 26px; font-weight: 800; line-height: 1.1; }
-        .shadow-kpi.risk-high { border-color: #fecaca; background: #fef2f2; }
-        .shadow-kpi.risk-low { border-color: #a7f3d0; background: #ecfdf5; }
-        .shadow-page .table-wrap {
-          border: 1px solid var(--line, #e2e8f0);
-          border-radius: 12px;
-          overflow: hidden;
-          background: #fff;
-        }
-        .shadow-page .data-table { margin: 0; }
-        .shadow-page .data-table th,
-        .shadow-page .data-table td {
-          padding: 14px 18px;
-          vertical-align: middle;
-        }
-        .shadow-page .data-table th:nth-child(1),
-        .shadow-page .data-table td:nth-child(1) { width: 44px; text-align: center; }
-        .shadow-page .data-table th:nth-child(3),
-        .shadow-page .data-table td:nth-child(3) { width: 110px; text-align: center; }
-        .shadow-page .data-table th:nth-child(4),
-        .shadow-page .data-table td:nth-child(4) { width: 110px; text-align: center; }
-        .shadow-page .data-table th:nth-child(5),
-        .shadow-page .data-table td:nth-child(5) { width: 120px; }
-        .shadow-page .data-table th:nth-child(6),
-        .shadow-page .data-table td:nth-child(6) { width: 160px; }
-        .shadow-page .data-table select.input {
-          min-height: 36px;
-          width: 100%;
-          max-width: 150px;
-        }
-        .shadow-bulk {
-          margin-bottom: 16px !important;
-          padding: 12px 16px;
-          border-radius: 10px;
-          background: #f8fafc;
-          border: 1px solid var(--line, #e2e8f0);
-          gap: 12px !important;
-        }
-      `}</style>
+      <style>{SHARED_CSS}</style>
     </div>
   )
 }
