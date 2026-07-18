@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" fill="none" role="img" aria-label="OpsGate">
+  <!-- Même marque que BrandMark.tsx / pdf_brand.py / page enrôlement -->
+  <defs>
+    <linearGradient id="bg" x1="8" y1="4" x2="120" y2="124" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0A1128"/>
+      <stop offset="0.55" stop-color="#0B1A36"/>
+      <stop offset="1" stop-color="#0F766E"/>
+    </linearGradient>
+  </defs>
+  <rect x="0" y="0" width="128" height="128" rx="28" fill="url(#bg)"/>
+  <rect x="1.5" y="1.5" width="125" height="125" rx="26.5" stroke="#2BD9C5" stroke-opacity="0.35" stroke-width="2" fill="none"/>
+  <!-- Glyph viewBox 32x32 scaled to ~58% = 74px, centered at 64,64 -->
+  <g transform="translate(27, 27) scale(2.3125)">
+    <!-- porte / arche -->
+    <path fill="none" stroke="#2BD9C5" stroke-width="2" stroke-linecap="round"
+      d="M8 22V12c0-4 3.5-7 8-7s8 3 8 7v10"/>
+    <!-- tête de serrure -->
+    <path fill="#2BD9C5"
+      d="M16 14.5c-1.8 0-3.2 1.3-3.2 3v1.2h6.4V17.5c0-1.7-1.4-3-3.2-3z"/>
+    <!-- corps de serrure -->
+    <path fill="none" stroke="#E2E8F0" stroke-width="1.6"
+      d="M12.5 18.5h7v4.2c0 1.6-1.6 3-3.5 3s-3.5-1.4-3.5-3v-4.2z"/>
+  </g>
+</svg>
