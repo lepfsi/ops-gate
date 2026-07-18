@@ -50,7 +50,12 @@ import type {
   StoredRulePack,
   UserGroup
 } from "./types"
-import { ALL_ADMIN_PERMISSIONS, mergePolicyFileScan } from "./types"
+import {
+  ALL_ADMIN_PERMISSIONS,
+  hasExplicitFileScan,
+  mergePolicyFileScan,
+  resolveEffectiveFileScan
+} from "./types"
 import {
   getPgRlsMode,
   getRlsContext,
@@ -216,7 +221,10 @@ function rowPolicy(r: pg.QueryResultRow): Policy {
     defaultAction: r.default_action,
     enabledHosts: r.enabled_hosts || [],
     scanUploads: r.scan_uploads,
-    fileScan: mergePolicyFileScan(fileScanRaw),
+    // {} en base = pas de réglage explicite → undefined (héritage si profil)
+    fileScan: hasExplicitFileScan(fileScanRaw)
+      ? mergePolicyFileScan(fileScanRaw)
+      : undefined,
     eventReporting: r.event_reporting,
     rulesPackVersion: r.rules_pack_version,
     managementPasswordHash: r.management_password_hash || "",
@@ -400,7 +408,9 @@ function rowProfile(r: pg.QueryResultRow): PolicyProfile {
     defaultAction: r.default_action,
     enabledHosts: r.enabled_hosts || [],
     scanUploads: r.scan_uploads !== false,
-    fileScan: mergePolicyFileScan(fileScanRaw),
+    fileScan: hasExplicitFileScan(fileScanRaw)
+      ? mergePolicyFileScan(fileScanRaw)
+      : undefined,
     eventReporting: r.event_reporting !== false,
     protectUnenroll: !!r.protect_unenroll,
     enabled: r.enabled !== false && r.enabled !== 0,
@@ -2793,10 +2803,7 @@ export class PgStore implements OpsGateStore {
           defaultAction: profile.defaultAction,
           enabledHosts: profile.enabledHosts,
           scanUploads: profile.scanUploads,
-          fileScan: mergePolicyFileScan({
-            ...(policy.fileScan || {}),
-            ...(profile.fileScan || {})
-          }),
+          fileScan: resolveEffectiveFileScan(policy.fileScan, profile.fileScan),
           eventReporting: profile.eventReporting,
           protectUnenroll: profile.protectUnenroll,
           userMessages: {
@@ -2814,7 +2821,7 @@ export class PgStore implements OpsGateStore {
           defaultAction: policy.defaultAction,
           enabledHosts: policy.enabledHosts,
           scanUploads: policy.scanUploads,
-          fileScan: mergePolicyFileScan(policy.fileScan),
+          fileScan: resolveEffectiveFileScan(policy.fileScan, null),
           eventReporting: policy.eventReporting,
           protectUnenroll: policy.protectUnenroll,
           userMessages: policy.userMessages || {},

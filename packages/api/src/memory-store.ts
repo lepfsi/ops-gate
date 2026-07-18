@@ -1724,16 +1724,13 @@ export class MemoryStore implements OpsGateStore {
     const agent = this.agents.get(agentId)
     const profile = this.resolveProfileForAgent(orgId, agent)
 
-    const { mergePolicyFileScan } = await import("./types")
+    const { resolveEffectiveFileScan } = await import("./types")
     const effective = profile
       ? {
           defaultAction: profile.defaultAction,
           enabledHosts: profile.enabledHosts,
           scanUploads: profile.scanUploads,
-          fileScan: mergePolicyFileScan({
-            ...(policy.fileScan || {}),
-            ...(profile.fileScan || {})
-          }),
+          fileScan: resolveEffectiveFileScan(policy.fileScan, profile.fileScan),
           eventReporting: profile.eventReporting,
           protectUnenroll: profile.protectUnenroll,
           userMessages: {
@@ -1751,7 +1748,7 @@ export class MemoryStore implements OpsGateStore {
           defaultAction: policy.defaultAction,
           enabledHosts: policy.enabledHosts,
           scanUploads: policy.scanUploads,
-          fileScan: mergePolicyFileScan(policy.fileScan),
+          fileScan: resolveEffectiveFileScan(policy.fileScan, null),
           eventReporting: policy.eventReporting,
           protectUnenroll: policy.protectUnenroll,
           userMessages: policy.userMessages || {},
