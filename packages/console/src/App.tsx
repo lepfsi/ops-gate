@@ -43,9 +43,12 @@ import { AI_HOST_PRESETS, HostPicker } from "./HostPicker"
 import { getStoredLang, makeT, setStoredLang, type Lang } from "./i18n"
 import { RiskView, ShadowAiView } from "./RiskShadowViews"
 import {
+  addWidget,
+  availableWidgets,
   loadDashLayout,
   moveWidget,
   patchWidget,
+  removeWidget,
   resetDashLayout,
   saveDashLayout,
   type DashWidgetId,
@@ -1914,8 +1917,10 @@ function SummaryView({
   const [dashLayout, setDashLayout] = useState<DashWidgetLayout[]>(() =>
     loadDashLayout()
   )
+  const [addMetricOpen, setAddMetricOpen] = useState(false)
   const [dragId, setDragId] = useState<DashWidgetId | null>(null)
   const [overId, setOverId] = useState<DashWidgetId | null>(null)
+  const metricsToAdd = availableWidgets(dashLayout)
   const resizeRef = useRef<{
     id: DashWidgetId
     startX: number
@@ -2048,6 +2053,16 @@ function SummaryView({
                 persistLayout(patchWidget(dashLayout, id, { w: nw }))
               }}>
               {lay.w}×
+            </button>
+            <button
+              type="button"
+              className="btn secondary btn-sm dash-widget-wbtn"
+              title={t("dash.removeWidget") || "Retirer"}
+              onClick={(e) => {
+                e.stopPropagation()
+                persistLayout(removeWidget(dashLayout, id))
+              }}>
+              ×
             </button>
           </div>
         </div>
@@ -2862,6 +2877,76 @@ function SummaryView({
             </div>
           )}
         </div>
+
+        {/* Ajouter des métriques au dashboard */}
+        {!dashExpanded && (
+          <div className="dash-add-metric">
+            {!addMetricOpen ? (
+              <button
+                type="button"
+                className="btn secondary dash-add-metric-btn"
+                disabled={metricsToAdd.length === 0}
+                onClick={() => setAddMetricOpen(true)}>
+                + {t("dash.addMetric") || "Ajouter une métrique"}
+              </button>
+            ) : (
+              <div className="card dash-add-metric-panel">
+                <div
+                  className="row"
+                  style={{
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    marginBottom: 10
+                  }}>
+                  <strong style={{ fontSize: 14 }}>
+                    {t("dash.addMetricTitle") || "Choisir une métrique"}
+                  </strong>
+                  <button
+                    type="button"
+                    className="btn secondary btn-sm"
+                    onClick={() => setAddMetricOpen(false)}>
+                    {t("common.close") || "Fermer"}
+                  </button>
+                </div>
+                {metricsToAdd.length === 0 ? (
+                  <p className="muted" style={{ margin: 0, fontSize: 13 }}>
+                    {t("dash.addMetricEmpty") ||
+                      "Toutes les métriques sont déjà affichées."}
+                  </p>
+                ) : (
+                  <div className="dash-add-metric-grid">
+                    {metricsToAdd.map((id) => (
+                      <button
+                        key={id}
+                        type="button"
+                        className="btn secondary dash-add-metric-item"
+                        onClick={() => {
+                          persistLayout(addWidget(dashLayout, id))
+                          setAddMetricOpen(false)
+                        }}>
+                        + {t(
+                          id === "licenses"
+                            ? "nav.licenses"
+                            : id === "connectivity"
+                              ? "nav.connectivity"
+                              : id === "protection"
+                                ? "dash.protection"
+                                : id === "activity"
+                                  ? "dash.activity"
+                                  : id === "timeline"
+                                    ? "dash.events14"
+                                    : id === "threats"
+                                      ? "dash.userDecisions"
+                                      : "dash.topRequesters"
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Décisions utilisateur (vue normale uniquement) */}

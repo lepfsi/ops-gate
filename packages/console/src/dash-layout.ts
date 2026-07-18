@@ -1,5 +1,6 @@
 /**
- * Layout dashboard libre (ordre + taille) — localStorage par navigateur.
+ * Layout dashboard libre (ordre + taille) - localStorage par navigateur.
+ * Les widgets peuvent être retirés puis ré-ajoutés via « + Métrique ».
  */
 
 export type DashWidgetId =
@@ -19,30 +20,47 @@ export type DashWidgetLayout = {
   h: number
 }
 
-const KEY = "opsgate_dash_layout_v1"
+const KEY = "opsgate_dash_layout_v2"
 
-export const DEFAULT_DASH_LAYOUT: DashWidgetLayout[] = [
-  { id: "licenses", w: 1, h: 200 },
-  { id: "connectivity", w: 1, h: 200 },
-  { id: "protection", w: 1, h: 200 },
-  { id: "activity", w: 1, h: 190 },
-  { id: "timeline", w: 1, h: 190 },
-  { id: "threats", w: 1, h: 210 },
-  { id: "requesters", w: 1, h: 210 }
-]
+export const DASH_WIDGET_META: Record<
+  DashWidgetId,
+  { labelKey: string; defaultW: 1 | 2 | 3; defaultH: number }
+> = {
+  licenses: { labelKey: "nav.licenses", defaultW: 1, defaultH: 200 },
+  connectivity: { labelKey: "nav.connectivity", defaultW: 1, defaultH: 200 },
+  protection: { labelKey: "dash.protection", defaultW: 1, defaultH: 200 },
+  activity: { labelKey: "dash.activity", defaultW: 1, defaultH: 190 },
+  timeline: { labelKey: "dash.events14", defaultW: 1, defaultH: 190 },
+  threats: { labelKey: "dash.userDecisions", defaultW: 1, defaultH: 210 },
+  requesters: { labelKey: "dash.topRequesters", defaultW: 1, defaultH: 210 }
+}
 
-const VALID = new Set<DashWidgetId>(
-  DEFAULT_DASH_LAYOUT.map((x) => x.id)
+export const ALL_DASH_WIDGET_IDS = Object.keys(
+  DASH_WIDGET_META
+) as DashWidgetId[]
+
+export const DEFAULT_DASH_LAYOUT: DashWidgetLayout[] = ALL_DASH_WIDGET_IDS.map(
+  (id) => ({
+    id,
+    w: DASH_WIDGET_META[id].defaultW,
+    h: DASH_WIDGET_META[id].defaultH
+  })
 )
+
+const VALID = new Set<DashWidgetId>(ALL_DASH_WIDGET_IDS)
 
 export function loadDashLayout(): DashWidgetLayout[] {
   try {
-    const raw = localStorage.getItem(KEY)
+    // Migration v1 → v2
+    const rawV2 = localStorage.getItem(KEY)
+    const rawV1 = localStorage.getItem("opsgate_dash_layout_v1")
+    const raw = rawV2 || rawV1
     if (!raw) return DEFAULT_DASH_LAYOUT.map((x) => ({ ...x }))
     const parsed = JSON.parse(raw) as DashWidgetLayout[]
-    if (!Array.isArray(parsed) || !parsed.length) {
+    if (!Array.isArray(parsed)) {
       return DEFAULT_DASH_LAYOUT.map((x) => ({ ...x }))
     }
+    // Tableau vide = utilisateur a retiré toutes les métriques (respecté)
     const seen = new Set<string>()
     const out: DashWidgetLayout[] = []
     for (const item of parsed) {
@@ -53,9 +71,9 @@ export function loadDashLayout(): DashWidgetLayout[] {
       const h = Math.min(520, Math.max(140, Math.floor(Number(item.h) || 200)))
       out.push({ id: item.id as DashWidgetId, w, h })
     }
-    // Ajouter widgets manquants (mises à jour produit)
-    for (const d of DEFAULT_DASH_LAYOUT) {
-      if (!seen.has(d.id)) out.push({ ...d })
+    if (!rawV2 && rawV1) {
+      // Première migration : garder le layout v1 tel quel (tous widgets présents)
+      saveDashLayout(out.length ? out : DEFAULT_DASH_LAYOUT.map((x) => ({ ...x })))
     }
     return out
   } catch {
@@ -110,4 +128,28 @@ export function patchWidget(
         : x.h
     return { ...x, w, h }
   })
+}
+
+export function removeWidget(
+  layout: DashWidgetLayout[],
+  id: DashWidgetId
+): DashWidgetLayout[] {
+  return layout.filter((x) => x.id !== id)
+}
+
+export function addWidget(
+  layout: DashWidgetLayout[],
+  id: DashWidgetId
+): DashWidgetLayout[] {
+  if (layout.some((x) => x.id === id)) return layout
+  if (!VALID.has(id)) return layout
+  const meta = DASH_WIDGET_META[id]
+  return [...layout, { id, w: meta.defaultW, h: meta.defaultH }]
+}
+
+export function availableWidgets(
+  layout: DashWidgetLayout[]
+): DashWidgetId[] {
+  const present = new Set(layout.map((x) => x.id))
+  return ALL_DASH_WIDGET_IDS.filter((id) => !present.has(id))
 }

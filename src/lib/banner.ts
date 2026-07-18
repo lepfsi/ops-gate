@@ -286,8 +286,28 @@ const SHADOW_CSS = `
     font-size: 13px;
     line-height: 1.45;
   }
-  .admin-notice { display: none; }
-  .warn-line { display: none; }
+  .admin-notice {
+    margin: 10px 0 0;
+    padding: 8px 10px;
+    border-radius: 8px;
+    background: #ecfdf5;
+    border: 1px solid #99f6e4;
+    color: #0f766e;
+    font-size: 12px;
+    font-weight: 650;
+    line-height: 1.4;
+  }
+  .wrap.mode-block .admin-notice {
+    background: #fef2f2;
+    border-color: #fecaca;
+    color: #b91c1c;
+  }
+  .warn-line {
+    margin: 8px 0 0;
+    color: #b45309;
+    font-size: 12px;
+    font-weight: 650;
+  }
   .pill {
     display: inline-block;
     margin-top: 6px;
@@ -341,26 +361,55 @@ const SHADOW_CSS = `
   .actions {
     display: flex;
     flex-direction: column;
-    gap: 8px;
-    padding: 12px 16px 14px;
+    gap: 10px;
+    padding: 14px 16px 16px;
     background: #f8fafc;
     border-top: 1px solid #f1f5f9;
   }
   .actions-primary {
-    display: flex;
-    flex-wrap: wrap;
+    display: grid;
+    grid-template-columns: 1fr;
     gap: 8px;
+  }
+  .actions-primary.has-secondary-cta {
+    grid-template-columns: 1.4fr 1fr;
+  }
+  @media (max-width: 520px) {
+    .actions-primary.has-secondary-cta { grid-template-columns: 1fr; }
+  }
+  .actions-primary .btn-accent {
+    min-height: 42px;
+    font-size: 14px;
+  }
+  .actions-alt {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+  @media (max-width: 420px) {
+    .actions-alt { grid-template-columns: 1fr; }
   }
   .actions-secondary {
     display: flex;
     flex-wrap: wrap;
     gap: 6px;
     align-items: center;
+    padding-top: 2px;
+    border-top: 1px dashed #e2e8f0;
   }
   .actions-secondary button {
     padding: 7px 10px;
     font-size: 12px;
     font-weight: 650;
+  }
+  .actions-label {
+    width: 100%;
+    margin: 0 0 2px;
+    font-size: 10px;
+    font-weight: 750;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: #94a3b8;
   }
   button {
     appearance: none;
@@ -786,41 +835,50 @@ export function showAlertBanner(
     simThreshold > 0 &&
     promptRisk.score >= simThreshold
 
-  // Actions : ligne principale (CTA) + ligne secondaire (outils)
+  // Actions structurées : CTA recommandé → alternatives → outils
   const actionsHtml = isBlock
     ? `
+      <p class="actions-label">Action requise</p>
       <div class="actions-primary">
         <button type="button" class="btn-primary" data-action="cancel">${escapeHtml(msgs.btnBlockAck)}</button>
       </div>
       <div class="actions-secondary">
         ${contactBtnHtml}
-        <button type="button" class="btn-secondary" data-action="toggle_details">Détails</button>
+        <button type="button" class="btn-secondary" data-action="toggle_details">Voir les détails</button>
       </div>
     `
     : isForce
       ? `
+      <p class="actions-label">Recommandé</p>
       <div class="actions-primary">
         <button type="button" class="btn-accent" data-action="open_rewrite">${escapeHtml(rewriteLabel)}</button>
+      </div>
+      <p class="actions-label">Autres options</p>
+      <div class="actions-alt">
         <button type="button" class="btn-secondary" data-action="mask_send">${escapeHtml(maskLabel)}</button>
+        <button type="button" class="btn-ghost" data-action="cancel">${escapeHtml(cancelLabel)}</button>
       </div>
       <div class="actions-secondary">
-        <button type="button" class="btn-secondary" data-action="open_sim">Simuler</button>
+        <button type="button" class="btn-secondary" data-action="open_sim">Simuler le risque</button>
         ${contactBtnHtml}
-        <button type="button" class="btn-secondary" data-action="toggle_details">Détails</button>
-        <button type="button" class="btn-ghost" data-action="cancel">${escapeHtml(cancelLabel)}</button>
+        <button type="button" class="btn-secondary" data-action="toggle_details">Voir les détails</button>
       </div>
     `
       : `
-      <div class="actions-primary">
+      <p class="actions-label">Recommandé</p>
+      <div class="actions-primary has-secondary-cta">
         <button type="button" class="btn-accent" data-action="open_rewrite">${escapeHtml(rewriteLabel)}</button>
         <button type="button" class="btn-secondary" data-action="mask_send">${escapeHtml(maskLabel)}</button>
+      </div>
+      <p class="actions-label">Autres options</p>
+      <div class="actions-alt">
         <button type="button" class="btn-danger" data-action="send_anyway">${escapeHtml(allowLabel)}</button>
+        <button type="button" class="btn-ghost" data-action="cancel">${escapeHtml(cancelLabel)}</button>
       </div>
       <div class="actions-secondary">
-        <button type="button" class="btn-secondary" data-action="open_sim">Simuler</button>
+        <button type="button" class="btn-secondary" data-action="open_sim">Simuler le risque</button>
         ${contactBtnHtml}
-        <button type="button" class="btn-secondary" data-action="toggle_details">Détails</button>
-        <button type="button" class="btn-ghost" data-action="cancel">${escapeHtml(cancelLabel)}</button>
+        <button type="button" class="btn-secondary" data-action="toggle_details">Voir les détails</button>
       </div>
     `
 
@@ -882,10 +940,16 @@ export function showAlertBanner(
         </div>
         <div>
           <p class="title">${escapeHtml(title)}</p>
-          <p class="sub">${escapeHtml(isFile ? `${detections.length} élément(s) · ${fileLabel}` : `${detections.length} élément(s)`)}${orgBit ? ` · ${orgBit.replace(/^ Organisation : /, "").replace(/\.$/, "")}` : ""}</p>
+          <p class="sub">${sub}</p>
           <span class="pill">${escapeHtml(pill)}</span>
+          <p class="admin-notice">${escapeHtml(msgs.adminNotice)}${orgBit}</p>
           <p class="post-contact-note" id="og-post-contact"></p>
           ${riskBlockHtml}
+          ${
+            !isBlock && high > 0
+              ? `<p class="warn-line">Éléments critiques : Secure Rewrite recommandé.</p>`
+              : ""
+          }
           ${options.note ? `<p class="sub" style="margin-top:6px">${escapeHtml(options.note)}</p>` : ""}
         </div>
       </div>
