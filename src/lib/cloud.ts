@@ -49,6 +49,8 @@ export interface ConfigResponse {
     rules_pack_version: string
     protect_unenroll?: boolean
     user_messages?: Record<string, string>
+    /** fr | en | auto — langue banner / options (pas la console admin) */
+    agent_ui_lang?: "fr" | "en" | "auto"
     require_unenroll_password?: boolean
     admin_credentials?: Array<{
       id: string
@@ -359,6 +361,12 @@ export async function syncConfig(
       defaultAction: (body.policy.default_action as OpsGateSettings["defaultAction"]) ||
         "mask_recommend",
       userMessages: body.policy.user_messages || {},
+      agentUiLang:
+        body.policy.agent_ui_lang === "en" ||
+        body.policy.agent_ui_lang === "auto" ||
+        body.policy.agent_ui_lang === "fr"
+          ? body.policy.agent_ui_lang
+          : "fr",
       // Si unlicensed après grace → désactive la protection locale
       enabled:
         body.policy.security_active === false

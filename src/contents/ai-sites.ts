@@ -12,7 +12,7 @@ import {
   toastFromDecision
 } from "~lib/banner"
 import { ext, sendMessageWithRetry } from "~lib/browser-api"
-import { mergeUserMessages } from "~types"
+import { mergeMessagesForLang, resolveAgentLang } from "~lib/i18n-agent"
 import {
   detectTextSync,
   ensureRulesWarm,
@@ -545,7 +545,8 @@ function handlePotentialSend(event: Event, sourceEl?: Element | null): void {
   )
 
   const action = settings.defaultAction || "mask_recommend"
-  const msgs = mergeUserMessages(settings.userMessages)
+  const agentLang = resolveAgentLang(settings.agentUiLang)
+  const msgs = mergeMessagesForLang(agentLang, settings.userMessages)
 
   // Toujours proposer le contact admin sur le bandeau (l’API gère non-enrôlé).
   showAlertBanner(
@@ -630,6 +631,7 @@ function handlePotentialSend(event: Event, sourceEl?: Element | null): void {
       sourceText: text,
       defaultAction: action,
       userMessages: settings.userMessages,
+      agentUiLang: settings.agentUiLang,
       orgName: settings.orgName,
       contactAdminEnabled: true
     }
@@ -842,7 +844,8 @@ async function processQuarantinedFiles(
           ] as unknown as Detection[])
 
     const fileAction = settings.defaultAction || "mask_recommend"
-    const fileMsgs = mergeUserMessages(settings.userMessages)
+    const agentLang = resolveAgentLang(settings.agentUiLang)
+    const fileMsgs = mergeMessagesForLang(agentLang, settings.userMessages)
 
     // Texte agrégé pour preview Secure Rewrite (fichiers scannés)
     const filePreviewText = scans
@@ -973,6 +976,7 @@ async function processQuarantinedFiles(
         note: notes.length ? notes.join(" ") : undefined,
         defaultAction: fileAction,
         userMessages: settings.userMessages,
+        agentUiLang: settings.agentUiLang,
         orgName: settings.orgName,
         contactAdminEnabled: true
       }

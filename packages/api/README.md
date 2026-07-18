@@ -1,6 +1,8 @@
-# `@opsgate/api` — Control Plane (PR5)
+# `@opsgate/api` — Control Plane
 
-API OpsGate. Store **memory** (défaut) ou **Postgres** (`DATABASE_URL`).
+API OpsGate (Hono). Store **memory** (défaut lab) ou **Postgres** (`DATABASE_URL`).
+
+**Version** : 1.2.x · monorepo · multi-tenant, SSO, risk/shadow, MSP
 
 ## Run
 
@@ -15,43 +17,31 @@ docker compose up -d
 pnpm api:dev
 ```
 
-Default: `http://127.0.0.1:8787`
+Default: `http://127.0.0.1:8787` · health: `GET /health`
 
-## Endpoints
+## Domaines fonctionnels
 
-| Method | Path | Auth | Description |
-|--------|------|------|-------------|
-| GET | `/health` | — | Liveness |
-| POST | `/v1/enroll` | — | Enroll agent with `org_code` |
-| GET | `/v1/agents/me/config` | Bearer agent | Policy + **active** rules pack |
-| POST | `/v1/events/batch` | Bearer agent | Ingest metadata events |
-| GET | `/v1/org/summary` | Dev admin | Dashboard numbers |
-| GET | `/v1/org/agents` | Dev admin | Agent list |
-| GET | `/v1/org/events` | Dev admin | Recent events |
-| GET | `/v1/org/policy` | Dev admin | Org + policy |
-| PATCH | `/v1/org/policy` | Dev admin | Update policy |
-| GET | `/v1/org/rules/packs` | Dev admin | List pack versions (PR2) |
-| GET | `/v1/org/rules/packs/:ver` | Dev admin | Pack detail |
-| POST | `/v1/org/rules/packs` | Dev admin | **Publish** pack |
-| POST | `/v1/org/rules/packs/:ver/activate` | Dev admin | Activate / rollback |
+| Domaine | Exemples de routes |
+|---------|-------------------|
+| Agents | enroll, config, events batch, force-sync |
+| Policy / packs | policy, profiles, rule packs signés ed25519 |
+| Org / MSP | summary, agents, monitoring, `msp-overview` (snapshot léger) |
+| Identité | console auth, MFA, WebAuthn, OIDC/SAML |
+| **V3 Risk / Shadow** | `/v1/org/risk/*`, `/v1/org/shadow-ai/*` |
+| Ops | audit WORM, SIEM, metrics, backup, GDPR |
 
 **Demo org code:** `DEMO-OPSGATE`  
-**Dev admin header:** `X-OpsGate-Dev-Admin: demo`
+**Dev admin:** header `X-OpsGate-Dev-Admin: demo` (lab)
 
-## Smoke test
+## Config agent notable
 
-```bash
-pnpm api:smoke
-```
+- `policy.agent_ui_lang` : `fr` \| `en` \| `auto` (depuis monitoring org)  
+- `policy.file_scan` : OCR / Office / configs  
+- `policy.user_messages` : custom banner (sinon defaults i18n agent)
 
 ## Docs
 
-- [PR1-API.md](../../docs/architecture/PR1-API.md)
-- [PR2-RULEPACK.md](../../docs/architecture/PR2-RULEPACK.md)
-
-## Next (PR3+)
-
-- Extension enroll UI + rules cache from API
-- Postgres + ed25519
-- Real admin auth (magic link)
-- OpsGate Console UI
+- [`docs/architecture/CONTROL-PLANE.md`](../../docs/architecture/CONTROL-PLANE.md)  
+- [`docs/architecture/PR1-API.md`](../../docs/architecture/PR1-API.md)  
+- [`docs/GUIDE-STACK-LOCALE.md`](../../docs/GUIDE-STACK-LOCALE.md)  
+- Gap produit : [`docs/STATUS-GAP-V1-V3.md`](../../docs/STATUS-GAP-V1-V3.md)

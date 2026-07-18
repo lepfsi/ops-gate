@@ -1,6 +1,8 @@
-# OpsGate Console (PR4)
+# OpsGate Console (MMC)
 
-UI admin légère pour le control plane.
+UI admin React/Vite pour le control plane.
+
+**Version** : 1.2.x · monorepo
 
 ## Run
 
@@ -14,17 +16,38 @@ pnpm console:dev
 
 Ouvre **http://127.0.0.1:5173**
 
-Dev admin header injecté automatiquement : `X-OpsGate-Dev-Admin: demo`
+Lab : header admin injecté automatiquement (`X-OpsGate-Dev-Admin: demo`).
 
-## Onglets
+## Onglets principaux
 
-- **Summary** — agents, events, décisions, top rules, pack actif  
-- **Rule packs** — publish (clone + disable rules), activate / rollback  
-- **Agents** — appareils enrollés  
-- **Events** — metadata only  
+| Onglet | Rôle |
+|--------|------|
+| **Tableau de bord** | Summary, widgets, licences, connectivité |
+| **Portfolio MSP** | Multi-org (même email admin) + KPI |
+| **Policy** | Action, hosts, file scan, messages banner, profils |
+| **People** | Admins, users, groups |
+| **Packs** | Publish / activate packs de règles |
+| **Agents** | Enrollés, licences, import CSV |
+| **Events** | Métadonnées détection |
+| **Risk Score** | Scores utilisateurs, tendances, pagination |
+| **Shadow AI** | Inventaire outils IA (auth / unauth) |
+| **Audit** | Journal WORM admin |
+| **Paramètres** | Langue console + **langue agents**, monitoring, SSO… |
 
 ## Build
 
 ```bash
 pnpm console:build
+# vendor branding :
+pnpm console:build:vendor
 ```
+
+## i18n
+
+Console : `src/i18n.ts` (préférence locale navigateur admin).  
+**Agents** (banner) : indépendant — Paramètres → Langue des agents (`fr`/`en`/`auto`).
+
+## Docs
+
+- [`docs/architecture/PR4-CONSOLE.md`](../../docs/architecture/PR4-CONSOLE.md)  
+- [`docs/GUIDE-UTILISATEUR-V2.md`](../../docs/GUIDE-UTILISATEUR-V2.md)

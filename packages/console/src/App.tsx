@@ -636,10 +636,17 @@ export default function App() {
     }
   }, [sessionAdmin])
 
+  const summaryRef = useRef<Summary | null>(null)
+  useEffect(() => {
+    summaryRef.current = summary
+  }, [summary])
+
   const loadTab = useCallback(async (t: Tab) => {
     if (!getToken()) return
     setError(null)
-    setBusy(true)
+    // Soft refresh dashboard : garder l’UI affichée pendant le rechargement
+    const softDash = t === "summary" && !!summaryRef.current
+    if (!softDash) setBusy(true)
     try {
       if (t === "summary") {
         setSummary(await api.summary())
@@ -1409,7 +1416,12 @@ export default function App() {
         className={`shell-main${
           tab === "summary" && dashExpanded ? " shell-main--dash-expanded" : ""
         }`}>
-      {busy && tab !== "packs" && tab !== "policy" && !dashExpanded && (
+      {busy &&
+        tab !== "packs" &&
+        tab !== "policy" &&
+        /* Dashboard : ne pas flash « chargement » si données déjà en cache */
+        !(tab === "summary" && summary) &&
+        !dashExpanded && (
         <p className="muted">{t("common.loading")}</p>
       )}
 
@@ -3332,6 +3344,7 @@ function SystemSettingsView({
   const [gdprRestorePhrase, setGdprRestorePhrase] = useState("RESTORE MY ORG")
   const [gdprConfirmInput, setGdprConfirmInput] = useState("")
   const [gdprReason, setGdprReason] = useState("")
+  const [agentUiLang, setAgentUiLang] = useState<"fr" | "en" | "auto">("fr")
   const [onlineMin, setOnlineMin] = useState(15)
   const [offlineMin, setOfflineMin] = useState(120)
   const [schedOn, setSchedOn] = useState(false)
@@ -3486,6 +3499,11 @@ function SystemSettingsView({
       try {
         const r = await api.monitoring()
         const m = r.monitoring
+        setAgentUiLang(
+          m.agentUiLang === "en" || m.agentUiLang === "auto"
+            ? m.agentUiLang
+            : "fr"
+        )
         setOnlineMin(Math.round((m.onlineMs || 900000) / 60000))
         setOfflineMin(Math.round((m.offlineLongMs || 7200000) / 60000))
         setSchedOn(!!m.schedule?.enabled)
@@ -3704,6 +3722,7 @@ function SystemSettingsView({
       setRetentionDays(daysClamped)
       setAuditLegalDays(legalClamped)
       await api.updateMonitoring({
+        agentUiLang,
         onlineMs: onlineMin * 60 * 1000,
         offlineLongMs: offlineMin * 60 * 1000,
         logRetentionDays: daysClamped,
@@ -3904,6 +3923,27 @@ function SystemSettingsView({
             </select>
             <p className="muted" style={{ fontSize: 12, margin: 0 }}>
               {t("settings.lang.hint")}
+            </p>
+          </div>
+
+          <h3 style={{ marginTop: 28 }}>{t("settings.agentLang")}</h3>
+          <div className="form-stack" style={{ maxWidth: 420 }}>
+            <label className="field-label">{t("settings.agentLang")}</label>
+            <select
+              className="input"
+              value={agentUiLang}
+              onChange={(e) => {
+                const v = e.target.value
+                setAgentUiLang(
+                  v === "en" || v === "auto" ? v : "fr"
+                )
+              }}>
+              <option value="fr">{t("settings.agentLang.fr")}</option>
+              <option value="en">{t("settings.agentLang.en")}</option>
+              <option value="auto">{t("settings.agentLang.auto")}</option>
+            </select>
+            <p className="muted" style={{ fontSize: 12, margin: 0 }}>
+              {t("settings.agentLang.hint")}
             </p>
           </div>
 
@@ -11167,149 +11207,278 @@ function MspPortfolioView({
     void load()
   }, [load, currentOrgId])
 
-  if (err) {
+  if (err && !data) {
     return (
-      <div className="card">
-        <h2>{t("msp.portfolio")}</h2>
-        <p className="err">{err}</p>
+      <div className="msp-portfolio">
+        <div className="card msp-hero">
+          <h2 style={{ margin: 0 }}>{t("msp.portfolio")}</h2>
+          <p className="err" style={{ marginBottom: 0 }}>
+            {err}
+          </p>
+        </div>
       </div>
     )
   }
-  if (!data || busy) {
+  if (!data) {
     return (
-      <div className="card empty">{t("common.loading")}</div>
+      <div className="msp-portfolio">
+        <div className="card msp-hero msp-skeleton">
+          <div className="msp-skel-line msp-skel-title" />
+          <div className="msp-kpis">
+            {[0, 1, 2, 3, 4, 5].map((i) => (
+              <div key={i} className="msp-kpi msp-skel-block" />
+            ))}
+          </div>
+        </div>
+        <div className="msp-grid">
+          {[0, 1, 2].map((i) => (
+            <div key={i} className="card msp-org-card msp-skel-card" />
+          ))}
+        </div>
+      </div>
     )
   }
 
   const totals = data.totals
+  const seatPctTotal =
+    totals.seats > 0
+      ? Math.round((totals.seats_used / totals.seats) * 100)
+      : null
+  const onlinePct =
+    totals.agents > 0
+      ? Math.round((totals.online / totals.agents) * 100)
+      : 0
+  const offlineLong = totals.offline_long ?? 0
+  const events7d = totals.events_7d ?? 0
+  const attention = totals.attention ?? 0
+
   return (
     <div className="msp-portfolio">
-      <div className="card" style={{ marginBottom: 14 }}>
-        <div
-          className="row"
-          style={{ justifyContent: "space-between", alignItems: "center", gap: 12 }}>
-          <h2 style={{ margin: 0 }}>{t("msp.portfolio")}</h2>
+      <div className="card msp-hero">
+        <div className="msp-hero-top">
+          <div className="msp-hero-title">
+            <span className="msp-hero-badge" aria-hidden="true">
+              MSP
+            </span>
+            <div>
+              <h2 style={{ margin: 0 }}>{t("msp.portfolio")}</h2>
+              <p className="msp-hero-sub">
+                {t("msp.portfolioHint", { n: data.org_count })}
+              </p>
+            </div>
+          </div>
           <button
             type="button"
             className="btn secondary btn-sm"
             disabled={busy}
             onClick={() => void load()}>
-            {t("top.refresh")}
+            {busy ? t("common.loading") : t("top.refresh")}
           </button>
         </div>
-        <div className="msp-totals" style={{ marginTop: 14 }}>
-          <div className="msp-stat">
-            <span className="muted">{t("msp.statOrgs")}</span>
-            <strong>{data.org_count}</strong>
+        {err ? (
+          <p className="err" style={{ margin: "8px 0 0", fontSize: 12 }}>
+            {err}
+          </p>
+        ) : null}
+
+        <div className="msp-kpis">
+          <div className="msp-kpi">
+            <span className="msp-kpi-l">{t("msp.statOrgs")}</span>
+            <span className="msp-kpi-v">{data.org_count}</span>
+            <span className="msp-kpi-s">{t("msp.statOrgsSub")}</span>
           </div>
-          <div className="msp-stat">
-            <span className="muted">{t("msp.statAgents")}</span>
-            <strong>
-              {totals.online}/{totals.agents}
-            </strong>
+          <div className="msp-kpi">
+            <span className="msp-kpi-l">{t("msp.statAgents")}</span>
+            <span className="msp-kpi-v">
+              {totals.online}
+              <span>/{totals.agents}</span>
+            </span>
+            <span className="msp-kpi-s">
+              {t("msp.onlinePct", { n: onlinePct })}
+            </span>
+            <div className="msp-meter" aria-hidden="true">
+              <i style={{ width: `${onlinePct}%` }} />
+            </div>
           </div>
-          <div className="msp-stat">
-            <span className="muted">{t("msp.statSeats")}</span>
-            <strong>
-              {totals.seats_used}/{totals.seats || "-"}
-            </strong>
+          <div className="msp-kpi">
+            <span className="msp-kpi-l">{t("msp.statSeats")}</span>
+            <span className="msp-kpi-v">
+              {totals.seats_used}
+              <span>/{totals.seats || "—"}</span>
+            </span>
+            <span className="msp-kpi-s">
+              {seatPctTotal != null
+                ? t("msp.seatsPct", { n: seatPctTotal })
+                : t("msp.seatsUnlimited")}
+            </span>
+            {seatPctTotal != null ? (
+              <div
+                className={`msp-meter${seatPctTotal >= 90 ? " msp-meter--warn" : ""}`}
+                aria-hidden="true">
+                <i style={{ width: `${Math.min(100, seatPctTotal)}%` }} />
+              </div>
+            ) : null}
           </div>
-          <div className="msp-stat">
-            <span className="muted">{t("msp.statExpiring")}</span>
-            <strong
-              style={{
-                color:
-                  totals.expiring_licenses > 0
-                    ? "var(--warn, #b45309)"
-                    : undefined
-              }}>
-              {totals.expiring_licenses}
-            </strong>
+          <div
+            className={`msp-kpi${offlineLong > 0 ? " msp-kpi--warn" : ""}`}>
+            <span className="msp-kpi-l">{t("msp.statOffline")}</span>
+            <span className="msp-kpi-v">{offlineLong}</span>
+            <span className="msp-kpi-s">{t("msp.statOfflineSub")}</span>
+          </div>
+          <div className="msp-kpi">
+            <span className="msp-kpi-l">{t("msp.statEvents")}</span>
+            <span className="msp-kpi-v">{events7d}</span>
+            <span className="msp-kpi-s">{t("msp.statEventsSub")}</span>
+          </div>
+          <div
+            className={`msp-kpi${attention > 0 ? " msp-kpi--alert" : " msp-kpi--ok"}`}>
+            <span className="msp-kpi-l">{t("msp.statAttention")}</span>
+            <span className="msp-kpi-v">{attention}</span>
+            <span className="msp-kpi-s">
+              {attention > 0
+                ? t("msp.statAttentionSub")
+                : t("msp.statAttentionOk")}
+            </span>
           </div>
         </div>
       </div>
+
       <div className="msp-grid">
         {data.orgs.map((o) => {
-          const offline = (o as { offline_long?: number }).offline_long ?? 0
+          const offline = o.offline_long ?? 0
+          const stale = o.stale ?? 0
           const days = o.license_days_left
           const seatsPct =
             typeof o.seats === "number" && o.seats > 0
               ? Math.round(((o.seats_used || 0) / o.seats) * 100)
               : null
+          const agentPct =
+            o.agents > 0 ? Math.round((o.online / o.agents) * 100) : 0
+          const licTone =
+            days != null && days < 0
+              ? "bad"
+              : days != null && days <= 30
+                ? "warn"
+                : "ok"
           return (
             <div
               key={o.org_id}
-              className={`card msp-org-card${o.current ? " msp-org-card--current" : ""}`}>
-              <div
-                className="row"
-                style={{ justifyContent: "space-between", gap: 8, marginBottom: 10 }}>
-                <div style={{ minWidth: 0 }}>
-                  <strong style={{ fontSize: 15 }}>{o.name}</strong>
-                  <div className="mono muted" style={{ fontSize: 11, marginTop: 2 }}>
-                    {o.org_code}
+              className={[
+                "card msp-org-card",
+                o.current ? "msp-org-card--current" : "",
+                o.needs_attention ? "msp-org-card--attention" : ""
+              ]
+                .filter(Boolean)
+                .join(" ")}>
+              <div className="msp-org-head">
+                <div className="msp-org-id">
+                  <strong className="msp-org-name">{o.name}</strong>
+                  <div className="msp-org-codes">
+                    <span className="mono">{o.org_code}</span>
+                    {o.company_name && o.company_name !== o.name ? (
+                      <span className="msp-org-company">{o.company_name}</span>
+                    ) : null}
                   </div>
                 </div>
-                {o.current ? (
-                  <span className="lic-status ok">{t("msp.current")}</span>
-                ) : null}
+                <div className="msp-org-badges">
+                  {o.current ? (
+                    <span className="msp-pill msp-pill--ok">
+                      {t("msp.current")}
+                    </span>
+                  ) : null}
+                  {o.is_principal ? (
+                    <span className="msp-pill msp-pill--teal">
+                      {t("msp.principal")}
+                    </span>
+                  ) : null}
+                  {o.needs_attention ? (
+                    <span className="msp-pill msp-pill--warn">
+                      {t("msp.attention")}
+                    </span>
+                  ) : null}
+                </div>
               </div>
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "1fr 1fr",
-                  gap: 10,
-                  fontSize: 13
-                }}>
-                <div>
-                  <div className="muted" style={{ fontSize: 11 }}>
-                    {t("msp.agentsOnline")}
-                  </div>
+
+              <div className="msp-org-metrics">
+                <div className="msp-org-metric">
+                  <span className="msp-org-ml">{t("msp.agentsOnline")}</span>
                   <strong>
                     {o.online}/{o.agents}
                   </strong>
-                  {offline > 0 ? (
-                    <div className="muted" style={{ fontSize: 11 }}>
-                      {offline} offline long
-                    </div>
-                  ) : null}
-                </div>
-                <div>
-                  <div className="muted" style={{ fontSize: 11 }}>
-                    {t("msp.seats")}
+                  <div className="msp-meter msp-meter--sm" aria-hidden="true">
+                    <i style={{ width: `${agentPct}%` }} />
                   </div>
+                  <span className="msp-org-ms">
+                    {stale > 0
+                      ? t("msp.staleN", { n: stale })
+                      : t("msp.onlinePct", { n: agentPct })}
+                  </span>
+                </div>
+                <div className="msp-org-metric">
+                  <span className="msp-org-ml">{t("msp.seats")}</span>
                   <strong>
-                    {o.seats_used}/{o.seats || "-"}
+                    {o.seats_used}/{o.seats || "—"}
                   </strong>
                   {seatsPct != null ? (
-                    <div className="muted" style={{ fontSize: 11 }}>
-                      {seatsPct}%
+                    <div
+                      className={`msp-meter msp-meter--sm${seatsPct >= 90 ? " msp-meter--warn" : ""}`}
+                      aria-hidden="true">
+                      <i style={{ width: `${Math.min(100, seatsPct)}%` }} />
                     </div>
-                  ) : null}
+                  ) : (
+                    <div className="msp-meter msp-meter--sm msp-meter--empty" />
+                  )}
+                  <span className="msp-org-ms">
+                    {seatsPct != null
+                      ? t("msp.seatsPct", { n: seatsPct })
+                      : t("msp.seatsUnlimited")}
+                  </span>
                 </div>
-                <div style={{ gridColumn: "1 / -1" }}>
-                  <div className="muted" style={{ fontSize: 11 }}>
-                    {t("msp.license")}
-                  </div>
-                  <strong>
-                    {o.license_mode}
-                    {days != null ? ` · ${days} j` : ""}
+                <div className="msp-org-metric">
+                  <span className="msp-org-ml">{t("msp.statOffline")}</span>
+                  <strong className={offline > 0 ? "msp-val-warn" : undefined}>
+                    {offline}
                   </strong>
-                  {days != null && days <= 30 ? (
-                    <div style={{ color: "var(--warn, #b45309)", fontSize: 11, fontWeight: 650 }}>
-                      Expire bientôt
-                    </div>
-                  ) : null}
+                  <span className="msp-org-ms">{t("msp.offlineLongHint")}</span>
+                </div>
+                <div className="msp-org-metric">
+                  <span className="msp-org-ml">{t("msp.statEvents")}</span>
+                  <strong>{o.events_7d ?? 0}</strong>
+                  <span className="msp-org-ms">{t("msp.statEventsSub")}</span>
                 </div>
               </div>
-              {!o.current && (
+
+              <div className={`msp-org-lic msp-org-lic--${licTone}`}>
+                <div>
+                  <span className="msp-org-ml">{t("msp.license")}</span>
+                  <strong>
+                    {o.license_mode}
+                    {days != null
+                      ? days < 0
+                        ? ` · ${t("msp.expired")}`
+                        : ` · ${t("msp.daysLeft", { n: days })}`
+                      : ""}
+                  </strong>
+                </div>
+                {days != null && days <= 30 ? (
+                  <span className="msp-pill msp-pill--warn msp-pill--sm">
+                    {days < 0 ? t("msp.expired") : t("msp.expiringSoon")}
+                  </span>
+                ) : null}
+              </div>
+
+              {!o.current ? (
                 <button
                   type="button"
-                  className="btn btn-sm"
-                  style={{ width: "100%", marginTop: 12 }}
+                  className="btn btn-sm msp-open-btn"
                   disabled={switchBusy}
                   onClick={() => onSwitch(o.org_id)}>
                   {t("msp.openTenant")}
                 </button>
+              ) : (
+                <div className="msp-open-btn msp-open-btn--current">
+                  {t("msp.viewingNow")}
+                </div>
               )}
             </div>
           )

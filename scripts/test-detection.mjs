@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Tests de non-régression du moteur de règles OpsGate.
  * Usage: node scripts/test-detection.mjs
  *
@@ -36,7 +36,7 @@ function isValidLuhn(num) {
 }
 
 function isValidIban(raw) {
-  const iban = raw.replace(/\s+/g, "").toUpperCase()
+  const iban = raw.replace(/[\s.\-]/g, "").toUpperCase()
   if (!/^[A-Z]{2}\d{2}[A-Z0-9]{11,30}$/.test(iban)) return false
   if (iban.length < 15 || iban.length > 34) return false
   const rearranged = iban.slice(4) + iban.slice(0, 4)
@@ -58,7 +58,7 @@ function detect(text) {
     const keywordRequired = [
       "ip-private-block",
       "license-key",
-      "iban",
+      // iban: checksum only (no keyword)
       "aws-secret-key",
       "huawei-vrp-config",
       "mikrotik-routeros",
@@ -84,8 +84,6 @@ function detect(text) {
           const raw = m[0]
           if (rule.id === "credit-card" && !isValidLuhn(raw)) continue
           if (rule.id === "iban" && !isValidIban(raw)) continue
-          if (rule.id === "iban" && !/iban|bic|swift|rib|bancaire|bank account/i.test(text))
-            continue
           if (
             rule.id === "password-assignment" &&
             /password\s*[=:]\s*(password|123456|changeme|test)\b/i.test(raw)
@@ -154,6 +152,16 @@ const cases = [
   {
     name: "Valid FR IBAN with context",
     text: "Mon IBAN est FR1420041010050500013M02606",
+    expect: ["iban"]
+  },
+  {
+    name: "Valid FR IBAN without keyword",
+    text: "Virement vers FR1420041010050500013M02606 demain",
+    expect: ["iban"]
+  },
+  {
+    name: "Valid FR IBAN spaced",
+    text: "FR76 3000 6000 0112 3456 7890 189",
     expect: ["iban"]
   },
   {
@@ -260,3 +268,4 @@ if (failed) {
   process.exit(1)
 }
 console.log(`All ${cases.length} tests passed`)
+

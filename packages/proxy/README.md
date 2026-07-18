@@ -1,7 +1,7 @@
-# @opsgate/proxy — P2 (MITM observe + control plane)
+# @opsgate/proxy — MITM local multi-IA
 
-**Phase** : P2  
-**Docs** : [`PROXY-P0.md`](../../docs/architecture/PROXY-P0.md) · [`PROXY-P1.md`](../../docs/architecture/PROXY-P1.md) · [`PROXY-P2.md`](../../docs/architecture/PROXY-P2.md)
+**Version** : 1.2.x · modes **observe** / **enforce**  
+**Docs** : [`PROXY-P0.md`](../../docs/architecture/PROXY-P0.md) · [`PROXY-P1.md`](../../docs/architecture/PROXY-P1.md) · [`PROXY-P2.md`](../../docs/architecture/PROXY-P2.md) · [`PROXY-PROD-WINDOWS.md`](../../docs/architecture/PROXY-PROD-WINDOWS.md) · runbook [`PROXY-RUNBOOK.md`](../../docs/architecture/PROXY-RUNBOOK.md)
 
 Proxy HTTP(S) **local** OpsGate :
 

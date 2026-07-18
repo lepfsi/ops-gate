@@ -1,12 +1,13 @@
 # Backlog V3 — différenciation produit
 
-**Mis à jour** : 17 juillet 2026  
-**Statut** : **gelé jusqu’à fin pre-GA V2** — spécifié, non démarré en code  
+**Mis à jour** : 18 juillet 2026  
+**Statut** : **V3-P0 livré en code** (A/B/C) · polish + V3-D/E/F/G ouverts · pre-GA V2 **toujours** le chemin commercial  
 **Principe** : *Enable AI. Secure Data.* — peu de features **fortes**, pas de dispersion  
+**Cut** : [`RELEASE-v3.md`](./RELEASE-v3.md) · **gap** : [`STATUS-GAP-V1-V3.md`](./STATUS-GAP-V1-V3.md)
 
-> **Avant d’ouvrir ce backlog en implémentation** : terminer le pre-GA V2  
-> (stores publiés ou process validé, pilote client, Stripe prod / licences).  
-> Synthèse V2 : [`STATUS-V2.md`](./STATUS-V2.md) · reste V2 : [`V2-BACKLOG.md`](./V2-BACKLOG.md)
+> **Commercial / GA** : terminer le pre-GA V2 (stores ou MDM, pilote, Stripe prod).  
+> **Produit** : P0 V3 est utilisable en démo ; ne pas bloquer les démos dessus.  
+> Synthèse : [`STATUS-V2.md`](./STATUS-V2.md) · reste V2 : [`V2-BACKLOG.md`](./V2-BACKLOG.md)
 
 **Specs sources** : [`roadmap-v3/`](./roadmap-v3/)  
 **Vision** : [`roadmap-v3/VISION-PRODUIT-ROADMAP-STRATEGIQUE-v1.md`](./roadmap-v3/VISION-PRODUIT-ROADMAP-STRATEGIQUE-v1.md)  
@@ -47,9 +48,9 @@ Socle déjà présent à réutiliser :
 
 | Epic | Priorité | Effort estimé | Spec | Statut |
 |------|----------|---------------|------|--------|
-| **V3-A Secure Rewrite** | P0 | Moyen | [`FEATURE-SPEC-SECURE-REWRITE-v1.md`](./roadmap-v3/FEATURE-SPEC-SECURE-REWRITE-v1.md) | ◐ **livré engine + banner** (17/07) |
-| **V3-B Risk Score prompt + Simulation** | P0 | Faible–moyen | [`FEATURE-SPEC-RISK-SCORE-SIMULATION-v1.md`](./roadmap-v3/FEATURE-SPEC-RISK-SCORE-SIMULATION-v1.md) | ◐ **livré** (17/07) |
-| **V3-C Shadow AI + Risk Score utilisateur** | P0 | Moyen–élevé | [`SHADOW-AI-RISK-SCORE.md`](./roadmap-v3/SHADOW-AI-RISK-SCORE.md) + [wireframes](./roadmap-v3/SHADOW-AI-RISK-SCORE-WIREFRAMES.md) | ◐ **livré** (17/07) |
+| **V3-A Secure Rewrite** | P0 | Moyen | [`FEATURE-SPEC-SECURE-REWRITE-v1.md`](./roadmap-v3/FEATURE-SPEC-SECURE-REWRITE-v1.md) | ✅ **livré** (17–18/07) |
+| **V3-B Risk Score prompt + Simulation** | P0 | Faible–moyen | [`FEATURE-SPEC-RISK-SCORE-SIMULATION-v1.md`](./roadmap-v3/FEATURE-SPEC-RISK-SCORE-SIMULATION-v1.md) | ✅ **livré** (17–18/07) |
+| **V3-C Shadow AI + Risk Score utilisateur** | P0 | Moyen–élevé | [`SHADOW-AI-RISK-SCORE.md`](./roadmap-v3/SHADOW-AI-RISK-SCORE.md) + [wireframes](./roadmap-v3/SHADOW-AI-RISK-SCORE-WIREFRAMES.md) | ✅ **livré** (17–18/07) |
 | **V3-D Dashboard Risk / Analytics** | P1 | Moyen | Wireframes § dashboard | ⬜ |
 | **V3-E AI Trust Score (par modèle)** | P1 | Moyen | Vision § Trust Score | ⬜ |
 | **V3-F Classification intelligente** | P2 | Élevé | Vision Phase 4 | ⬜ |
@@ -189,7 +190,8 @@ Checklist kickoff V3-C :
 | Date | Événement |
 |------|-----------|
 | 17/07/2026 | Specs V3 déposées (commit Roadmap) puis déplacées sous `docs/roadmap-v3/` |
-| 17/07/2026 | **Ce backlog** créé ; implémentation V3 **gelée** jusqu’à gate pre-GA |
+| 17/07/2026 | **Ce backlog** créé ; implémentation V3 initialement gelée |
+| 17–18/07/2026 | **P0 A/B/C livrés** en monorepo ; UX banner/MSP/Risk ; i18n agents ; RELEASE-v3 + STATUS-GAP |
 
 ---
 

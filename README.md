@@ -2,14 +2,14 @@
 
 **Utilisez l’IA librement. Protégez vos données automatiquement.**
 
-**Version : 1.2.x monorepo · maturité V2 functional / pre-GA** — synthèse [`docs/STATUS-V2.md`](docs/STATUS-V2.md) · cut V2 [`docs/RELEASE-v2.md`](docs/RELEASE-v2.md) · socle V1 [`docs/RELEASE-v1.md`](docs/RELEASE-v1.md)
+**Version : 1.2.x monorepo · maturité V2 pre-GA + V3-P0 functional** — synthèse [`docs/STATUS-V2.md`](docs/STATUS-V2.md) · gap [`docs/STATUS-GAP-V1-V3.md`](docs/STATUS-GAP-V1-V3.md) · cut V2 [`docs/RELEASE-v2.md`](docs/RELEASE-v2.md) · cut V3 [`docs/RELEASE-v3.md`](docs/RELEASE-v3.md) · socle V1 [`docs/RELEASE-v1.md`](docs/RELEASE-v1.md)
 
-OpsGate est une plateforme de **Data Loss Prevention légère** pour l’IA générative : extension navigateur (**Chrome / Edge / Firefox / Safari build**, Manifest V3), control plane (API + Console multi-tenant), **proxy local** multi-IA, SSO/MFA/passkeys, audit WORM.
+OpsGate est une plateforme de **Data Loss Prevention / AI security** pour l’IA générative : extension navigateur (**Chrome / Edge / Firefox / Safari build**, Manifest V3), **Secure Rewrite**, risk scores, Shadow AI, control plane multi-tenant, **proxy local** multi-IA, SSO/MFA/passkeys, audit WORM.
 
-**Statut produit** : [`docs/STATUS-V2.md`](docs/STATUS-V2.md) · **traces** : [`docs/CHANGELOG-TECHNIQUE.md`](docs/CHANGELOG-TECHNIQUE.md) · **backlog V2** : [`docs/V2-BACKLOG.md`](docs/V2-BACKLOG.md) · **V3 (après pre-GA)** : [`docs/V3-BACKLOG.md`](docs/V3-BACKLOG.md)
+**Statut produit** : [`docs/STATUS-V2.md`](docs/STATUS-V2.md) · **traces** : [`docs/CHANGELOG-TECHNIQUE.md`](docs/CHANGELOG-TECHNIQUE.md) · **backlog V2** : [`docs/V2-BACKLOG.md`](docs/V2-BACKLOG.md) · **V3** : [`docs/V3-BACKLOG.md`](docs/V3-BACKLOG.md) · **concepteur** : [`docs/CAHIER-CONCEPTEUR.md`](docs/CAHIER-CONCEPTEUR.md)
 
 **Déploiement client** : [`DEPLOIEMENT-CLIENT.pdf`](docs/DEPLOIEMENT-CLIENT.pdf) · [EN](docs/DEPLOIEMENT-CLIENT-EN.pdf) · [md FR](docs/DEPLOIEMENT-CLIENT.md)  
-**Décideurs (V2)** : [`DECIDEURS-V2-FR.pdf`](docs/DECIDEURS-V2-FR.pdf) · [`DECIDEURS-V2-EN.pdf`](docs/DECIDEURS-V2-EN.pdf)  
+**Décideurs** : [`DECIDEURS-V2-FR.pdf`](docs/DECIDEURS-V2-FR.pdf) · [`DECIDEURS-V2-EN.pdf`](docs/DECIDEURS-V2-EN.pdf) · [md FR](docs/DECIDEURS-V2-FR.md)  
 **Guides** : [`GUIDE-UTILISATEUR-V2.pdf`](docs/GUIDE-UTILISATEUR-V2.pdf) · [EN](docs/GUIDE-UTILISATEUR-V2-EN.pdf) · **Tests** : [`GUIDE-TEST-V2.pdf`](docs/GUIDE-TEST-V2.pdf)
 
 En mode local, tout le traitement est **local**. En mode org, seules des **métadonnées** d’événements peuvent être centralisées (pas le prompt).
@@ -21,14 +21,16 @@ En mode local, tout le traitement est **local**. En mode org, seules des **méta
 - Détection **générale** : secrets, API keys, OpenAI/Anthropic/HF, mots de passe, PII, IBAN, cartes, Azure/GCP/Stripe, JWT, .env…
 - Détection **infra** : Fortinet, Cisco, Juniper, **Huawei**, **MikroTik**, **Palo Alto**, pfSense/OPNsense, WireGuard/OpenVPN, Arista, credentials réseau
 - Sites IA : ChatGPT, Claude, Gemini, **Copilot**, **Perplexity**, **DeepSeek**, **AI Studio**, Grok, etc.
-- Bandeau non bloquant : masquer · envoyer quand même · détails · annuler
+- Bandeau pro : **Secure Rewrite** · masquer · simuler · contacter admin · annuler
+- **Risk score** par prompt + **Simulation** ; console **Risk Score** + **Shadow AI**
 - **Proxy local** MITM multi-IA (MSI Windows, soft-block)
-- Control plane : API + Console multi-tenant (RLS), **SSO OIDC/SAML**, **MFA TOTP**, **passkeys**, MSP
+- Control plane : API + Console multi-tenant (RLS), **SSO OIDC/SAML**, **MFA TOTP**, **passkeys**, **MSP** densifié
+- Langue agents **FR / EN / auto** (indépendante de la console admin)
 - Audit **WORM**, backup config/DB, notifs multi-canaux, export logs planifié, import CSV agents
 - Journal local + activation ON/OFF
 - Identité visuelle (icônes + wordmark dans `assets/`)
 
-Détail avancement : [`docs/STATUS-V2.md`](docs/STATUS-V2.md)
+Détail avancement : [`docs/STATUS-V2.md`](docs/STATUS-V2.md) · gap : [`docs/STATUS-GAP-V1-V3.md`](docs/STATUS-GAP-V1-V3.md)
 
 ## Installer en dev / test
 

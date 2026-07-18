@@ -17,6 +17,12 @@ import type {
   UserDecision
 } from "../types"
 import { DEFAULT_USER_MESSAGES, mergeUserMessages } from "../types"
+import {
+  mergeMessagesForLang,
+  resolveAgentLang,
+  tAgent,
+  type AgentUiLang
+} from "./i18n-agent"
 
 const BANNER_ID = "opsgate-alert-banner"
 
@@ -59,6 +65,11 @@ export interface BannerOptions {
   simulationThreshold?: number
   /** Désactive l’ouverture auto de la simulation */
   autoSimulation?: boolean
+  /**
+   * Langue UI agent (fr|en|auto). Défaut fr.
+   * Indépendante de la console admin.
+   */
+  agentUiLang?: "fr" | "en" | "auto"
 }
 
 /** Styles isolés dans un Shadow DOM (évite que ChatGPT/Claude écrasent le rouge) */
@@ -73,14 +84,16 @@ const SHADOW_CSS = `
     transform: translateX(-50%);
     /* Sous le popup réponse admin (2147483647) */
     z-index: 2147483645;
-    width: min(600px, calc(100vw - 24px));
+    width: min(560px, calc(100vw - 24px));
     font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
     font-size: 14px;
     color: #0f172a;
     background: #ffffff;
     border: 1px solid #e2e8f0;
-    border-radius: 12px;
-    box-shadow: 0 12px 40px rgba(15, 23, 42, 0.22);
+    border-radius: 14px;
+    box-shadow:
+      0 0 0 1px rgba(15, 23, 42, 0.03),
+      0 16px 48px rgba(15, 23, 42, 0.18);
     overflow: hidden;
     animation: og-in 0.2s ease-out;
   }
@@ -232,11 +245,15 @@ const SHADOW_CSS = `
   .sim-actions {
     display: flex;
     flex-wrap: wrap;
-    gap: 8px;
-    padding: 12px 16px 14px;
-    background: #f8fafc;
-    border-top: 1px solid #e2e8f0;
+    align-items: center;
+    gap: 6px 8px;
+    padding: 10px 14px 12px;
+    background: linear-gradient(180deg, #fbfdff 0%, #f1f5f9 100%);
+    border-top: 1px solid #e8eef5;
   }
+  .sim-actions .btn-cta,
+  .sim-actions .btn-accent { margin-right: 2px; }
+  .sim-actions .spacer { flex: 1 1 auto; min-width: 8px; }
   .wrap.mode-block {
     border-color: #fecaca;
   }
@@ -251,9 +268,9 @@ const SHADOW_CSS = `
     display: flex;
     align-items: flex-start;
     gap: 12px;
-    padding: 14px 16px 10px;
+    padding: 13px 14px 11px;
     border-bottom: 1px solid #f1f5f9;
-    background: linear-gradient(180deg, #fff7ed 0%, #ffffff 55%);
+    background: linear-gradient(180deg, #fff7ed 0%, #ffffff 58%);
   }
   .wrap.mode-block .header {
     background: linear-gradient(180deg, #fef2f2 0%, #ffffff 55%);
@@ -358,116 +375,234 @@ const SHADOW_CSS = `
     word-break: break-all;
     margin-top: 2px;
   }
+  /* ── Footer actions : toolbar compacte, hiérarchie claire ── */
   .actions {
     display: flex;
     flex-direction: column;
     gap: 10px;
-    padding: 14px 16px 16px;
-    background: #f8fafc;
-    border-top: 1px solid #f1f5f9;
+    padding: 12px 14px 13px;
+    background:
+      linear-gradient(180deg, #fbfdff 0%, #f1f5f9 100%);
+    border-top: 1px solid #e8eef5;
   }
-  .actions-primary {
-    display: grid;
-    grid-template-columns: 1fr;
-    gap: 8px;
-  }
-  .actions-primary.has-secondary-cta {
-    grid-template-columns: 1.4fr 1fr;
-  }
-  @media (max-width: 520px) {
-    .actions-primary.has-secondary-cta { grid-template-columns: 1fr; }
-  }
-  .actions-primary .btn-accent {
-    min-height: 42px;
-    font-size: 14px;
-  }
-  .actions-alt {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 8px;
-  }
-  @media (max-width: 420px) {
-    .actions-alt { grid-template-columns: 1fr; }
-  }
-  .actions-secondary {
+  .act-main {
     display: flex;
     flex-wrap: wrap;
-    gap: 6px;
     align-items: center;
-    padding-top: 2px;
-    border-top: 1px dashed #e2e8f0;
+    gap: 8px;
   }
-  .actions-secondary button {
-    padding: 7px 10px;
-    font-size: 12px;
-    font-weight: 650;
+  .act-main .btn-cta {
+    flex: 1 1 auto;
+    min-width: min(100%, 168px);
   }
+  .act-main .btn-soft {
+    flex: 0 1 auto;
+  }
+  .act-bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px 12px;
+    padding-top: 8px;
+    border-top: 1px solid rgba(148, 163, 184, 0.28);
+  }
+  .act-utils {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+  }
+  .act-utils .dot {
+    display: none; /* pills espacées : plus de séparateurs point */
+  }
+  .act-side {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    margin-left: auto;
+  }
+  /* Labels de section (legacy / panels) */
   .actions-label {
     width: 100%;
-    margin: 0 0 2px;
+    margin: 0;
     font-size: 10px;
-    font-weight: 750;
-    letter-spacing: 0.04em;
+    font-weight: 700;
+    letter-spacing: 0.06em;
     text-transform: uppercase;
     color: #94a3b8;
   }
   button {
     appearance: none;
     -webkit-appearance: none;
-    border-radius: 8px;
-    padding: 9px 13px;
-    font-size: 13px;
-    font-weight: 700;
+    border-radius: 999px;
+    padding: 7px 12px;
+    font-size: 12.5px;
+    font-weight: 650;
     cursor: pointer;
     font-family: inherit;
     line-height: 1.2;
-    transition: filter 0.12s, transform 0.05s;
-  }
-  button:hover { filter: brightness(0.97); }
-  button:active { transform: translateY(1px); }
-  .btn-primary {
-    border: 1px solid #0a1128;
-    background: #0a1128;
-    color: #ffffff;
-  }
-  .btn-accent {
-    border: 1px solid #0d9488;
-    background: #2bd9c5;
-    color: #0a1128;
-  }
-  .btn-danger {
-    border: 2px solid #b91c1c;
-    background: #dc2626;
-    color: #ffffff;
-    box-shadow: 0 1px 2px rgba(185, 28, 28, 0.25);
-  }
-  .btn-danger:hover {
-    background: #b91c1c;
-    filter: none;
-  }
-  .btn-secondary {
-    border: 1px solid #cbd5e1;
-    background: #ffffff;
-    color: #334155;
-  }
-  .btn-ghost {
+    letter-spacing: -0.01em;
     border: 1px solid transparent;
     background: transparent;
-    color: #64748b;
+    color: #334155;
+    transition:
+      background 0.14s ease,
+      border-color 0.14s ease,
+      color 0.14s ease,
+      box-shadow 0.14s ease,
+      transform 0.08s ease;
   }
+  button:hover { background: rgba(15, 23, 42, 0.04); }
+  button:active { transform: translateY(0.5px); }
+  button:focus-visible {
+    outline: 2px solid #2bd9c5;
+    outline-offset: 2px;
+  }
+  button .btn-ico {
+    display: inline-flex;
+    width: 14px;
+    height: 14px;
+    margin-right: 6px;
+    vertical-align: -2px;
+  }
+  button .btn-ico svg {
+    width: 14px;
+    height: 14px;
+    display: block;
+  }
+  /* Tous les boutons d’action : pill arrondie + cadre */
+  .btn-cta,
+  .btn-accent,
+  .btn-soft,
+  .btn-secondary,
+  .btn-primary,
+  .btn-link,
+  .btn-quiet,
+  .btn-ghost,
+  .btn-warn,
+  .btn-danger,
   .btn-contact {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    white-space: nowrap;
+    border-radius: 999px;
+  }
+  .btn-cta,
+  .btn-accent {
     border: 1px solid #0f766e;
-    background: #ccfbf1;
-    color: #0f766e;
+    background: linear-gradient(180deg, #3ee0cd 0%, #2bd9c5 55%, #14b8a6 100%);
+    color: #042f2e;
     font-weight: 750;
+    box-shadow:
+      0 1px 0 rgba(255, 255, 255, 0.35) inset,
+      0 1px 2px rgba(15, 118, 110, 0.22);
+    padding: 8px 14px;
+  }
+  .btn-cta:hover,
+  .btn-accent:hover {
+    background: linear-gradient(180deg, #5eead4 0%, #2bd9c5 50%, #0d9488 100%);
+    filter: none;
+  }
+  .btn-cta:active,
+  .btn-accent:active {
+    box-shadow: 0 1px 1px rgba(15, 118, 110, 0.2) inset;
+  }
+  /* Secondaire soft (Masquer, Éditer, etc.) */
+  .btn-soft,
+  .btn-secondary {
+    border: 1px solid #d0d7e2;
+    background: #ffffff;
+    color: #1e293b;
+    font-weight: 650;
+    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.8) inset;
+    padding: 7px 12px;
+  }
+  .btn-soft:hover,
+  .btn-secondary:hover {
+    border-color: #94a3b8;
+    background: #fff;
+    filter: none;
+  }
+  /* Acknowledgement block */
+  .btn-primary {
+    border: 1px solid #0a1128;
+    background: linear-gradient(180deg, #1e293b 0%, #0a1128 100%);
+    color: #ffffff;
+    font-weight: 700;
+    padding: 8px 16px;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.2);
+  }
+  .btn-primary:hover {
+    background: linear-gradient(180deg, #334155 0%, #0f172a 100%);
+    filter: none;
+  }
+  /* Utilitaires : Détails, Simuler, Retour, Annuler — même cadre arrondi */
+  .btn-link,
+  .btn-quiet,
+  .btn-ghost {
+    border: 1px solid #d0d7e2;
+    background: #ffffff;
+    color: #475569;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 6px 11px;
+    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.8) inset;
+  }
+  .btn-link:hover,
+  .btn-quiet:hover,
+  .btn-ghost:hover {
+    border-color: #94a3b8;
+    color: #0f172a;
+    background: #fff;
+    filter: none;
+  }
+  /* Danger discret, cadre arrondi */
+  .btn-warn,
+  .btn-danger {
+    border: 1px solid #fecaca;
+    background: #fff;
+    color: #b91c1c;
+    font-weight: 650;
+    padding: 6px 11px;
+    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.8) inset;
+  }
+  .btn-warn:hover,
+  .btn-danger:hover {
+    background: #fef2f2;
+    border-color: #f87171;
+    color: #991b1b;
+    filter: none;
+  }
+  /* Contact : pill teal légère */
+  .btn-contact {
+    border: 1px solid #99f6e4;
+    background: #f0fdfa;
+    color: #0f766e;
+    font-weight: 650;
+    font-size: 12px;
+    padding: 6px 11px;
+    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.7) inset;
   }
   .btn-contact:hover {
-    background: #99f6e4;
+    background: #ccfbf1;
+    border-color: #2bd9c5;
+    color: #0d9488;
     filter: none;
   }
   .wrap.mode-block .btn-contact {
-    border-color: #0f766e;
-    background: #ecfdf5;
+    border-color: #99f6e4;
+    background: #f0fdfa;
+    color: #0f766e;
+  }
+  /* CTA pleine largeur uniquement en mode block (1 action) */
+  .act-main.single .btn-primary,
+  .act-main.single .btn-cta {
+    width: 100%;
+    justify-content: center;
   }
   /* Mode contact : le bandeau d’alerte cède la place au formulaire */
   .wrap.contact-mode .alert-main { display: none !important; }
@@ -542,8 +677,11 @@ const SHADOW_CSS = `
   .contact-actions {
     display: flex;
     flex-wrap: wrap;
-    gap: 8px;
+    align-items: center;
+    gap: 6px 8px;
+    margin-top: 4px;
   }
+  .contact-actions .btn-quiet { margin-left: auto; }
   button:disabled {
     opacity: 0.55;
     cursor: not-allowed;
@@ -595,16 +733,25 @@ const SHADOW_CSS = `
   .score-chip.low { border-color: #a7f3d0; background: #ecfdf5; color: #047857; }
   .btn-icon-close {
     flex-shrink: 0;
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: center;
     border: 1px solid #e2e8f0 !important;
     background: #fff !important;
     color: #475569 !important;
-    width: 34px;
-    height: 34px;
+    width: 30px;
+    height: 30px;
+    min-width: 30px;
     padding: 0 !important;
     border-radius: 8px !important;
-    font-size: 18px !important;
+    font-size: 16px !important;
     line-height: 1 !important;
-    font-weight: 600 !important;
+    font-weight: 500 !important;
+  }
+  .btn-icon-close:hover {
+    background: #f8fafc !important;
+    color: #0f172a !important;
+    filter: none !important;
   }
   .rewrite-body {
     flex: 1;
@@ -696,11 +843,33 @@ const SHADOW_CSS = `
     flex-shrink: 0;
     display: flex;
     flex-wrap: wrap;
-    gap: 8px;
-    padding: 12px 14px;
-    background: #f8fafc;
+    align-items: center;
+    gap: 6px 8px;
+    padding: 10px 14px 12px;
+    background: linear-gradient(180deg, #fbfdff 0%, #f1f5f9 100%);
+    border-top: 1px solid #e8eef5;
   }
+  .rewrite-actions .spacer { flex: 1 1 auto; min-width: 8px; }
+  .rewrite-actions .btn-cta,
+  .rewrite-actions .btn-accent { order: 3; }
+  .rewrite-actions .btn-soft,
+  .rewrite-actions .btn-secondary { order: 2; }
+  .rewrite-actions .btn-quiet,
+  .rewrite-actions .btn-ghost { order: 1; }
 `
+
+/** Libellé court pour toolbar : garde le message policy s’il est déjà compact. */
+function shortLabel(
+  custom: string | undefined,
+  fallback: string,
+  max = 26
+): string {
+  const raw = (custom || "").trim()
+  if (!raw) return fallback
+  if (raw.length <= max) return raw
+  // Tronquer proprement les textes policy trop longs
+  return raw.slice(0, max - 1).trimEnd() + "…"
+}
 
 /**
  * Retire le bandeau d’alerte.
@@ -740,7 +909,11 @@ export function showAlertBanner(
   document.getElementById(BANNER_ID)?.remove()
   activeBannerDecision = onDecision
 
-  const msgs = mergeUserMessages(options.userMessages || DEFAULT_USER_MESSAGES)
+  const lang: AgentUiLang = resolveAgentLang(options.agentUiLang)
+  const msgs = mergeMessagesForLang(
+    lang,
+    options.userMessages || DEFAULT_USER_MESSAGES
+  )
   const action: DefaultAction = options.defaultAction || "mask_recommend"
   const isBlock = action === "block"
   const isForce = action === "mask_force"
@@ -770,35 +943,40 @@ export function showAlertBanner(
     sub = isFile
       ? `${msgs.blockBody} Fichier concerné : « ${escapeHtml(fileLabel)} » (${detections.length} élément${detections.length > 1 ? "s" : ""}).`
       : `${msgs.blockBody} (${detections.length} élément${detections.length > 1 ? "s" : ""} : ${summaryParts.join(", ") || "données sensibles"}).`
-    pill = "Bloqué par la politique admin"
+    pill = tAgent(lang, "banner.pillBlock")
   } else if (isForce) {
     title = msgs.maskForceTitle
     sub = isFile
       ? `${msgs.maskForceBody} Fichier : « ${escapeHtml(fileLabel)} ».`
       : `${msgs.maskForceBody} (${summaryParts.join(", ") || detections.length + " détection(s)"}).`
-    pill = "Masquage obligatoire · policy"
+    pill = tAgent(lang, "banner.pillForce")
   } else {
     title = isFile ? msgs.alertTitleFile : msgs.alertTitle
     sub = isFile
       ? `${msgs.alertBodyFile} « ${escapeHtml(fileLabel)} » - ${detections.length} élément${detections.length > 1 ? "s" : ""} (${summaryParts.join(", ")}).`
       : `${msgs.alertBody} ${detections.length} élément${detections.length > 1 ? "s" : ""} (${summaryParts.join(", ")}).`
-    pill = isFile ? "Fichier en attente · policy org" : "Alerte sécurité · policy org"
+    pill = isFile
+      ? tAgent(lang, "banner.pillFile")
+      : tAgent(lang, "banner.pillAlert")
   }
 
   const orgBit = options.orgName
     ? ` Organisation : ${escapeHtml(options.orgName)}.`
     : ""
 
+  // Libellés courts pour le toolbar (messages policy custom en priorité)
   const rewriteLabel = isFile
-    ? "Secure Rewrite & joindre"
-    : msgs.btnSecureRewrite || "Secure Rewrite & envoyer"
+    ? tAgent(lang, "banner.rewrite")
+    : shortLabel(msgs.btnSecureRewrite, tAgent(lang, "banner.rewrite"), 28)
   const maskLabel = isFile
-    ? "Masquer simplement & joindre"
-    : msgs.btnMask || "Masquer simplement"
+    ? tAgent(lang, "banner.mask")
+    : shortLabel(msgs.btnMask, tAgent(lang, "banner.mask"), 22)
   const allowLabel = isFile
-    ? "Joindre l’original (journalisé)"
-    : msgs.btnSendAnyway
-  const cancelLabel = isFile ? "Ne pas joindre" : msgs.btnCancel
+    ? tAgent(lang, "banner.attachOriginal")
+    : shortLabel(msgs.btnSendAnyway, tAgent(lang, "banner.sendAnyway"), 28)
+  const cancelLabel = isFile
+    ? tAgent(lang, "banner.notAttach")
+    : shortLabel(msgs.btnCancel, tAgent(lang, "banner.cancel"), 18)
 
   const modeClass = isBlock ? "mode-block" : isForce ? "mode-force" : ""
 
@@ -820,8 +998,11 @@ export function showAlertBanner(
   // Toujours afficher le bouton (défaut true). Seul contactAdminEnabled: false le masque.
   const contactEnabled = options.contactAdminEnabled !== false
   const contactBtnHtml = contactEnabled
-    ? `<button type="button" class="btn-contact" data-action="toggle_contact" title="Envoyer un message à l'administrateur">Contacter l'admin</button>`
+    ? `<button type="button" class="btn-contact" data-action="toggle_contact" title="${escapeHtml(tAgent(lang, "banner.contactTitle"))}">${escapeHtml(tAgent(lang, "banner.contact"))}</button>`
     : ""
+
+  const icoRewrite = `<span class="btn-ico" aria-hidden="true"><svg viewBox="0 0 16 16" fill="none"><path d="M3 11.5 11.5 3M9 3h2.5V5.5M4.5 7.5 3 11.5l4-1.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span>`
+  const icoMask = `<span class="btn-ico" aria-hidden="true"><svg viewBox="0 0 16 16" fill="none"><path d="M2 8s2.5-4 6-4 6 4 6 4-2.5 4-6 4-6-4-6-4Z" stroke="currentColor" stroke-width="1.35"/><circle cx="8" cy="8" r="1.6" fill="currentColor"/><path d="M3 13 13 3" stroke="currentColor" stroke-width="1.35" stroke-linecap="round"/></svg></span>`
 
   // Risk score (prompt)
   const promptRisk: PromptRiskScore = calculatePromptRiskScore(detections)
@@ -835,50 +1016,56 @@ export function showAlertBanner(
     simThreshold > 0 &&
     promptRisk.score >= simThreshold
 
-  // Actions structurées : CTA recommandé → alternatives → outils
+  // Toolbar : CTA compact + utilitaires + danger discret
+  const utilsHtml = `
+      <div class="act-utils">
+        <button type="button" class="btn-link" data-action="toggle_details">${escapeHtml(tAgent(lang, "banner.details"))}</button>
+        ${
+          isBlock
+            ? ""
+            : `<span class="dot" aria-hidden="true"></span>
+        <button type="button" class="btn-link" data-action="open_sim">${escapeHtml(tAgent(lang, "banner.sim"))}</button>`
+        }
+        ${
+          contactEnabled
+            ? `<span class="dot" aria-hidden="true"></span>${contactBtnHtml}`
+            : ""
+        }
+      </div>`
+
   const actionsHtml = isBlock
     ? `
-      <p class="actions-label">Action requise</p>
-      <div class="actions-primary">
+      <div class="act-main single">
         <button type="button" class="btn-primary" data-action="cancel">${escapeHtml(msgs.btnBlockAck)}</button>
       </div>
-      <div class="actions-secondary">
-        ${contactBtnHtml}
-        <button type="button" class="btn-secondary" data-action="toggle_details">Voir les détails</button>
+      <div class="act-bar">
+        ${utilsHtml}
       </div>
     `
     : isForce
       ? `
-      <p class="actions-label">Recommandé</p>
-      <div class="actions-primary">
-        <button type="button" class="btn-accent" data-action="open_rewrite">${escapeHtml(rewriteLabel)}</button>
+      <div class="act-main">
+        <button type="button" class="btn-cta" data-action="open_rewrite" title="${escapeHtml(rewriteLabel)}">${icoRewrite}${escapeHtml(rewriteLabel)}</button>
+        <button type="button" class="btn-soft" data-action="mask_send" title="${escapeHtml(maskLabel)}">${icoMask}${escapeHtml(maskLabel)}</button>
       </div>
-      <p class="actions-label">Autres options</p>
-      <div class="actions-alt">
-        <button type="button" class="btn-secondary" data-action="mask_send">${escapeHtml(maskLabel)}</button>
-        <button type="button" class="btn-ghost" data-action="cancel">${escapeHtml(cancelLabel)}</button>
-      </div>
-      <div class="actions-secondary">
-        <button type="button" class="btn-secondary" data-action="open_sim">Simuler le risque</button>
-        ${contactBtnHtml}
-        <button type="button" class="btn-secondary" data-action="toggle_details">Voir les détails</button>
+      <div class="act-bar">
+        ${utilsHtml}
+        <div class="act-side">
+          <button type="button" class="btn-quiet" data-action="cancel">${escapeHtml(cancelLabel)}</button>
+        </div>
       </div>
     `
       : `
-      <p class="actions-label">Recommandé</p>
-      <div class="actions-primary has-secondary-cta">
-        <button type="button" class="btn-accent" data-action="open_rewrite">${escapeHtml(rewriteLabel)}</button>
-        <button type="button" class="btn-secondary" data-action="mask_send">${escapeHtml(maskLabel)}</button>
+      <div class="act-main">
+        <button type="button" class="btn-cta" data-action="open_rewrite" title="${escapeHtml(rewriteLabel)}">${icoRewrite}${escapeHtml(rewriteLabel)}</button>
+        <button type="button" class="btn-soft" data-action="mask_send" title="${escapeHtml(maskLabel)}">${icoMask}${escapeHtml(maskLabel)}</button>
       </div>
-      <p class="actions-label">Autres options</p>
-      <div class="actions-alt">
-        <button type="button" class="btn-danger" data-action="send_anyway">${escapeHtml(allowLabel)}</button>
-        <button type="button" class="btn-ghost" data-action="cancel">${escapeHtml(cancelLabel)}</button>
-      </div>
-      <div class="actions-secondary">
-        <button type="button" class="btn-secondary" data-action="open_sim">Simuler le risque</button>
-        ${contactBtnHtml}
-        <button type="button" class="btn-secondary" data-action="toggle_details">Voir les détails</button>
+      <div class="act-bar">
+        ${utilsHtml}
+        <div class="act-side">
+          <button type="button" class="btn-quiet" data-action="cancel">${escapeHtml(cancelLabel)}</button>
+          <button type="button" class="btn-warn" data-action="send_anyway" title="${escapeHtml(tAgent(lang, "banner.journalized"))}">${escapeHtml(allowLabel)}</button>
+        </div>
       </div>
     `
 
@@ -947,7 +1134,7 @@ export function showAlertBanner(
           ${riskBlockHtml}
           ${
             !isBlock && high > 0
-              ? `<p class="warn-line">Éléments critiques : Secure Rewrite recommandé.</p>`
+              ? `<p class="warn-line">${escapeHtml(tAgent(lang, "banner.riskLine"))}</p>`
               : ""
           }
           ${options.note ? `<p class="sub" style="margin-top:6px">${escapeHtml(options.note)}</p>` : ""}
@@ -968,8 +1155,8 @@ export function showAlertBanner(
       <label for="og-contact-body">Votre message</label>
       <textarea id="og-contact-body" maxlength="4000">${escapeHtml(prefillBody)}</textarea>
       <div class="contact-actions">
-        <button type="button" class="btn-accent" data-action="send_contact">Envoyer à l'admin</button>
-        <button type="button" class="btn-secondary" data-action="toggle_contact">Retour à l'alerte</button>
+        <button type="button" class="btn-cta" data-action="send_contact">${escapeHtml(tAgent(lang, "banner.send"))}</button>
+        <button type="button" class="btn-quiet" data-action="toggle_contact">${escapeHtml(tAgent(lang, "banner.back"))}</button>
       </div>
     </div>`
         : ""
@@ -983,14 +1170,15 @@ export function showAlertBanner(
       <div class="sim-list" id="og-sim-list"></div>
       <div class="sim-rec" id="og-sim-rec"></div>
       <div class="sim-actions">
-        <button type="button" class="btn-accent" data-action="open_rewrite">Secure Rewrite</button>
+        <button type="button" class="btn-cta" data-action="open_rewrite">${escapeHtml(tAgent(lang, "banner.rewrite"))}</button>
         ${
           isForce
             ? ""
-            : `<button type="button" class="btn-danger" data-action="send_anyway">${escapeHtml(allowLabel)}</button>`
+            : `<button type="button" class="btn-warn" data-action="send_anyway">${escapeHtml(allowLabel)}</button>`
         }
-        <button type="button" class="btn-ghost" data-action="close_sim">Retour</button>
-        <button type="button" class="btn-secondary" data-action="cancel">${escapeHtml(cancelLabel)}</button>
+        <span class="spacer" aria-hidden="true"></span>
+        <button type="button" class="btn-quiet" data-action="close_sim">${escapeHtml(tAgent(lang, "banner.back"))}</button>
+        <button type="button" class="btn-quiet" data-action="cancel">${escapeHtml(cancelLabel)}</button>
       </div>
     </div>
     <div class="rewrite-panel" id="og-rewrite" aria-label="Secure Rewrite">
@@ -1015,9 +1203,10 @@ export function showAlertBanner(
         <div class="rewrite-changes" id="og-rewrite-changes"></div>
       </div>
       <div class="rewrite-actions">
-        <button type="button" class="btn-accent" data-action="apply_rewrite">Appliquer et envoyer</button>
-        <button type="button" class="btn-secondary" data-action="focus_edit">Éditer</button>
-        <button type="button" class="btn-ghost" data-action="close_rewrite">Fermer</button>
+        <button type="button" class="btn-quiet" data-action="close_rewrite">${escapeHtml(tAgent(lang, "banner.close"))}</button>
+        <button type="button" class="btn-soft" data-action="focus_edit">${escapeHtml(tAgent(lang, "banner.edit"))}</button>
+        <span class="spacer" aria-hidden="true"></span>
+        <button type="button" class="btn-cta" data-action="apply_rewrite">${escapeHtml(tAgent(lang, "banner.applySend"))}</button>
       </div>
     </div>
   `

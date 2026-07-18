@@ -39,6 +39,9 @@ packaging/proxy/proxy.ico
 # plasmo
 .plasmo
 
+# Nested accidental clone / copy of the monorepo (never commit)
+/ops-gate/
+
 # typescript
 .tsbuildinfo
 

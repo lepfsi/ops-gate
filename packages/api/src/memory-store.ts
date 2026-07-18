@@ -2442,6 +2442,16 @@ export class MemoryStore implements OpsGateStore {
       .reverse()
   }
 
+  async countEventsSince(orgId: string, sinceIso: string): Promise<number> {
+    const since = Date.parse(sinceIso)
+    if (!Number.isFinite(since)) return 0
+    return this.events.filter(
+      (e) =>
+        e.orgId === orgId &&
+        Date.parse(e.receivedAt || e.ts || "") >= since
+    ).length
+  }
+
   async listOrgAiTools(orgId: string) {
     return [...(this.orgAiTools.get(orgId) || [])].sort((a, b) =>
       a.tool.localeCompare(b.tool)
