@@ -556,6 +556,11 @@ export interface OpsGateStore {
     events: DetectionEventInput[]
   ): Promise<AppendEventsResult>
   listEvents(orgId: string, limit?: number): Promise<StoredEvent[]>
+  /**
+   * Compte d’events de détection depuis une date ISO (UTC).
+   * Chemin léger pour portfolio MSP / agrégats — pas de summary complet.
+   */
+  countEventsSince(orgId: string, sinceIso: string): Promise<number>
 
   /** Shadow AI — inventaire outils IA (statut authorized/unauthorized) */
   listOrgAiTools(orgId: string): Promise<import("./types").OrgAiTool[]>

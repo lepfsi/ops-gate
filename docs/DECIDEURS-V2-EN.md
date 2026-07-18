@@ -1,21 +1,30 @@
-# OpsGate - Decision-maker documentation V2
+# OpsGate - Decision-maker documentation
 
-**Audience**: CIO, CISO, security architects, risk committees 
-**Product version**: 1.2 / V2 batch (July 2026) 
-**Maturity**: **V2 functional / pre-GA** - see [`STATUS-V2.md`](./STATUS-V2.md) 
-**Vendor**: DailyOps.Tech 
+**Audience**: CIO, CISO, security architects, risk committees  
+**Product version**: 1.2 / V2 batch + **V3 differentiators** (July 2026)  
+**Maturity**: **V2 functional / pre-GA** · V3-P0 in code — see [`STATUS-V2.md`](./STATUS-V2.md) · [`RELEASE-v3.md`](./RELEASE-v3.md)  
+**Vendor**: DailyOps.Tech  
 
 ---
 
 ## 1. What is it?
 
-**OpsGate** is a **lightweight data-loss prevention (DLP)** product focused on **generative AI tools** (ChatGPT, Claude, Gemini, Copilot, Perplexity, and more).
+**OpsGate** is a **DLP / AI security** platform focused on **generative AI tools** (ChatGPT, Claude, Gemini, Copilot, Perplexity, and more).
 
 It answers one question:
 
 > *How do we let employees use AI freely without leaking secrets, customer data, or infrastructure configs?*
 
-OpsGate is **not** a full network CASB and **not** a conversation surveillance tool. It is a **business safety net**: local detection, clear user actions (mask / block / log), and central governance for IT and security teams.
+OpsGate is **not** a full network CASB and **not** a conversation surveillance tool. It is a **business safety net**: local detection, **Secure Rewrite**, risk scores, Shadow AI inventory, and central governance.
+
+### V3 differentiators (demo-ready)
+
+| Capability | Decision-maker value |
+|------------|----------------------|
+| **Secure Rewrite** | Useful AI prompts **without pasting the secret** |
+| **Prompt risk + Simulation** | Users *see* impact before send |
+| **Shadow AI Discovery** | Which AI tools are actually used (approved or not) |
+| **User risk scores** | Who takes the most risk (trend vs prior period) |
 
 ---
 

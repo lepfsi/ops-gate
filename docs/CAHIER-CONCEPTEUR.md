@@ -3,7 +3,8 @@
 Document de conception pour l’équipe produit / design / architecture.  
 Chaque fonctionnalité listée indique **ce qu’elle fait**, **où elle vit dans le code**, et les **dépendances** éventuelles.
 
-> Dernière mise à jour : 2026-07 · stack V1 pilote (extension Plasmo MV3 + API Hono + console Vite + Postgres).
+> Dernière mise à jour : 2026-07-18 · monorepo **1.2.x** — V2 enterprise + **V3-P0** (Secure Rewrite, Risk, Shadow AI).  
+> Statut : [`STATUS-V2.md`](./STATUS-V2.md) · gap : [`STATUS-GAP-V1-V3.md`](./STATUS-GAP-V1-V3.md) · cut V3 : [`RELEASE-v3.md`](./RELEASE-v3.md).
 
 ---
 
@@ -77,7 +78,29 @@ Catégories :
 - `image` → OCR Tesseract.js si policy `scanImages` (sinon skip)
 - `media` → warn confirm
 
-### 2.5 Banner / décisions utilisateur
+### 2.5 Secure Rewrite (V3-A)
+
+| | |
+|--|--|
+| **Description** | Anonymisation intelligente des matches (mapping cohérent) ; preview côte-à-côte ; décision `secure_rewrite`. |
+| **Code** | `packages/engine/src/secure-rewrite.ts`, `src/lib/banner.ts`, `src/contents/ai-sites.ts` |
+| **Tests** | `scripts/test-secure-rewrite.mjs` |
+
+### 2.6 Risk score prompt + Simulation (V3-B)
+
+| | |
+|--|--|
+| **Description** | Score 0–100 sur les détections d’un prompt ; Simulation Mode (auto si score ≥ seuil) ; CTA Secure Rewrite. |
+| **Code** | `packages/engine/src/prompt-risk.ts`, banner |
+
+### 2.7 Langue agents (banner / options)
+
+| | |
+|--|--|
+| **Description** | UI agent FR/EN indépendante de la console. Org : `monitoring.agentUiLang` = `fr` \| `en` \| `auto`. Sync config `agent_ui_lang`. |
+| **Code** | `src/lib/i18n-agent.ts`, `src/lib/cloud.ts`, `packages/api` monitoring, console Paramètres → Général |
+
+### 2.8 Banner / décisions utilisateur
 
 | | |
 |--|--|

@@ -2,8 +2,8 @@
 
 **Public** : développeurs / mainteneurs qui reviennent dans 6 mois ou 5 ans.  
 **But** : ne pas s’égarer — *quoi a été fait, où, comment ça marche, où lire la suite*.  
-**Mis à jour** : 17 juillet 2026  
-**Maturité produit** : **V2 functional / pre-GA** — voir [`STATUS-V2.md`](./STATUS-V2.md)
+**Mis à jour** : 18 juillet 2026  
+**Maturité produit** : **V2 pre-GA + V3-P0 functional** — [`STATUS-V2.md`](./STATUS-V2.md) · gap [`STATUS-GAP-V1-V3.md`](./STATUS-GAP-V1-V3.md) · cut [`RELEASE-v3.md`](./RELEASE-v3.md)
 
 ---
 
@@ -24,6 +24,7 @@ ops-gate/
 | Si tu cherches… | Ouvre… |
 |-----------------|--------|
 | **Statut V2 global** | `docs/STATUS-V2.md`, `docs/RELEASE-v2.md` |
+| **V3 + gap** | `docs/RELEASE-v3.md`, `docs/V3-BACKLOG.md`, `docs/STATUS-GAP-V1-V3.md` |
 | Déployer chez un client | `docs/DEPLOIEMENT-CLIENT.md` (+ PDF FR/EN) |
 | Démarrer la stack lab | `docs/GUIDE-STACK-LOCALE.md`, `docs/architecture/PROXY-RUNBOOK.md` |
 | Décideurs DSI | `docs/DECIDEURS-V2-FR.md` (+ PDF), `docs/DSI-FILTRAGE-DONNEES-SENSIBLES.md` |
@@ -32,6 +33,33 @@ ops-gate/
 | Design d’origine V2 | `docs/architecture/PLATFORM-v2.md` (référence ; code largement livré) |
 | Règles sensibles | `packages/engine/rules/rules.json` + `packages/engine/src/rules-engine.ts` |
 | Branding PDF | `scripts/pdf_brand.py` (BrandMark login MMC) |
+| i18n agents | `src/lib/i18n-agent.ts` · sync `agent_ui_lang` monitoring |
+
+---
+
+## 0bis. Session 17–18 juillet 2026 (V3 + polish)
+
+| Sujet | Détail | Fichiers clés |
+|-------|--------|----------------|
+| Secure Rewrite | Engine + modal banner | `packages/engine/src/secure-rewrite.ts`, `src/lib/banner.ts` |
+| Risk prompt / Simulation | Score + sim auto | `prompt-risk.ts`, banner |
+| Shadow AI + Risk user | API + console | `packages/api/src/risk-shadow.ts`, `RiskShadowViews.tsx` |
+| Banner UX | Toolbar pills, labels i18n | `src/lib/banner.ts`, `i18n-agent.ts` |
+| Langue agents | `fr`/`en`/`auto` org | `types.ts` monitoring, config agent, console Paramètres |
+| MSP portfolio | KPI densifiés, snapshot sans `summary()` lourd | `app.ts` msp-overview, `App.tsx` MspPortfolioView |
+| IBAN | Checksum, patterns espacés, packs | `rules-engine.ts`, `rules.json`, `republish-engine-pack.mjs` |
+| File scan profils | resolveEffectiveFileScan | policy + console PolicyView |
+| Dashboard soft load | pas de flash busy si cache | `App.tsx` loadTab |
+| Risk pagination | 20 / page | `RiskShadowViews.tsx` |
+
+**Commandes utiles**
+
+```powershell
+pnpm test:rules
+pnpm --filter @opsgate/api exec tsx ../../scripts/republish-engine-pack.mjs  # si script à la racine via node depuis api
+pnpm build:chrome
+pnpm console:dev
+```
 
 ---
 

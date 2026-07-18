@@ -1,15 +1,16 @@
 # OpsGate V2 — Statut produit (synthèse)
 
-**Date** : 17 juillet 2026  
-**Version code** : 1.2.x monorepo · **maturité** : **V2 functional / pre-GA**  
+**Date** : 18 juillet 2026  
+**Version code** : 1.2.x monorepo · **maturité** : **V2 functional / pre-GA** + **V3-P0 functional**  
 **Éditeur** : DailyOps.Tech  
+**Gap finition** : [`STATUS-GAP-V1-V3.md`](./STATUS-GAP-V1-V3.md) · **cut V3** : [`RELEASE-v3.md`](./RELEASE-v3.md)
 
 ---
 
 ## En une phrase
 
-OpsGate dispose aujourd’hui d’une **plateforme entreprise opérationnelle** : extension multi-fichiers + OCR, proxy Windows, control plane multi-tenant (SSO/MFA/passkeys/MSP), audit WORM, exports et docs de déploiement client.  
-Il reste surtout la **publication store** réelle, le **billing Stripe GA** et quelques durcissements IdP.
+OpsGate dispose aujourd’hui d’une **plateforme entreprise opérationnelle** (V2) **et** des différenciateurs V3-P0 (**Secure Rewrite**, risk prompt/simulation, Shadow AI + risk utilisateurs).  
+Il reste surtout la **publication store** réelle, le **pilote client**, le **billing Stripe prod** et le polish analytics V3-D.
 
 ---
 
@@ -39,6 +40,12 @@ Il reste surtout la **publication store** réelle, le **billing Stripe GA** et q
 | Safari App Store | **Prep livrée** | `pnpm store:safari` + convert Xcode ; ship Apple = ops |
 | Billing Stripe portal | **Livré** | Checkout + Customer Portal UI + webhook sièges |
 | Soft-delete org GDPR | **Livré** | export DSAR, soft-delete, restore, hard purge cron |
+| **V3 Secure Rewrite** | **Livré** | engine + banner modal |
+| **V3 Risk prompt + Simulation** | **Livré** | score 0–100 + sim bandeau |
+| **V3 Shadow AI + Risk user** | **Livré** | console `#/risk` `#/shadow` |
+| Langue agents (banner) | **Livré** | `agent_ui_lang` fr/en/auto |
+| Portfolio MSP densifié | **Livré** | snapshot léger + KPI |
+| File scan policy + profils | **Livré** | OCR / Office / configs |
 
 Légende : **Livré** = dans le monorepo et utilisable · **Fondations** = API/config sans parcours produit complet · **Build only** = artefact sans distribution officielle.
 
@@ -82,7 +89,8 @@ Légende : **Livré** = dans le monorepo et utilisable · **Fondations** = API/c
 - [ ] Pilote client réel validé (checklist DEPLOIEMENT §11)  
 - [ ] Clés Stripe **prod** + webhook Dashboard branché (ou process licence vendor)  
 
-**Après V2.0 GA** : différenciation produit → [`V3-BACKLOG.md`](./V3-BACKLOG.md) (Secure Rewrite, Risk Score, Shadow AI) — **ne pas démarrer** tant que la gate pre-GA n’est pas franchie.
+**V3-P0** (Secure Rewrite, Risk, Shadow) est **déjà dans le code** — la gate pre-GA reste **recommandée** pour le *ship commercial*, pas pour le dev différenciant.  
+Suite : [`V3-BACKLOG.md`](./V3-BACKLOG.md) · gap : [`STATUS-GAP-V1-V3.md`](./STATUS-GAP-V1-V3.md).
 
 ---
 
@@ -96,8 +104,9 @@ Légende : **Livré** = dans le monorepo et utilisable · **Fondations** = API/c
 | DSI / RSSI | [`DECIDEURS-V2-FR.md`](./DECIDEURS-V2-FR.md) (+ PDF) |
 | Dev / maintainer | [`CHANGELOG-TECHNIQUE.md`](./CHANGELOG-TECHNIQUE.md), [`V2-BACKLOG.md`](./V2-BACKLOG.md) |
 | Capacités techniques | [`architecture/BACKEND-V2-CATALOG.md`](./architecture/BACKEND-V2-CATALOG.md) |
-| **V3** (gelé jusqu’à fin pre-GA) | [`V3-BACKLOG.md`](./V3-BACKLOG.md) · specs [`roadmap-v3/`](./roadmap-v3/) |
+| **V3** (P0 livré, suite ouverte) | [`RELEASE-v3.md`](./RELEASE-v3.md) · [`V3-BACKLOG.md`](./V3-BACKLOG.md) · [`roadmap-v3/`](./roadmap-v3/) |
+| **Gap finition** | [`STATUS-GAP-V1-V3.md`](./STATUS-GAP-V1-V3.md) |
 
 ---
 
-*OpsGate · STATUS-V2 · DailyOps.Tech · 17 juillet 2026*
+*OpsGate · STATUS-V2 · DailyOps.Tech · 18 juillet 2026*

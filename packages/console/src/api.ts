@@ -331,6 +331,8 @@ export type MonitoringSettings = {
   /** SIEM / Syslog (V2 P0) */
   siem?: SiEmSettings
   proxy?: { enabled: boolean; mode: "observe" | "enforce" }
+  /** Langue banner / options agents — indépendante de la console */
+  agentUiLang?: "fr" | "en" | "auto"
   quotas?: {
     maxEventsPerDay: number
     maxEventsPerMinute?: number
@@ -773,6 +775,7 @@ export const api = {
         current: boolean
         agents: number
         online: number
+        stale?: number
         offline_long: number
         seats: number
         seats_used: number
@@ -780,13 +783,19 @@ export const api = {
         license_expires_at: string | null
         license_days_left: number | null
         company_name: string
+        events_7d?: number
+        needs_attention?: boolean
+        attention_reasons?: string[]
       }>
       totals: {
         agents: number
         online: number
+        offline_long?: number
         seats: number
         seats_used: number
         expiring_licenses: number
+        events_7d?: number
+        attention?: number
       }
     }>("/v1/auth/msp-overview"),
 

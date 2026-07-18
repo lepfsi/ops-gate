@@ -2,7 +2,7 @@
 
 **Dossier** : hors Grafana (observabilité) — ici = **vision produit / features différenciantes**.  
 **Origine** : commit `V3 Roadmap` (17/07/2026), initialement déposé par erreur dans `docs/grafana/`.  
-**Statut** : **specs draft** · backlog d’implémentation → [`../V3-BACKLOG.md`](../V3-BACKLOG.md) (**gelé** jusqu’à fin pre-GA V2).
+**Statut** : specs + **P0 A/B/C livrés en code** (17–18/07) · suite V3-D+ ouverte · cut [`../RELEASE-v3.md`](../RELEASE-v3.md) · backlog [`../V3-BACKLOG.md`](../V3-BACKLOG.md).
 
 ---
 

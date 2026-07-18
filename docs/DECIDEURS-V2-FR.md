@@ -1,21 +1,30 @@
-# OpsGate - Documentation décideurs V2
+# OpsGate - Documentation décideurs
 
-**Pour** : DSI, RSSI, RSSI adjoint, architectes sécurité, comités risques 
-**Version produit** : 1.2 / lot V2 (juillet 2026) 
-**Maturité** : **V2 functional / pre-GA** - synthèse [`STATUS-V2.md`](./STATUS-V2.md) 
-**Éditeur** : DailyOps.Tech 
+**Pour** : DSI, RSSI, RSSI adjoint, architectes sécurité, comités risques  
+**Version produit** : 1.2 / lot V2 + **différenciateurs V3** (juillet 2026)  
+**Maturité** : **V2 functional / pre-GA** · V3-P0 en code — synthèse [`STATUS-V2.md`](./STATUS-V2.md) · [`RELEASE-v3.md`](./RELEASE-v3.md)  
+**Éditeur** : DailyOps.Tech  
 
 ---
 
 ## 1. Qu’est-ce que c’est ?
 
-**OpsGate** est une solution de **prévention de fuite de données (DLP légère)** centrée sur l’usage des **outils d’IA générative** (ChatGPT, Claude, Gemini, Copilot, Perplexity, etc.).
+**OpsGate** est une plateforme de **prévention de fuite de données (DLP)** et d’**AI security** centrée sur l’usage des **outils d’IA générative** (ChatGPT, Claude, Gemini, Copilot, Perplexity, etc.).
 
 Elle répond à une question simple :
 
 > *Comment laisser les collaborateurs utiliser l’IA librement, sans exposer secrets, données clients ou configurations d’infrastructure ?*
 
-OpsGate **n’est pas** un CASB réseau complet, ni un outil d’espionnage des conversations. C’est un **filet métier** : détection locale, actions claires (masquer / bloquer / journaliser), gouvernance centrale pour l’entreprise.
+OpsGate **n’est pas** un CASB réseau complet, ni un outil d’espionnage des conversations. C’est un **filet métier** : détection locale, **Secure Rewrite**, scores de risque, inventaire Shadow AI, gouvernance centrale.
+
+### Différenciateurs V3 (disponibles en démo)
+
+| Capacité | Bénéfice décideur |
+|----------|-------------------|
+| **Secure Rewrite** | Envoi utile à l’IA **sans coller le secret** — adoption > simple masquage |
+| **Score de risque + Simulation** | L’utilisateur *voit* l’impact avant d’envoyer |
+| **Shadow AI Discovery** | Quels outils IA sont vraiment utilisés (autorisés ou non) |
+| **Risk Score utilisateurs** | Qui prend le plus de risques (tendance vs période précédente) |
 
 ---
 
@@ -42,10 +51,10 @@ Utilisateur ──► Site IA (navigateur)
  SIEM · métriques · rapports PDF
 ```
 
-1. **Détection** dans le navigateur (et/ou le proxy) avant envoi. 
-2. **Décision** : masquer les secrets, bloquer, ou journaliser selon la policy. 
-3. **Gouvernance** : admins définissent règles, groupes, profils, licences. 
-4. **Preuve** : events, audit, exports, SIEM, PDF sécurité.
+1. **Détection** dans le navigateur (et/ou le proxy) avant envoi.  
+2. **Décision** : Secure Rewrite, masquer, bloquer, simuler le risque, ou journaliser selon la policy.  
+3. **Gouvernance** : admins définissent règles, groupes, profils, licences, langue agents.  
+4. **Preuve** : events, audit, Risk/Shadow console, exports, SIEM, PDF sécurité.
 
 ---
 

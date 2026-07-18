@@ -179,6 +179,11 @@ export interface OpsGateSettings {
   defaultAction?: DefaultAction
   /** Messages UX custom admin (partial) */
   userMessages?: Partial<PolicyUserMessages>
+  /**
+   * Langue UI agent (sync org monitoring).
+   * fr | en | auto — défaut fr. Indépendante de la console admin.
+   */
+  agentUiLang?: "fr" | "en" | "auto"
 }
 
 export type ExitActorInfo = {
@@ -203,6 +208,7 @@ export const DEFAULT_SETTINGS: OpsGateSettings = {
   managedLockActive: false,
   defaultAction: "mask_recommend",
   userMessages: { ...DEFAULT_USER_MESSAGES },
+  agentUiLang: "fr",
   enabledHosts: [
     "chatgpt.com",
     "chat.openai.com",

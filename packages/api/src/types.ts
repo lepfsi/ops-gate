@@ -270,6 +270,13 @@ export interface OrgMonitoringSettings {
    * Mot de passe : non renvoyé en API (comme LDAP bind).
    */
   smtp?: OrgSmtpSettings
+  /**
+   * Langue UI agents (banner + options extension), indépendante de la console admin.
+   * - fr : français (défaut — fief FR)
+   * - en : anglais
+   * - auto : langue du navigateur de l’utilisateur final
+   */
+  agentUiLang?: "fr" | "en" | "auto"
 }
 
 /** Config SMTP org — saisie client dans Paramètres → E-mail / SMTP */
@@ -538,7 +545,8 @@ export const DEFAULT_MONITORING_SETTINGS: OrgMonitoringSettings = {
   siem: { ...DEFAULT_SIEM_SETTINGS },
   quotas: { ...DEFAULT_QUOTA_SETTINGS },
   ldap: { ...DEFAULT_LDAP_SETTINGS },
-  smtp: { ...DEFAULT_SMTP_SETTINGS }
+  smtp: { ...DEFAULT_SMTP_SETTINGS },
+  agentUiLang: "fr"
 }
 
 export function mergeMonitoringSettings(
@@ -948,6 +956,13 @@ export function mergeMonitoringSettings(
           ? partial.proxy.mode
           : base.proxy!.mode
     }
+  }
+  if (
+    partial.agentUiLang === "fr" ||
+    partial.agentUiLang === "en" ||
+    partial.agentUiLang === "auto"
+  ) {
+    base.agentUiLang = partial.agentUiLang
   }
   return base
 }

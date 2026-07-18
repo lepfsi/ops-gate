@@ -528,7 +528,12 @@ export function createApp() {
         event_reporting: effective.eventReporting,
         rules_pack_version: pack.version,
         protect_unenroll: effective.protectUnenroll,
-        /** Messages UX (merge defaults côté agent) */
+        /**
+         * Langue UI agents (banner / options) — org monitoring, défaut fr.
+         * Indépendante de la langue de la console admin.
+         */
+        agent_ui_lang: mon.agentUiLang || "fr",
+        /** Messages UX (merge defaults côté agent selon locale) */
         user_messages: effective.userMessages || policy.userMessages || {},
         require_unenroll_password: requireUnenroll,
         /** Admins avec droit unenroll (hashes) */
@@ -5288,6 +5293,9 @@ export function createApp() {
   /**
    * Vue MSP multi-org — portfolio des tenants accessibles (même email admin).
    * GET /v1/auth/msp-overview
+   *
+   * Snapshot léger (listAgents + connectivity + count events) en parallèle —
+   * ne pas appeler summary() (trop lourd : purge, top rules, licence par agent…).
    */
   v1.get("/auth/msp-overview", async (c) => {
     const auth = await requireConsoleAuth(c, "console_access")
@@ -5301,74 +5309,156 @@ export function createApp() {
         totals: {
           agents: 0,
           online: 0,
+          offline_long: 0,
           seats: 0,
           seats_used: 0,
-          expiring_licenses: 0
+          expiring_licenses: 0,
+          events_7d: 0,
+          attention: 0
         }
       })
     }
     const { mergeMonitoringSettings } = await import("./types")
-    const orgs: Array<Record<string, unknown>> = []
+    const { connectivityBuckets } = await import("./summary-helpers")
+    const since7d = new Date(Date.now() - 7 * 24 * 3600_000).toISOString()
+
+    const snapshots = await Promise.all(
+      accessible.map(async (o) => {
+        try {
+          const [org, agents, events7d] = await Promise.all([
+            store.getOrg(o.org_id),
+            store.listAgents(o.org_id),
+            store.countEventsSince(o.org_id, since7d).catch(() => 0)
+          ])
+          const mon = mergeMonitoringSettings(org?.monitoring)
+          const conn = connectivityBuckets(
+            agents,
+            mon,
+            (a) => a.licenseAssigned === true
+          )
+          const lic = mon.licenseDisplay
+          const expRaw = lic?.expiresAt || null
+          let daysLeft: number | null = null
+          if (expRaw) {
+            const expMs = Date.parse(expRaw)
+            if (Number.isFinite(expMs)) {
+              daysLeft = Math.ceil((expMs - Date.now()) / (24 * 3600_000))
+            }
+          }
+          const seats =
+            typeof lic?.seats === "number" && lic.seats > 0
+              ? lic.seats
+              : org?.licenseSeats ?? 0
+          const seatsUsed = agents.filter((a) => a.licenseAssigned === true)
+            .length
+          const offlineLong = conn.offline_long || 0
+          const expiring = daysLeft != null && daysLeft <= 30
+          const seatsTight =
+            seats > 0 && seatsUsed / seats >= 0.9
+          const needsAttention =
+            expiring || offlineLong > 0 || seatsTight || (daysLeft != null && daysLeft < 0)
+
+          return {
+            org_id: o.org_id,
+            org_code: o.org_code,
+            name: o.name,
+            is_principal: o.is_principal,
+            current: o.org_id === auth.orgId,
+            agents: agents.length,
+            online: conn.online || 0,
+            stale: conn.stale || 0,
+            offline_long: offlineLong,
+            seats,
+            seats_used: seatsUsed,
+            license_mode: lic?.mode || "trial",
+            license_expires_at: expRaw,
+            license_days_left: daysLeft,
+            company_name: lic?.companyName || o.name,
+            events_7d: events7d,
+            needs_attention: needsAttention,
+            attention_reasons: [
+              expiring ? "license_expiring" : null,
+              daysLeft != null && daysLeft < 0 ? "license_expired" : null,
+              offlineLong > 0 ? "offline_long" : null,
+              seatsTight ? "seats_tight" : null
+            ].filter(Boolean) as string[]
+          }
+        } catch (e) {
+          console.warn(
+            `[msp-overview] org ${o.org_id.slice(0, 12)}…:`,
+            e instanceof Error ? e.message : e
+          )
+          return {
+            org_id: o.org_id,
+            org_code: o.org_code,
+            name: o.name,
+            is_principal: o.is_principal,
+            current: o.org_id === auth.orgId,
+            agents: 0,
+            online: 0,
+            stale: 0,
+            offline_long: 0,
+            seats: 0,
+            seats_used: 0,
+            license_mode: "unknown",
+            license_expires_at: null,
+            license_days_left: null,
+            company_name: o.name,
+            events_7d: 0,
+            needs_attention: false,
+            attention_reasons: [] as string[]
+          }
+        }
+      })
+    )
+
+    // Actif en tête, puis attention, puis alpha
+    snapshots.sort((a, b) => {
+      if (a.current !== b.current) return a.current ? -1 : 1
+      if (a.needs_attention !== b.needs_attention)
+        return a.needs_attention ? -1 : 1
+      return a.name.localeCompare(b.name, "fr")
+    })
+
     let tAgents = 0
     let tOnline = 0
+    let tOffline = 0
     let tSeats = 0
     let tSeatsUsed = 0
     let tExpiring = 0
-    for (const o of accessible) {
-      const org = await store.getOrg(o.org_id)
-      const mon = mergeMonitoringSettings(org?.monitoring)
-      let sum: Awaited<ReturnType<typeof store.summary>> | null = null
-      try {
-        sum = await store.summary(o.org_id)
-      } catch {
-        sum = null
+    let tEvents = 0
+    let tAttention = 0
+    for (const s of snapshots) {
+      tAgents += s.agents
+      tOnline += s.online
+      tOffline += s.offline_long
+      tSeats += typeof s.seats === "number" ? s.seats : 0
+      tSeatsUsed += s.seats_used
+      tEvents += s.events_7d
+      if (s.needs_attention) tAttention++
+      if (
+        s.license_days_left != null &&
+        s.license_days_left <= 30 &&
+        s.license_days_left >= 0
+      ) {
+        tExpiring++
       }
-      const lic = mon.licenseDisplay
-      const expRaw = lic?.expiresAt
-      let daysLeft: number | null = null
-      if (expRaw) {
-        const expMs = Date.parse(expRaw)
-        if (Number.isFinite(expMs)) {
-          daysLeft = Math.ceil((expMs - Date.now()) / (24 * 3600_000))
-          if (daysLeft <= 30) tExpiring++
-        }
-      }
-      const agents = sum?.agents ?? 0
-      const online = sum?.connectivity?.online ?? 0
-      const seats = sum?.licenses?.seats ?? lic?.seats ?? 0
-      const seatsUsed = sum?.licenses?.seats_used ?? sum?.licenses?.licensed ?? 0
-      tAgents += agents
-      tOnline += online
-      tSeats += typeof seats === "number" ? seats : 0
-      tSeatsUsed += typeof seatsUsed === "number" ? seatsUsed : 0
-      orgs.push({
-        org_id: o.org_id,
-        org_code: o.org_code,
-        name: o.name,
-        is_principal: o.is_principal,
-        current: o.org_id === auth.orgId,
-        agents,
-        online,
-        offline_long: sum?.connectivity?.offline_long ?? 0,
-        seats,
-        seats_used: seatsUsed,
-        license_mode: lic?.mode || "trial",
-        license_expires_at: expRaw || null,
-        license_days_left: daysLeft,
-        company_name: lic?.companyName || o.name
-      })
     }
+
     return c.json({
       multi_org: true,
-      org_count: orgs.length,
+      org_count: snapshots.length,
       current_org_id: auth.orgId,
-      orgs,
+      orgs: snapshots,
       totals: {
         agents: tAgents,
         online: tOnline,
+        offline_long: tOffline,
         seats: tSeats,
         seats_used: tSeatsUsed,
-        expiring_licenses: tExpiring
+        expiring_licenses: tExpiring,
+        events_7d: tEvents,
+        attention: tAttention
       }
     })
   })

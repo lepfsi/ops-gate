@@ -3733,6 +3733,15 @@ export class PgStore implements OpsGateStore {
     return rows.map(rowEvent)
   }
 
+  async countEventsSince(orgId: string, sinceIso: string): Promise<number> {
+    const { rows } = await this.pool.query(
+      `SELECT COUNT(*)::int AS n FROM detection_events
+       WHERE org_id = $1 AND received_at >= $2::timestamptz`,
+      [orgId, sinceIso]
+    )
+    return rows[0]?.n || 0
+  }
+
   async listOrgAiTools(orgId: string) {
     const { rows } = await this.pool.query(
       `SELECT * FROM org_ai_tools WHERE org_id = $1 ORDER BY tool ASC`,

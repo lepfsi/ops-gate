@@ -1,8 +1,8 @@
 # OpsGate - Installation & déploiement chez le client
 
 **Public** : intégrateur, admin système, DSI / RSSI pilote 
-**Version produit** : 1.2 / lot V2 
-**Maturité** : **V2 functional / pre-GA** - [`STATUS-V2.md`](./STATUS-V2.md) 
+**Version produit** : 1.2 / lot V2 + capacités **V3-P0** (Secure Rewrite, Risk, Shadow AI)  
+**Maturité** : **V2 functional / pre-GA** · V3-P0 en code — [`STATUS-V2.md`](./STATUS-V2.md) · gap [`STATUS-GAP-V1-V3.md`](./STATUS-GAP-V1-V3.md)  
 **Objectif** : déployer OpsGate **chez le client** (pas seulement en lab dev)
 
 > Ce document est le **point d’entrée déploiement**. 
@@ -408,13 +408,16 @@ pnpm api:validate-pg
 
 ## 14. Après le déploiement
 
-- Former les admins : [`GUIDE-UTILISATEUR-V2.md`](./GUIDE-UTILISATEUR-V2.md) 
-- Brief décideurs : [`DECIDEURS-V2-FR.md`](./DECIDEURS-V2-FR.md) 
-- FAQ technique : [`FAQ-DEPLOIEMENT-V2.md`](./FAQ-DEPLOIEMENT-V2.md) 
-- Catalogue capacités : [`architecture/BACKEND-V2-CATALOG.md`](./architecture/BACKEND-V2-CATALOG.md) 
+- Former les admins : [`GUIDE-UTILISATEUR-V2.md`](./GUIDE-UTILISATEUR-V2.md)  
+- Brief décideurs : [`DECIDEURS-V2-FR.md`](./DECIDEURS-V2-FR.md)  
+- FAQ technique : [`FAQ-DEPLOIEMENT-V2.md`](./FAQ-DEPLOIEMENT-V2.md)  
+- Catalogue capacités : [`architecture/BACKEND-V2-CATALOG.md`](./architecture/BACKEND-V2-CATALOG.md)  
+- Différenciation V3 (Rewrite / Risk / Shadow) : [`RELEASE-v3.md`](./RELEASE-v3.md)  
+- Langue des agents (banner) : Console → Paramètres → **Langue des agents** (`fr` / `en` / `auto`) puis sync  
+- Republier le pack de règles si l’engine a évolué (IBAN, etc.) : console Packs ou script `scripts/republish-engine-pack.mjs`
 
-Support : **contact@dailyops.tech** - indiquer code org, version API (`/health`), et navigateur.
+Support : **contact@dailyops.tech** — indiquer code org, version API (`/health`), et navigateur.
 
 ---
 
-*OpsGate · Guide déploiement client · DailyOps.Tech · juillet 2026*
+*OpsGate · Guide déploiement client · DailyOps.Tech · 18 juillet 2026*

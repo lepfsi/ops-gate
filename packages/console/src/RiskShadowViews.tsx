@@ -292,6 +292,44 @@ const SHARED_CSS = `
     padding: 0;
   }
   .rs-link:hover { text-decoration: underline; }
+  .rs-pager {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    padding: 6px 10px 8px;
+    border-top: 1px solid #f1f5f9;
+  }
+  .rs-page-btn {
+    appearance: none;
+    border: 1px solid #e2e8f0;
+    background: #fff;
+    color: #64748b;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 4px 10px;
+    border-radius: 999px;
+    cursor: pointer;
+    font-family: inherit;
+    transition: border-color 0.12s, color 0.12s, background 0.12s;
+  }
+  .rs-page-btn:hover:not(:disabled) {
+    border-color: #99f6e4;
+    color: #0f766e;
+    background: #f0fdfa;
+  }
+  .rs-page-btn:disabled {
+    opacity: 0.35;
+    cursor: default;
+  }
+  .rs-page-ind {
+    font-size: 11px;
+    font-weight: 600;
+    color: #94a3b8;
+    font-variant-numeric: tabular-nums;
+    min-width: 36px;
+    text-align: center;
+  }
   .rs-split {
     display: grid;
     grid-template-columns: minmax(0, 1.35fr) minmax(260px, 0.9fr);
@@ -431,6 +469,8 @@ export function RiskView({
   const [busy, setBusy] = useState(false)
   const [minScore, setMinScore] = useState(0)
   const [shadowUnauth, setShadowUnauth] = useState(0)
+  const [userPage, setUserPage] = useState(0)
+  const USERS_PAGE = 20
 
   const load = useCallback(async () => {
     setBusy(true)
@@ -457,6 +497,10 @@ export function RiskView({
   useEffect(() => {
     void load()
   }, [load])
+
+  useEffect(() => {
+    setUserPage(0)
+  }, [period, minScore, users.length])
 
   const openDetail = async (u: RiskUser) => {
     setSelected(u)
@@ -490,6 +534,13 @@ export function RiskView({
     summary && summary.previous_average_score != null
       ? summary.average_score - summary.previous_average_score
       : null
+
+  const userPages = Math.max(1, Math.ceil(users.length / USERS_PAGE))
+  const pageSafe = Math.min(userPage, userPages - 1)
+  const pageUsers = users.slice(
+    pageSafe * USERS_PAGE,
+    pageSafe * USERS_PAGE + USERS_PAGE
+  )
 
   return (
     <div className="rs-page">
@@ -673,7 +724,15 @@ export function RiskView({
         <div className="rs-panel">
           <div className="rs-panel-h">
             <strong>{t("risk.usersList")}</strong>
-            <span className="rs-muted">{users.length}</span>
+            <span className="rs-muted">
+              {users.length
+                ? t("risk.pageOf", {
+                    from: pageSafe * USERS_PAGE + 1,
+                    to: Math.min(users.length, (pageSafe + 1) * USERS_PAGE),
+                    total: users.length
+                  })
+                : 0}
+            </span>
           </div>
           <table className="rs-table">
             <thead>
@@ -681,13 +740,17 @@ export function RiskView({
                 <th style={{ width: 22 }} />
                 <th>{t("risk.colUser")}</th>
                 <th style={{ width: 52 }}>{t("risk.colScore")}</th>
-                <th style={{ width: 36 }}>{t("risk.colTrend")}</th>
+                <th
+                  style={{ width: 36 }}
+                  title={t("risk.trendHint")}>
+                  {t("risk.colTrend")}
+                </th>
                 <th style={{ width: 64 }}>Activité</th>
                 <th style={{ width: 48 }}>Shadow</th>
               </tr>
             </thead>
             <tbody>
-              {users.map((u) => (
+              {pageUsers.map((u) => (
                 <tr
                   key={u.agent_id}
                   className={
@@ -703,7 +766,18 @@ export function RiskView({
                       {u.score}
                     </span>
                   </td>
-                  <td className="rs-muted">{trendGlyph(u.trend)}</td>
+                  <td
+                    className="rs-muted"
+                    title={
+                      u.score_previous != null
+                        ? t("risk.trendUserHint", {
+                            prev: u.score_previous,
+                            cur: u.score
+                          })
+                        : t("risk.trendNoPrev")
+                    }>
+                    {trendGlyph(u.trend)}
+                  </td>
                   <td className="rs-muted">{relativeTime(u.last_event_at)}</td>
                   <td className="rs-muted">{u.tools?.length || 0}</td>
                 </tr>
@@ -717,8 +791,31 @@ export function RiskView({
               )}
             </tbody>
           </table>
+          {userPages > 1 ? (
+            <div className="rs-pager">
+              <button
+                type="button"
+                className="rs-page-btn"
+                disabled={pageSafe <= 0}
+                onClick={() => setUserPage((p) => Math.max(0, p - 1))}>
+                {t("risk.prev")}
+              </button>
+              <span className="rs-page-ind">
+                {pageSafe + 1} / {userPages}
+              </span>
+              <button
+                type="button"
+                className="rs-page-btn"
+                disabled={pageSafe >= userPages - 1}
+                onClick={() =>
+                  setUserPage((p) => Math.min(userPages - 1, p + 1))
+                }>
+                {t("risk.next")}
+              </button>
+            </div>
+          ) : null}
           <p className="rs-legend" style={{ padding: "0 10px 8px" }}>
-            ● High (≥70) · Medium (40–69) · Low (&lt;40)
+            ● High (≥70) · Medium (40–69) · Low (&lt;40) · {t("risk.trendLegend")}
           </p>
         </div>
 
