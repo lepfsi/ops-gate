@@ -15,6 +15,7 @@ export type DashWidgetId =
   | "ai_rewrite"
   | "risk_snapshot"
   | "shadow_snapshot"
+  | "proxy_fleet"
 
 export type DashWidgetLayout = {
   id: DashWidgetId
@@ -24,7 +25,8 @@ export type DashWidgetLayout = {
   h: number
 }
 
-const KEY = "opsgate_dash_layout_v3"
+const KEY = "opsgate_dash_layout_v4"
+const KEY_V3 = "opsgate_dash_layout_v3"
 const KEY_V2 = "opsgate_dash_layout_v2"
 const KEY_V1 = "opsgate_dash_layout_v1"
 
@@ -41,7 +43,8 @@ export const DASH_WIDGET_META: Record<
   requesters: { labelKey: "dash.topRequesters", defaultW: 1, defaultH: 210 },
   ai_rewrite: { labelKey: "dash.aiRewrite", defaultW: 1, defaultH: 200 },
   risk_snapshot: { labelKey: "dash.riskSnapshot", defaultW: 1, defaultH: 210 },
-  shadow_snapshot: { labelKey: "dash.shadowSnapshot", defaultW: 1, defaultH: 200 }
+  shadow_snapshot: { labelKey: "dash.shadowSnapshot", defaultW: 1, defaultH: 200 },
+  proxy_fleet: { labelKey: "dash.proxyFleet", defaultW: 1, defaultH: 210 }
 }
 
 export const ALL_DASH_WIDGET_IDS = Object.keys(
@@ -79,11 +82,16 @@ function parseLayout(raw: string | null): DashWidgetLayout[] | null {
   }
 }
 
-/** Ajoute les widgets V3 manquants en fin de layout (migration douce). */
-function ensureV3Widgets(layout: DashWidgetLayout[]): DashWidgetLayout[] {
+/** Ajoute les widgets récents manquants en fin de layout (migration douce). */
+function ensureNewWidgets(layout: DashWidgetLayout[]): DashWidgetLayout[] {
   const have = new Set(layout.map((x) => x.id))
   const next = [...layout]
-  for (const id of ["ai_rewrite", "risk_snapshot", "shadow_snapshot"] as const) {
+  for (const id of [
+    "ai_rewrite",
+    "risk_snapshot",
+    "shadow_snapshot",
+    "proxy_fleet"
+  ] as const) {
     if (!have.has(id)) {
       next.push({
         id,
@@ -97,16 +105,21 @@ function ensureV3Widgets(layout: DashWidgetLayout[]): DashWidgetLayout[] {
 
 export function loadDashLayout(): DashWidgetLayout[] {
   try {
-    const rawV3 = localStorage.getItem(KEY)
+    const rawV4 = localStorage.getItem(KEY)
+    const rawV3 = localStorage.getItem(KEY_V3)
     const rawV2 = localStorage.getItem(KEY_V2)
     const rawV1 = localStorage.getItem(KEY_V1)
-    const parsed = parseLayout(rawV3) || parseLayout(rawV2) || parseLayout(rawV1)
+    const parsed =
+      parseLayout(rawV4) ||
+      parseLayout(rawV3) ||
+      parseLayout(rawV2) ||
+      parseLayout(rawV1)
     if (!parsed) return DEFAULT_DASH_LAYOUT.map((x) => ({ ...x }))
     // Tableau vide = utilisateur a retiré toutes les métriques (respecté)
     if (parsed.length === 0) return []
-    const withV3 = rawV3 ? parsed : ensureV3Widgets(parsed)
-    if (!rawV3) saveDashLayout(withV3)
-    return withV3
+    const withNew = rawV4 ? parsed : ensureNewWidgets(parsed)
+    if (!rawV4) saveDashLayout(withNew)
+    return withNew
   } catch {
     return DEFAULT_DASH_LAYOUT.map((x) => ({ ...x }))
   }
