@@ -238,6 +238,25 @@ export default function App() {
   }, [])
 
   const [summary, setSummary] = useState<Summary | null>(null)
+  /** Snapshot V3 pour widgets dashboard (Risk 7j + Shadow) */
+  const [dashV3, setDashV3] = useState<{
+    risk: {
+      average_score: number
+      previous_average_score: number | null
+      trend: string
+      users_count: number
+      high_risk_users: number
+      medium_risk_users: number
+      low_risk_users: number
+      top_risk_users?: Array<{ label: string; score: number; trend: string }>
+    } | null
+    shadow: {
+      total: number
+      unauthorized: number
+      authorized: number
+      unknown: number
+    } | null
+  }>({ risk: null, shadow: null })
   const [packs, setPacks] = useState<PackListItem[]>([])
   const [activeVersion, setActiveVersion] = useState<string | undefined>()
   const [agents, setAgents] = useState<AgentRow[]>([])
@@ -649,7 +668,52 @@ export default function App() {
     if (!softDash) setBusy(true)
     try {
       if (t === "summary") {
-        setSummary(await api.summary())
+        const [sum, riskRaw, shadowRaw] = await Promise.all([
+          api.summary(),
+          api.riskSummary("7d").catch(() => null),
+          api.shadowAi({ period: "7d" }).catch(() => null)
+        ])
+        setSummary(sum)
+        const r = riskRaw as Record<string, unknown> | null
+        const s = shadowRaw as {
+          counts?: {
+            total?: number
+            unauthorized?: number
+            authorized?: number
+            unknown?: number
+          }
+        } | null
+        setDashV3({
+          risk: r
+            ? {
+                average_score: Number(r.average_score ?? 0),
+                previous_average_score:
+                  r.previous_average_score == null
+                    ? null
+                    : Number(r.previous_average_score),
+                trend: String(r.trend || "flat"),
+                users_count: Number(r.users_count ?? 0),
+                high_risk_users: Number(r.high_risk_users ?? 0),
+                medium_risk_users: Number(r.medium_risk_users ?? 0),
+                low_risk_users: Number(r.low_risk_users ?? 0),
+                top_risk_users: Array.isArray(r.top_risk_users)
+                  ? (r.top_risk_users as Array<{
+                      label: string
+                      score: number
+                      trend: string
+                    }>).slice(0, 5)
+                  : []
+              }
+            : null,
+          shadow: s?.counts
+            ? {
+                total: s.counts.total ?? 0,
+                unauthorized: s.counts.unauthorized ?? 0,
+                authorized: s.counts.authorized ?? 0,
+                unknown: s.counts.unknown ?? 0
+              }
+            : null
+        })
       } else if (t === "policy") {
         const [p, pr, g] = await Promise.all([
           api.policy(),
@@ -1428,6 +1492,7 @@ export default function App() {
       {tab === "summary" && (
         <SummaryView
           summary={summary}
+          dashV3={dashV3}
           busy={busy}
           dashSection={dashSection}
           setDashSection={setDashSection}
@@ -1435,6 +1500,8 @@ export default function App() {
           setDashExpanded={setDashExpanded}
           t={t}
           onRefresh={() => void loadTab("summary")}
+          onGoRisk={() => goTab("risk")}
+          onGoShadow={() => goTab("shadow")}
           onForceSync={async () => {
             setBusy(true)
             setError(null)
@@ -1888,6 +1955,7 @@ function ForcePasswordModal({ onDone }: { onDone: () => void }) {
 
 function SummaryView({
   summary,
+  dashV3,
   busy,
   dashSection,
   setDashSection,
@@ -1898,12 +1966,32 @@ function SummaryView({
   onMerged,
   onForceSyncAgent,
   onRevokeAgent,
+  onGoRisk,
+  onGoShadow,
   setError,
   setInfo,
   setBusy,
   t
 }: {
   summary: Summary | null
+  dashV3?: {
+    risk: {
+      average_score: number
+      previous_average_score: number | null
+      trend: string
+      users_count: number
+      high_risk_users: number
+      medium_risk_users: number
+      low_risk_users: number
+      top_risk_users?: Array<{ label: string; score: number; trend: string }>
+    } | null
+    shadow: {
+      total: number
+      unauthorized: number
+      authorized: number
+      unknown: number
+    } | null
+  }
   busy?: boolean
   dashSection: "overview" | "licenses" | "connectivity" | "activity" | "rules"
   setDashSection: (
@@ -1916,6 +2004,8 @@ function SummaryView({
   onForceSyncAgent?: (agentId: string, offlineMs: number) => void
   onRevokeAgent?: (agentId: string) => void
   onMerged?: () => void
+  onGoRisk?: () => void
+  onGoShadow?: () => void
   setError?: (e: string | null) => void
   setInfo?: (i: string | null) => void
   setBusy?: (b: boolean) => void
@@ -2212,11 +2302,18 @@ function SummaryView({
   }
 
   const maskN = decisions.mask_send || 0
+  const rewriteN = decisions.secure_rewrite || 0
   const riskN = decisions.send_anyway || 0
   const cancelN = decisions.cancel || 0
   const observeN = decisions.observe || 0
   const blockN = decisions.block || 0
-  const totalDec = maskN + riskN + cancelN + observeN + blockN
+  const totalDec = maskN + rewriteN + riskN + cancelN + observeN + blockN
+  const userActs = maskN + rewriteN + riskN + cancelN
+  const rewriteShare = userActs
+    ? Math.round((rewriteN / userActs) * 1000) / 10
+    : 0
+  const v3Risk = dashV3?.risk
+  const v3Shadow = dashV3?.shadow
   const maxRule = Math.max(
     1,
     ...(summary.top_rules || []).map((r) => r.count)
@@ -2704,6 +2801,10 @@ function SummaryView({
                       <strong>{summary.events_total}</strong>
                     </li>
                     <li>
+                      <span className="dash-dot ok" /> {t("dash.rewriteShort")}{" "}
+                      <strong>{rewriteN}</strong>
+                    </li>
+                    <li>
                       <span className="dash-dot crit" /> {t("dash.riskySends")}{" "}
                       <strong>{riskN}</strong>
                     </li>
@@ -2724,6 +2825,12 @@ function SummaryView({
                 <div className="dash-bars dash-bars--compact">
                   {(
                     [
+                      [
+                        "secure_rewrite",
+                        t("dash.rewrite"),
+                        rewriteN,
+                        "ok"
+                      ],
                       ["mask_send", t("dash.mask"), maskN, "ok"],
                       ["send_anyway", t("dash.risky"), riskN, "crit"],
                       ["cancel", t("dash.cancel"), cancelN, "warn"],
@@ -2750,6 +2857,154 @@ function SummaryView({
                   ))}
                 </div>,
                 "dash-widget--activity"
+              )
+            }
+            if (lay.id === "ai_rewrite") {
+              return wrapWidget(
+                "ai_rewrite",
+                t("dash.aiRewrite"),
+                <div className="dash-v3">
+                  <div className="dash-v3-hero">
+                    <span className="dash-v3-num">{rewriteN}</span>
+                    <span className="dash-v3-lbl">
+                      {t("dash.rewriteCount")}
+                    </span>
+                  </div>
+                  <ul className="dash-status-list">
+                    <li>
+                      <span className="dash-dot ok" /> {t("dash.mask")}{" "}
+                      <strong>{maskN}</strong>
+                    </li>
+                    <li>
+                      <span className="dash-dot crit" /> {t("dash.risky")}{" "}
+                      <strong>{riskN}</strong>
+                    </li>
+                    <li>
+                      <span className="dash-dot warn" /> {t("dash.rewriteShare")}{" "}
+                      <strong>{rewriteShare}%</strong>
+                    </li>
+                  </ul>
+                  <div className="dash-meter" aria-hidden>
+                    <i
+                      style={{
+                        width: `${Math.min(100, rewriteShare)}%`
+                      }}
+                    />
+                  </div>
+                  <p className="muted" style={{ fontSize: 11, margin: "6px 0 0" }}>
+                    {t("dash.rewriteHint")}
+                  </p>
+                </div>
+              )
+            }
+            if (lay.id === "risk_snapshot") {
+              const avg = v3Risk?.average_score ?? 0
+              const trend = v3Risk?.trend || "flat"
+              const trendG =
+                trend === "up" ? "↑" : trend === "down" ? "↓" : "→"
+              return wrapWidget(
+                "risk_snapshot",
+                t("dash.riskSnapshot"),
+                <div className="dash-v3">
+                  {v3Risk ? (
+                    <>
+                      <div className="dash-v3-hero">
+                        <span className="dash-v3-num">{avg}</span>
+                        <span className="dash-v3-lbl">
+                          {t("dash.riskAvg")} · {trendG}
+                        </span>
+                      </div>
+                      <ul className="dash-status-list">
+                        <li>
+                          <span className="dash-dot crit" /> High ≥70{" "}
+                          <strong>{v3Risk.high_risk_users}</strong>
+                        </li>
+                        <li>
+                          <span className="dash-dot warn" /> Med 40–69{" "}
+                          <strong>{v3Risk.medium_risk_users}</strong>
+                        </li>
+                        <li>
+                          <span className="dash-dot ok" /> Low{" "}
+                          <strong>{v3Risk.low_risk_users}</strong>
+                        </li>
+                        <li className="muted" style={{ fontSize: 11 }}>
+                          {t("dash.riskUsers", { n: v3Risk.users_count })} · 7 j
+                        </li>
+                      </ul>
+                      {v3Risk.top_risk_users &&
+                      v3Risk.top_risk_users.length > 0 ? (
+                        <ol className="dash-rank" style={{ marginTop: 8 }}>
+                          {v3Risk.top_risk_users.slice(0, 3).map((u, i) => (
+                            <li key={`${u.label}-${i}`}>
+                              <span className="dash-rank-i">{i + 1}.</span>
+                              <span className="dash-rank-id" title={u.label}>
+                                {u.label}
+                              </span>
+                              <strong className="dash-rank-n">{u.score}</strong>
+                            </li>
+                          ))}
+                        </ol>
+                      ) : null}
+                      {onGoRisk ? (
+                        <button
+                          type="button"
+                          className="btn secondary btn-sm"
+                          style={{ marginTop: 8, width: "100%" }}
+                          onClick={() => onGoRisk()}>
+                          {t("dash.openRisk")}
+                        </button>
+                      ) : null}
+                    </>
+                  ) : (
+                    <div className="empty">{t("dash.v3Loading")}</div>
+                  )}
+                </div>
+              )
+            }
+            if (lay.id === "shadow_snapshot") {
+              return wrapWidget(
+                "shadow_snapshot",
+                t("dash.shadowSnapshot"),
+                <div className="dash-v3">
+                  {v3Shadow ? (
+                    <>
+                      <div className="dash-v3-hero">
+                        <span className="dash-v3-num">
+                          {v3Shadow.unauthorized}
+                        </span>
+                        <span className="dash-v3-lbl">
+                          {t("dash.shadowUnauth")}
+                        </span>
+                      </div>
+                      <ul className="dash-status-list">
+                        <li>
+                          <span className="dash-dot ok" /> {t("dash.shadowAuth")}{" "}
+                          <strong>{v3Shadow.authorized}</strong>
+                        </li>
+                        <li>
+                          <span className="dash-dot warn" />{" "}
+                          {t("dash.shadowUnknown")}{" "}
+                          <strong>{v3Shadow.unknown}</strong>
+                        </li>
+                        <li>
+                          <span className="dash-dot" /> {t("dash.shadowTotal")}{" "}
+                          <strong>{v3Shadow.total}</strong>
+                        </li>
+                      </ul>
+                      {onGoShadow ? (
+                        <button
+                          type="button"
+                          className="btn secondary btn-sm"
+                          style={{ marginTop: 8, width: "100%" }}
+                          onClick={() => onGoShadow()}>
+                          {t("dash.openShadow")}
+                        </button>
+                      ) : null}
+                    </>
+                  ) : (
+                    <div className="empty">{t("dash.v3Loading")}</div>
+                  )}
+                </div>
               )
             }
             if (lay.id === "timeline") {
@@ -2788,6 +3043,7 @@ function SummaryView({
                   <div className="decision-grid decision-grid--compact">
                     {(
                       [
+                        ["secure_rewrite", t("dash.rewrite")],
                         ["mask_send", t("dash.maskSend")],
                         ["send_anyway", t("dash.sendAnyway")],
                         ["cancel", t("dash.cancel")],
@@ -10343,6 +10599,8 @@ function AgentsView({
 
 function decisionLabelFr(d: string): string {
   switch (d) {
+    case "secure_rewrite":
+      return "Secure Rewrite"
     case "mask_send":
       return "Masquer et envoyer"
     case "send_anyway":

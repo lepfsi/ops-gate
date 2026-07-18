@@ -602,13 +602,24 @@ export function RiskView({
                 {summary.average_score}
                 <span>/100</span>
               </div>
+              {summary.previous_average_score != null ? (
+                <div className="rs-kpi-s">
+                  {t("risk.prevAvg", { n: summary.previous_average_score })}
+                </div>
+              ) : null}
             </div>
             <div className="rs-kpi rs-high">
               <div className="rs-kpi-l">{t("risk.highUsers")}</div>
               <div className="rs-kpi-v">{summary.high_risk_users}</div>
+              <div className="rs-kpi-s">
+                {t("risk.medUsers")} {summary.medium_risk_users} ·{" "}
+                {t("risk.lowUsers")} {summary.low_risk_users}
+              </div>
             </div>
-            <div className="rs-kpi">
-              <div className="rs-kpi-l">Tendance</div>
+            <div
+              className="rs-kpi"
+              title={t("risk.trendHint")}>
+              <div className="rs-kpi-l">{t("risk.colTrend")}</div>
               <div className="rs-kpi-v">
                 {trendGlyph(summary.trend)}
                 {trendPts != null ? (
@@ -618,19 +629,24 @@ export function RiskView({
                   </span>
                 ) : null}
               </div>
+              <div className="rs-kpi-s">{t("risk.trendLegend")}</div>
             </div>
             <div className="rs-kpi">
-              <div className="rs-kpi-l">Shadow</div>
-              <div className="rs-kpi-v">{shadowUnauth}</div>
-              <div className="rs-kpi-s">non autorisés</div>
+              <div className="rs-kpi-l">{t("risk.usersCount")}</div>
+              <div className="rs-kpi-v">{summary.users_count}</div>
+              <div className="rs-kpi-s">
+                Shadow unauth · {shadowUnauth}
+              </div>
             </div>
           </div>
 
           <div className="rs-grid2">
             <div className="rs-panel">
               <div className="rs-panel-h">
-                <strong>Répartition</strong>
-                <span className="rs-muted">{summary.users_count} users</span>
+                <strong>{t("risk.distribution")}</strong>
+                <span className="rs-muted">
+                  {summary.users_count} {t("risk.usersCount").toLowerCase()}
+                </span>
               </div>
               <div className="rs-dist">
                 {(
@@ -658,7 +674,7 @@ export function RiskView({
 
             <div className="rs-panel">
               <div className="rs-panel-h">
-                <strong>Top risque</strong>
+                <strong>{t("risk.topRisk")}</strong>
               </div>
               <table className="rs-table">
                 <thead>

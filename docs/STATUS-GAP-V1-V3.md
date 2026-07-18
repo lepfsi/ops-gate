@@ -101,13 +101,14 @@ A. Ops pre-GA (bloquant vente)
    2. Pilote §11 DEPLOIEMENT
    3. Licence : vendor OU Stripe prod
 
-B. Polish produit (différenciation démo)
-   4. Docs décideurs/déploiement mention V3 à jour (+ PDF)
-   5. Meta risk events + alertes score
-   6. Dashboard Risk V3-D minimal
+B. Polish produit (crédibilité)
+   4. ~~Dashboard widgets V3 + rapport PDF § Risk/Shadow/Rewrite~~ (18/07)
+   5. Rebuild PDF décideurs/déploiement (`pnpm docs:pdf:v2`)
+   6. Meta risk events + alertes score
+   7. Dashboard Risk analytics V3-D étendu
 
 C. Suite V3 (après GA)
-   7. Trust Score / classification / Agent Guard
+   8. Trust Score / classification / Agent Guard
 ```
 
 ---

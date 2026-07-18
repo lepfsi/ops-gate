@@ -41,8 +41,12 @@ export type SecurityReportPayload = {
     risky_sends: number
     blocks: number
     masks: number
+    /** V3 — Secure Rewrite */
+    secure_rewrites: number
     observes: number
     cancels: number
+    /** Taux rewrite parmi (mask + rewrite + send_anyway + cancel) */
+    secure_rewrite_share_pct: number
   }
   by_decision: Array<{ decision: string; count: number; pct: number }>
   by_severity: Array<{ severity: string; count: number; pct: number }>
@@ -58,6 +62,31 @@ export type SecurityReportPayload = {
     maintenance: number
     online_ms: number
     offline_long_ms: number
+  }
+  /** V3 — Risk Score utilisateurs (période mappée) */
+  risk?: {
+    period: string
+    average_score: number
+    previous_average_score: number | null
+    trend: "up" | "down" | "flat"
+    users_count: number
+    high_risk_users: number
+    medium_risk_users: number
+    low_risk_users: number
+    top_risk_users: Array<{
+      label: string
+      score: number
+      trend: "up" | "down" | "flat"
+    }>
+  }
+  /** V3 — Shadow AI Discovery */
+  shadow_ai?: {
+    period: string
+    total: number
+    unauthorized: number
+    authorized: number
+    unknown: number
+    top_unauthorized: Array<{ tool: string; events_count: number }>
   }
   brand: {
     product: string
@@ -168,6 +197,9 @@ export async function buildSecurityReport(input: {
     | Promise<import("./types").WorkSchedule | null | undefined>
   period: ReturnType<typeof resolveReportPeriod>
   seats?: { seats: number; seats_used: number }
+  /** V3 optionnel — injecté depuis risk-shadow */
+  risk?: SecurityReportPayload["risk"]
+  shadow_ai?: SecurityReportPayload["shadow_ai"]
 }): Promise<SecurityReportPayload> {
   const slice = filterEventsRange(
     input.events,
@@ -250,6 +282,15 @@ export async function buildSecurityReport(input: {
       pct: pct(x.count, total)
     }))
 
+  const masks = byDecision.get("mask_send") || 0
+  const rewrites = byDecision.get("secure_rewrite") || 0
+  const risky = byDecision.get("send_anyway") || 0
+  const cancels = byDecision.get("cancel") || 0
+  const userActions = masks + rewrites + risky + cancels
+  const rewriteShare = userActions
+    ? Math.round((rewrites / userActions) * 1000) / 10
+    : 0
+
   return {
     schema_version: 1,
     generated_at: new Date().toISOString(),
@@ -273,11 +314,13 @@ export async function buildSecurityReport(input: {
       grace,
       seats: input.seats?.seats ?? 0,
       seats_used: input.seats?.seats_used ?? licensed,
-      risky_sends: byDecision.get("send_anyway") || 0,
+      risky_sends: risky,
       blocks: byDecision.get("block") || 0,
-      masks: byDecision.get("mask_send") || 0,
+      masks,
+      secure_rewrites: rewrites,
       observes: byDecision.get("observe") || 0,
-      cancels: byDecision.get("cancel") || 0
+      cancels,
+      secure_rewrite_share_pct: rewriteShare
     },
     by_decision: toArr(byDecision, "decision") as SecurityReportPayload["by_decision"],
     by_severity: toArr(bySev, "severity") as SecurityReportPayload["by_severity"],
@@ -303,6 +346,8 @@ export async function buildSecurityReport(input: {
       online_ms: conn.online_ms,
       offline_long_ms: conn.offline_long_ms
     },
+    risk: input.risk,
+    shadow_ai: input.shadow_ai,
     brand: {
       product: "OpsGate",
       vendor: "DailyOps.Tech",
