@@ -475,6 +475,19 @@ const fr: Dict = {
   "logs.proxy": "Events proxy (observe / block MITM)",
   "logs.proxyHint":
     "Décocher si le proxy inonde le journal (page ouverte longtemps).",
+  "proxy.title": "Proxy MITM local (flotte)",
+  "proxy.hint":
+    "Politique org pour les agents proxy Windows. Les postes avec le MSI synchronisent ce mode. Les décisions apparaissent dans Events (source=proxy).",
+  "proxy.enabled": "Proxy org activé (policy sync)",
+  "proxy.mode": "Mode d’application",
+  "proxy.mode.observe": "Observe — journaliser sans couper",
+  "proxy.mode.enforce": "Enforce — soft-block / soft-mask selon détection",
+  "proxy.mode.observeHint":
+    "Les flux IA sont scannés et journalisés (decision=observe). Aucune coupure réseau.",
+  "proxy.mode.enforceHint":
+    "Les détections medium/high peuvent déclencher soft-block ou soft-mask (decision=block / mask). Le site reste utilisable après.",
+  "proxy.monitorHint":
+    "Monitoring : Agents (badge Proxy) · Events filtrés source proxy · Dashboard barres Observe / Bloqué · Rapport PDF KPI Observe/Blocks.",
   "logs.login": "Connexions console (login / logout / échecs)",
   "logs.audit": "Audit administration (policy, packs, admins…)",
   "logs.agents": "Cycle de vie agents (licence, assignation, révocation)",
@@ -1285,6 +1298,19 @@ const en: Dict = {
   "logs.proxy": "Proxy events (observe / MITM block)",
   "logs.proxyHint":
     "Uncheck if the proxy floods the journal (long-lived open page).",
+  "proxy.title": "Local MITM proxy (fleet)",
+  "proxy.hint":
+    "Org policy for Windows proxy agents. MSI endpoints sync this mode. Decisions appear in Events (source=proxy).",
+  "proxy.enabled": "Org proxy enabled (policy sync)",
+  "proxy.mode": "Enforcement mode",
+  "proxy.mode.observe": "Observe — log only, do not cut",
+  "proxy.mode.enforce": "Enforce — soft-block / soft-mask on detection",
+  "proxy.mode.observeHint":
+    "AI traffic is scanned and logged (decision=observe). No network cut.",
+  "proxy.mode.enforceHint":
+    "Medium/high detections may soft-block or soft-mask (decision=block / mask). Site remains usable after.",
+  "proxy.monitorHint":
+    "Monitor: Agents (Proxy badge) · Events filtered by source=proxy · Dashboard Observe/Block bars · PDF report Observe/Blocks KPIs.",
   "logs.login": "Console logins (login / logout / failures)",
   "logs.audit": "Admin audit (policy, packs, admins…)",
   "logs.agents": "Agent lifecycle (license, assign, revoke)",

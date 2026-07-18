@@ -80,6 +80,20 @@ def uw(pdf: FPDF) -> float:
     return pdf.w - pdf.l_margin - pdf.r_margin
 
 
+def bottom_limit(pdf: FPDF) -> float:
+    """Y max utile (au-dessus du footer + marge)."""
+    return pdf.h - 18
+
+
+def ensure_space(pdf: FPDF, needed: float) -> None:
+    """
+    Saut de page *avant* un bloc si la place restante est insuffisante.
+    Évite titres orphelins et pages « vides » (contenu collé en bas).
+    """
+    if pdf.get_y() + needed > bottom_limit(pdf):
+        pdf.add_page()
+
+
 def cover(pdf: ReportPDF, data: dict) -> None:
     pdf.set_fill_color(*NAVY)
     pdf.rect(0, 0, pdf.w, pdf.h, "F")
@@ -136,6 +150,8 @@ def cover(pdf: ReportPDF, data: dict) -> None:
 
 
 def h1(pdf: FPDF, t: str) -> None:
+    # Titre de section + un peu de contenu (évite titre seul en bas de page)
+    ensure_space(pdf, 28)
     pdf.ln(2)
     pdf.set_font(font_name(), "B", 13)
     pdf.set_text_color(*NAVY)
@@ -148,6 +164,7 @@ def h1(pdf: FPDF, t: str) -> None:
 
 
 def h2(pdf: FPDF, t: str) -> None:
+    ensure_space(pdf, 22)
     pdf.ln(1)
     pdf.set_font(font_name(), "B", 10)
     pdf.set_text_color(*NAVY2)
@@ -173,9 +190,15 @@ def kpi_grid(pdf: FPDF, kpis: dict) -> None:
     w = uw(pdf)
     col = w / 4
     row_h = 22
+    rows_n = (len(items) + 3) // 4
+    grid_h = rows_n * (row_h + 4) + 4
+    ensure_space(pdf, grid_h)
+    # Dessin absolu : couper l’auto page-break (sinon pages blanches)
+    prev_break = pdf.auto_page_break
+    prev_margin = pdf.b_margin
+    pdf.set_auto_page_break(False)
     x0 = pdf.l_margin
     y0 = pdf.get_y()
-    rows_n = (len(items) + 3) // 4
     for i, (lab, val, color) in enumerate(items):
         col_i = i % 4
         row_i = i // 4
@@ -193,7 +216,8 @@ def kpi_grid(pdf: FPDF, kpis: dict) -> None:
         pdf.set_font(font_name(), "", 7.5)
         pdf.set_text_color(*GRAY)
         pdf.cell(col - 10, 5, lab)
-    pdf.set_y(y0 + rows_n * (row_h + 4) + 2)
+    pdf.set_y(y0 + grid_h)
+    pdf.set_auto_page_break(prev_break, margin=prev_margin)
 
 
 def hbar_chart(
@@ -204,12 +228,25 @@ def hbar_chart(
 ) -> None:
     if not rows:
         return
+    # Titre + toutes les barres si possible, sinon page propre avant le titre
+    block_h = 10 + len(rows) * 6.5 + 4
+    ensure_space(pdf, min(block_h, 50))
     h2(pdf, title)
     max_v = max((c for _, c in rows), default=1) or 1
     bar_max = uw(pdf) - 70
+    prev_break = pdf.auto_page_break
+    prev_margin = pdf.b_margin
+    pdf.set_auto_page_break(False)
     for label, count in rows:
-        if pdf.get_y() > pdf.h - 24:
+        if pdf.get_y() + 8 > bottom_limit(pdf):
+            pdf.set_auto_page_break(prev_break, margin=prev_margin)
             pdf.add_page()
+            # Reprise propre (pas de demi-ligne orpheline)
+            pdf.set_font(font_name(), "B", 9)
+            pdf.set_text_color(*MUTED)
+            pdf.cell(0, 5, f"{title} (suite)", new_x="LMARGIN", new_y="NEXT")
+            pdf.ln(1)
+            pdf.set_auto_page_break(False)
         y = pdf.get_y()
         pdf.set_font(font_name(), "", 8)
         pdf.set_text_color(*INK)
@@ -224,20 +261,22 @@ def hbar_chart(
         pdf.cell(18, 5.5, str(count))
         pdf.set_y(y + 6.5)
     pdf.ln(2)
+    pdf.set_auto_page_break(prev_break, margin=prev_margin)
 
 
 def vbar_chart(pdf: FPDF, title: str, days: list[dict]) -> None:
     if not days:
         return
+    chart_h = 48
+    ensure_space(pdf, chart_h + 22)
     h2(pdf, title)
     max_v = max((d.get("count") or 0 for d in days), default=1) or 1
-    chart_h = 48
     chart_w = uw(pdf)
     x0 = pdf.l_margin
+    prev_break = pdf.auto_page_break
+    prev_margin = pdf.b_margin
+    pdf.set_auto_page_break(False)
     y0 = pdf.get_y()
-    if y0 + chart_h + 16 > pdf.h - 16:
-        pdf.add_page()
-        y0 = pdf.get_y()
     # axis baseline
     pdf.set_draw_color(*MUTED)
     pdf.set_line_width(0.3)
@@ -264,15 +303,15 @@ def vbar_chart(pdf: FPDF, title: str, days: list[dict]) -> None:
         pdf.set_xy(x - 2, y0 + chart_h + 1)
         pdf.cell(bw + 6, 4, day)
     pdf.set_y(y0 + chart_h + 10)
+    pdf.set_auto_page_break(prev_break, margin=prev_margin)
 
 
-def table_simple(pdf: FPDF, headers: list[str], rows: list[list[str]], col_w: list[float]) -> None:
-    if pdf.get_y() > pdf.h - 30:
-        pdf.add_page()
+def _table_header(
+    pdf: FPDF, headers: list[str], col_w: list[float], x0: float
+) -> None:
     pdf.set_fill_color(*NAVY)
     pdf.set_text_color(*WHITE)
     pdf.set_font(font_name(), "B", 8)
-    x0 = pdf.l_margin
     for i, h in enumerate(headers):
         pdf.set_x(x0 + sum(col_w[:i]))
         pdf.cell(col_w[i], 6.5, h[:40], fill=True)
@@ -280,10 +319,26 @@ def table_simple(pdf: FPDF, headers: list[str], rows: list[list[str]], col_w: li
     pdf.set_draw_color(*TEAL)
     pdf.set_line_width(0.6)
     pdf.line(x0, pdf.get_y(), x0 + sum(col_w), pdf.get_y())
+
+
+def table_simple(
+    pdf: FPDF, headers: list[str], rows: list[list[str]], col_w: list[float]
+) -> None:
+    # En-tête + au moins 2 lignes de données ensemble
+    ensure_space(pdf, 6.5 + 6 * min(3, max(1, len(rows))) + 4)
+    x0 = pdf.l_margin
+    prev_break = pdf.auto_page_break
+    prev_margin = pdf.b_margin
+    pdf.set_auto_page_break(False)
+    _table_header(pdf, headers, col_w, x0)
     fill = False
     for row in rows:
-        if pdf.get_y() > pdf.h - 16:
+        if pdf.get_y() + 8 > bottom_limit(pdf):
+            pdf.set_auto_page_break(prev_break, margin=prev_margin)
             pdf.add_page()
+            pdf.set_auto_page_break(False)
+            _table_header(pdf, headers, col_w, x0)
+            fill = False
         if fill:
             pdf.set_fill_color(*TEAL_SOFT)
         else:
@@ -302,12 +357,14 @@ def table_simple(pdf: FPDF, headers: list[str], rows: list[list[str]], col_w: li
         pdf.set_y(y + 6)
         fill = not fill
     pdf.ln(2)
+    pdf.set_auto_page_break(prev_break, margin=prev_margin)
 
 
 def build(data: dict, out: Path | None, stdout: bool) -> None:
     org = data.get("org_name") or data.get("org_id") or "OpsGate"
     pdf = ReportPDF(org_label=str(org)[:40])
-    pdf.set_auto_page_break(auto=True, margin=16)
+    # Marge bas 18 mm : footer + respiration (évite collisions → page blanche)
+    pdf.set_auto_page_break(auto=True, margin=18)
     pdf.set_margins(16, 20, 16)
     register_fonts(pdf)
     pdf.add_page()
@@ -326,26 +383,30 @@ def build(data: dict, out: Path | None, stdout: bool) -> None:
         f"sur l'organisation : indicateurs, tendances et top menaces.",
     )
     pdf.ln(2)
+    # KPI grid doit tenir sur la même page que le début de §1
     kpi_grid(pdf, kpis)
 
     h1(pdf, "2. Activité dans le temps")
     vbar_chart(pdf, "Événements par jour", data.get("events_by_day") or [])
 
-    h1(pdf, "3. Décisions & sévérité")
+    # §3 : regrouper les 3 graphiques — si peu de place, page neuve
     dec = [
         (d.get("decision", ""), int(d.get("count") or 0))
         for d in (data.get("by_decision") or [])
     ]
-    hbar_chart(pdf, "Répartition des décisions", dec, BAR_NAVY)
     sev = [
         (d.get("severity", ""), int(d.get("count") or 0))
         for d in (data.get("by_severity") or [])
     ]
-    hbar_chart(pdf, "Sévérité", sev, BAR_WARN)
     src = [
         (d.get("source", ""), int(d.get("count") or 0))
         for d in (data.get("by_source") or [])
     ]
+    est3 = 20 + (len(dec) + len(sev) + len(src)) * 6.5 + 36
+    ensure_space(pdf, min(est3, 90))
+    h1(pdf, "3. Décisions & sévérité")
+    hbar_chart(pdf, "Répartition des décisions", dec, BAR_NAVY)
+    hbar_chart(pdf, "Sévérité", sev, BAR_WARN)
     hbar_chart(pdf, "Sources", src, TEAL)
 
     h1(pdf, "4. Top menaces & cibles")
@@ -412,6 +473,8 @@ def build(data: dict, out: Path | None, stdout: bool) -> None:
         "et inventaire Shadow AI (outils non autorisés).",
     )
     pdf.ln(2)
+    # Blocs §6 : réserver assez d’espace pour titre + 5 lignes
+    ensure_space(pdf, 52)
     h2(pdf, "Secure Rewrite & décisions utilisateur")
     table_simple(
         pdf,
@@ -430,6 +493,8 @@ def build(data: dict, out: Path | None, stdout: bool) -> None:
     )
 
     if risk:
+        # Titre + 7 lignes KPI ensemble
+        ensure_space(pdf, 62)
         h2(pdf, f"Risk Score utilisateurs ({risk.get('period', '')})")
         trend = risk.get("trend") or "flat"
         trend_lbl = {"up": "↑ en hausse", "down": "↓ en baisse", "flat": "→ stable"}.get(
@@ -493,11 +558,13 @@ def build(data: dict, out: Path | None, stdout: bool) -> None:
                 [w * 0.75, w * 0.25],
             )
 
-    # closing
-    pdf.ln(8)
-    if pdf.get_y() > pdf.h - 36:
-        pdf.add_page()
+    # closing banner (espace réservé avant, pas de page quasi-vide)
+    ensure_space(pdf, 36)
+    pdf.ln(6)
     y = pdf.get_y()
+    prev_break = pdf.auto_page_break
+    prev_margin = pdf.b_margin
+    pdf.set_auto_page_break(False)
     pdf.set_fill_color(*NAVY)
     pdf.rect(pdf.l_margin, y, uw(pdf), 28, "F")
     pdf.set_fill_color(*TEAL)
@@ -511,6 +578,8 @@ def build(data: dict, out: Path | None, stdout: bool) -> None:
     pdf.set_font(font_name(), "", 9)
     pdf.set_text_color(*WHITE)
     pdf.cell(0, 5, "Security Activity Report — usage interne / comité sécurité")
+    pdf.set_y(y + 30)
+    pdf.set_auto_page_break(prev_break, margin=prev_margin)
 
     if stdout:
         sys.stdout.buffer.write(pdf.output())
