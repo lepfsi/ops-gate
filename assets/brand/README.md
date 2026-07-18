@@ -2,13 +2,12 @@
 
 | Fichier | Usage |
 |---------|--------|
-| `../icon.png` | Icône source Plasmo (512×512, **coins arrondis**) → build Chrome |
-| `../icons/icon-*.png` | Jeu multi-tailles (16→1024), coins arrondis |
-| `opsgate-icon-refined.jpg` | Master mark (porte + bouclier, glow teal) |
-| `opsgate-wordmark.png` | Logo + wordmark (docs, démo, slides) |
+| **`packages/console/public/brand/opsgate-mark.svg`** | **Source de vérité** marque porte/serrure (= BrandMark.tsx, PDF, enrôlement) |
+| `../icon.png` + `../icons/icon-*.png` | Générés par `python scripts/gen-gate-icons.py` (resvg) pour l’extension |
+| `opsgate-icon-refined.jpg` | Asset marketing alternatif (neon) — **pas** l’icône produit |
+| `opsgate-wordmark.png` | Wordmark docs / démo |
 | `opsgate-banner-1280.png` | Bannière 1280×720 |
-| `packages/console/public/brand/*` | Mark produit (login/topbar) |
-| `packages/console/public/brand/favicon*` | **Favicon console** tab-first (teal + O) — distinct du logo extension |
+| `packages/console/public/brand/favicon*` | Favicon onglet console (distinct) |
 
 ## Charte rapide
 
