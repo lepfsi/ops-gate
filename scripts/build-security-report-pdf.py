@@ -160,17 +160,22 @@ def kpi_grid(pdf: FPDF, kpis: dict) -> None:
         ("Events", kpis.get("events_total", 0), TEAL),
         ("Blocks", kpis.get("blocks", 0), BAR_CRIT),
         ("Mask", kpis.get("masks", 0), BAR_OK),
+        ("Rewrite", kpis.get("secure_rewrites", 0), TEAL),
         ("Risky", kpis.get("risky_sends", 0), BAR_WARN),
-        ("Observe", kpis.get("observes", 0), BAR_NAVY),
-        ("Agents", kpis.get("agents_total", 0), BAR_MUTED),
+        ("Cancel", kpis.get("cancels", 0), BAR_MUTED),
+        ("Agents", kpis.get("agents_total", 0), BAR_NAVY),
         ("Online", kpis.get("agents_online", 0), BAR_OK),
         ("Unlic.", kpis.get("unlicensed", 0), BAR_CRIT),
+        ("Rewrite %", f"{kpis.get('secure_rewrite_share_pct', 0)}%", TEAL),
+        ("Observe", kpis.get("observes", 0), BAR_NAVY),
+        ("Sièges", f"{kpis.get('seats_used', 0)}/{kpis.get('seats', 0) or '—'}", BAR_MUTED),
     ]
     w = uw(pdf)
     col = w / 4
     row_h = 22
     x0 = pdf.l_margin
     y0 = pdf.get_y()
+    rows_n = (len(items) + 3) // 4
     for i, (lab, val, color) in enumerate(items):
         col_i = i % 4
         row_i = i // 4
@@ -181,14 +186,14 @@ def kpi_grid(pdf: FPDF, kpis: dict) -> None:
         pdf.set_fill_color(*color)
         pdf.rect(x + 1, y, 2.5, row_h, "F")
         pdf.set_xy(x + 6, y + 3)
-        pdf.set_font(font_name(), "B", 14)
+        pdf.set_font(font_name(), "B", 13)
         pdf.set_text_color(*NAVY)
         pdf.cell(col - 10, 8, str(val))
         pdf.set_xy(x + 6, y + 12)
-        pdf.set_font(font_name(), "", 8)
+        pdf.set_font(font_name(), "", 7.5)
         pdf.set_text_color(*GRAY)
         pdf.cell(col - 10, 5, lab)
-    pdf.set_y(y0 + 2 * (row_h + 4) + 2)
+    pdf.set_y(y0 + rows_n * (row_h + 4) + 2)
 
 
 def hbar_chart(
@@ -393,6 +398,100 @@ def build(data: dict, out: Path | None, stdout: bool) -> None:
         ],
         [w * 0.55, w * 0.45],
     )
+
+    # V3 — Secure Rewrite · Risk · Shadow AI
+    risk = data.get("risk") or {}
+    shadow = data.get("shadow_ai") or {}
+    h1(pdf, "6. AI Security (V3)")
+    pdf.set_font(font_name(), "", 9)
+    pdf.set_text_color(*INK)
+    pdf.multi_cell(
+        uw(pdf),
+        5,
+        "Indicateurs différenciants : adoption Secure Rewrite, scores de risque utilisateurs "
+        "et inventaire Shadow AI (outils non autorisés).",
+    )
+    pdf.ln(2)
+    h2(pdf, "Secure Rewrite & décisions utilisateur")
+    table_simple(
+        pdf,
+        ["Indicateur", "Valeur"],
+        [
+            ["Secure Rewrite", str(kpis.get("secure_rewrites", 0))],
+            ["Masquage simple", str(kpis.get("masks", 0))],
+            ["Envois risqués (send_anyway)", str(kpis.get("risky_sends", 0))],
+            ["Annulations", str(kpis.get("cancels", 0))],
+            [
+                "Part Rewrite (parmi actions user)",
+                f"{kpis.get('secure_rewrite_share_pct', 0)} %",
+            ],
+        ],
+        [w * 0.65, w * 0.35],
+    )
+
+    if risk:
+        h2(pdf, f"Risk Score utilisateurs ({risk.get('period', '')})")
+        trend = risk.get("trend") or "flat"
+        trend_lbl = {"up": "↑ en hausse", "down": "↓ en baisse", "flat": "→ stable"}.get(
+            trend, trend
+        )
+        prev = risk.get("previous_average_score")
+        prev_s = "—" if prev is None else str(prev)
+        table_simple(
+            pdf,
+            ["Indicateur", "Valeur"],
+            [
+                ["Score moyen", f"{risk.get('average_score', 0)} / 100"],
+                ["Score moyen période préc.", prev_s],
+                ["Tendance", trend_lbl],
+                ["Utilisateurs (activité)", str(risk.get("users_count", 0))],
+                ["High risk ≥70", str(risk.get("high_risk_users", 0))],
+                ["Medium 40–69", str(risk.get("medium_risk_users", 0))],
+                ["Low <40", str(risk.get("low_risk_users", 0))],
+            ],
+            [w * 0.65, w * 0.35],
+        )
+        tops = risk.get("top_risk_users") or []
+        if tops:
+            h2(pdf, "Top utilisateurs à risque")
+            table_simple(
+                pdf,
+                ["Utilisateur", "Score", "Tendance"],
+                [
+                    [
+                        t.get("label", ""),
+                        str(t.get("score", 0)),
+                        {"up": "↑", "down": "↓", "flat": "→"}.get(
+                            t.get("trend") or "flat", "→"
+                        ),
+                    ]
+                    for t in tops
+                ],
+                [w * 0.55, w * 0.2, w * 0.25],
+            )
+
+    if shadow:
+        h2(pdf, f"Shadow AI Discovery ({shadow.get('period', '')})")
+        table_simple(
+            pdf,
+            ["Statut outil", "Nombre"],
+            [
+                ["Total outils vus", str(shadow.get("total", 0))],
+                ["Non autorisés", str(shadow.get("unauthorized", 0))],
+                ["Autorisés", str(shadow.get("authorized", 0))],
+                ["Inconnus", str(shadow.get("unknown", 0))],
+            ],
+            [w * 0.65, w * 0.35],
+        )
+        tops_u = shadow.get("top_unauthorized") or []
+        if tops_u:
+            h2(pdf, "Top outils non autorisés")
+            table_simple(
+                pdf,
+                ["Outil", "Events"],
+                [[t.get("tool", ""), str(t.get("events_count", 0))] for t in tops_u],
+                [w * 0.75, w * 0.25],
+            )
 
     # closing
     pdf.ln(8)

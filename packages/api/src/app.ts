@@ -2628,6 +2628,58 @@ export function createApp() {
       const events = await store.listEvents(org.id, 5000)
       const agents = await store.listAgents(org.id)
       const licenseStats = await store.getLicenseStats(org.id)
+      // V3 — Risk + Shadow sur fenêtre proche de la période rapport
+      const riskPeriod =
+        range === "all" || period.label.includes("90")
+          ? ("90d" as const)
+          : ("7d" as const)
+      let riskBlock: import("./security-report").SecurityReportPayload["risk"]
+      let shadowBlock: import("./security-report").SecurityReportPayload["shadow_ai"]
+      try {
+        const { buildOrgRisk, buildShadowAiInventory } = await import(
+          "./risk-shadow"
+        )
+        const [riskBuilt, tools] = await Promise.all([
+          buildOrgRisk(store, org.id, riskPeriod),
+          buildShadowAiInventory(store, org.id, riskPeriod)
+        ])
+        riskBlock = {
+          period: riskPeriod,
+          average_score: riskBuilt.summary.average_score,
+          previous_average_score: riskBuilt.summary.previous_average_score,
+          trend: riskBuilt.summary.trend,
+          users_count: riskBuilt.summary.users_count,
+          high_risk_users: riskBuilt.summary.high_risk_users,
+          medium_risk_users: riskBuilt.summary.medium_risk_users,
+          low_risk_users: riskBuilt.summary.low_risk_users,
+          top_risk_users: (riskBuilt.summary.top_risk_users || [])
+            .slice(0, 5)
+            .map((u) => ({
+              label: u.label,
+              score: u.score,
+              trend: u.trend
+            }))
+        }
+        const unauthorized = tools.filter((t) => t.status === "unauthorized")
+        shadowBlock = {
+          period: riskPeriod,
+          total: tools.length,
+          unauthorized: unauthorized.length,
+          authorized: tools.filter((t) => t.status === "authorized").length,
+          unknown: tools.filter((t) => t.status === "unknown").length,
+          top_unauthorized: unauthorized
+            .slice()
+            .sort((a, b) => (b.events_count || 0) - (a.events_count || 0))
+            .slice(0, 6)
+            .map((t) => ({
+              tool: t.display_name || t.tool,
+              events_count: t.events_count || 0
+            }))
+        }
+      } catch {
+        riskBlock = undefined
+        shadowBlock = undefined
+      }
       const report = await buildSecurityReport({
         orgId: org.id,
         orgName: org.name || org.orgCode,
@@ -2643,7 +2695,9 @@ export function createApp() {
         seats: {
           seats: licenseStats.seats,
           seats_used: licenseStats.seats_used
-        }
+        },
+        risk: riskBlock,
+        shadow_ai: shadowBlock
       })
 
       if (format === "pdf") {

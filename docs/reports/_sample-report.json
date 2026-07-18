@@ -1,1 +1,106 @@
-{"schema_version": 1, "generated_at": "2026-07-16T12:00:00Z", "org_id": "org_demo", "org_name": "DEMO-OPSGATE", "period": {"kind": "week", "from_ts": "2026-07-07T00:00:00Z", "to_ts": "2026-07-13T23:59:59Z", "label": "Semaine ISO 2026-W28"}, "kpis": {"events_total": 42, "agents_total": 5, "agents_online": 3, "agents_stale": 1, "agents_offline_long": 1, "agents_maintenance": 0, "licensed": 4, "unlicensed": 1, "grace": 0, "seats": 10, "seats_used": 4, "risky_sends": 3, "blocks": 8, "masks": 12, "observes": 15, "cancels": 4}, "by_decision": [{"decision": "block", "count": 8, "pct": 19}, {"decision": "mask_send", "count": 12, "pct": 28.5}, {"decision": "observe", "count": 15, "pct": 35.7}, {"decision": "send_anyway", "count": 3, "pct": 7.1}, {"decision": "cancel", "count": 4, "pct": 9.5}], "by_severity": [{"severity": "high", "count": 20, "pct": 47.6}, {"severity": "medium", "count": 12, "pct": 28.5}, {"severity": "low", "count": 10, "pct": 23.8}], "by_source": [{"source": "proxy", "count": 25, "pct": 59.5}, {"source": "prompt", "count": 17, "pct": 40.5}], "events_by_day": [{"day": "2026-07-07", "count": 21}, {"day": "2026-07-08", "count": 24}, {"day": "2026-07-09", "count": 27}, {"day": "2026-07-10", "count": 30}, {"day": "2026-07-11", "count": 33}, {"day": "2026-07-12", "count": 36}, {"day": "2026-07-13", "count": 39}], "top_rules": [{"rule_id": "credit-card", "count": 9}, {"rule_id": "iban", "count": 5}, {"rule_id": "generic-api-key", "count": 4}], "top_hosts": [{"hostname": "chatgpt.com", "count": 20}, {"hostname": "claude.ai", "count": 8}], "top_devices": [{"device_label": "mon-pc", "count": 15}], "connectivity": {"online": 3, "stale": 1, "offline_long": 1, "maintenance": 0, "online_ms": 900000, "offline_long_ms": 7200000}, "brand": {"product": "OpsGate", "vendor": "DailyOps.Tech", "colors": {"navy": "#0A1128", "teal": "#2BD9C5"}}}
+{
+  "schema_version": 1,
+  "generated_at": "2026-07-18T12:00:00Z",
+  "org_id": "org_demo",
+  "org_name": "DEMO-OPSGATE",
+  "period": {
+    "kind": "week",
+    "from_ts": "2026-07-07T00:00:00Z",
+    "to_ts": "2026-07-13T23:59:59Z",
+    "label": "Semaine ISO 2026-W28"
+  },
+  "kpis": {
+    "events_total": 48,
+    "agents_total": 5,
+    "agents_online": 3,
+    "agents_stale": 1,
+    "agents_offline_long": 1,
+    "agents_maintenance": 0,
+    "licensed": 4,
+    "unlicensed": 1,
+    "grace": 0,
+    "seats": 10,
+    "seats_used": 4,
+    "risky_sends": 3,
+    "blocks": 8,
+    "masks": 10,
+    "secure_rewrites": 6,
+    "secure_rewrite_share_pct": 26.1,
+    "observes": 15,
+    "cancels": 4
+  },
+  "by_decision": [
+    { "decision": "observe", "count": 15, "pct": 31.3 },
+    { "decision": "mask_send", "count": 10, "pct": 20.8 },
+    { "decision": "block", "count": 8, "pct": 16.7 },
+    { "decision": "secure_rewrite", "count": 6, "pct": 12.5 },
+    { "decision": "cancel", "count": 4, "pct": 8.3 },
+    { "decision": "send_anyway", "count": 3, "pct": 6.3 }
+  ],
+  "by_severity": [
+    { "severity": "high", "count": 20, "pct": 41.7 },
+    { "severity": "medium", "count": 14, "pct": 29.2 },
+    { "severity": "low", "count": 14, "pct": 29.2 }
+  ],
+  "by_source": [
+    { "source": "proxy", "count": 25, "pct": 52.1 },
+    { "source": "prompt", "count": 23, "pct": 47.9 }
+  ],
+  "events_by_day": [
+    { "day": "2026-07-07", "count": 21 },
+    { "day": "2026-07-08", "count": 24 },
+    { "day": "2026-07-09", "count": 27 },
+    { "day": "2026-07-10", "count": 30 },
+    { "day": "2026-07-11", "count": 33 },
+    { "day": "2026-07-12", "count": 36 },
+    { "day": "2026-07-13", "count": 39 }
+  ],
+  "top_rules": [
+    { "rule_id": "credit-card", "count": 9 },
+    { "rule_id": "iban", "count": 5 },
+    { "rule_id": "generic-api-key", "count": 4 }
+  ],
+  "top_hosts": [
+    { "hostname": "chatgpt.com", "count": 20 },
+    { "hostname": "claude.ai", "count": 8 }
+  ],
+  "top_devices": [{ "device_label": "mon-pc", "count": 15 }],
+  "connectivity": {
+    "online": 3,
+    "stale": 1,
+    "offline_long": 1,
+    "maintenance": 0,
+    "online_ms": 900000,
+    "offline_long_ms": 7200000
+  },
+  "risk": {
+    "period": "7d",
+    "average_score": 42,
+    "previous_average_score": 38,
+    "trend": "up",
+    "users_count": 5,
+    "high_risk_users": 1,
+    "medium_risk_users": 2,
+    "low_risk_users": 2,
+    "top_risk_users": [
+      { "label": "mon-pc", "score": 78, "trend": "up" },
+      { "label": "laptop-finance", "score": 55, "trend": "flat" }
+    ]
+  },
+  "shadow_ai": {
+    "period": "7d",
+    "total": 6,
+    "unauthorized": 2,
+    "authorized": 3,
+    "unknown": 1,
+    "top_unauthorized": [
+      { "tool": "chat.deepseek.com", "events_count": 4 },
+      { "tool": "poe.com", "events_count": 2 }
+    ]
+  },
+  "brand": {
+    "product": "OpsGate",
+    "vendor": "DailyOps.Tech",
+    "colors": { "navy": "#0A1128", "teal": "#2BD9C5" }
+  }
+}
