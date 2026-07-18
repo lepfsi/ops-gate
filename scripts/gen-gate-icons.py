@@ -212,7 +212,27 @@ def main() -> None:
         else:
             save_png(BRAND / name, pil_img=render_with_pil(s))
 
-    print("ok — marque BrandMark / enrôlement / PDF")
+    # Favicons console (même marque)
+    favicon_svg = BRAND / "favicon.svg"
+    fav_bytes = favicon_svg.read_bytes() if favicon_svg.exists() else svg_bytes
+    for s, name in (
+        (16, "favicon-16.png"),
+        (32, "favicon-32.png"),
+        (48, "favicon-48.png"),
+        (32, "favicon.png"),
+    ):
+        if use_resvg:
+            png = render_with_resvg(fav_bytes, s)
+            save_png(BRAND / name, png_bytes=png)
+            if name == "favicon.png":
+                save_png(ROOT / "packages" / "console" / "public" / "favicon.png", png_bytes=png)
+        else:
+            im = render_with_pil(s)
+            save_png(BRAND / name, pil_img=im)
+            if name == "favicon.png":
+                save_png(ROOT / "packages" / "console" / "public" / "favicon.png", pil_img=im)
+
+    print("ok - marque BrandMark / enrolement / PDF / favicon")
 
 
 if __name__ == "__main__":
