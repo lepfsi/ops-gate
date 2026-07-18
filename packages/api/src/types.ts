@@ -1137,6 +1137,27 @@ export function mergePolicyFileScan(
   }
 }
 
+/** true si l’objet JSON stocké a au moins une clé (réglage explicite). */
+export function hasExplicitFileScan(
+  raw: Partial<PolicyFileScan> | null | undefined
+): boolean {
+  return !!raw && typeof raw === "object" && Object.keys(raw).length > 0
+}
+
+/**
+ * Hiérarchie org → profil : le profil n’écrase que s’il a un fileScan
+ * explicite (sinon hérite 100 % de l’org). Évite qu’un `{}` en base
+ * force images=false sur les agents d’un profil.
+ */
+export function resolveEffectiveFileScan(
+  orgScan?: PolicyFileScan | Partial<PolicyFileScan> | null,
+  profileScan?: PolicyFileScan | Partial<PolicyFileScan> | null
+): PolicyFileScan {
+  const base = mergePolicyFileScan(orgScan)
+  if (!hasExplicitFileScan(profileScan || null)) return base
+  return mergePolicyFileScan({ ...base, ...profileScan })
+}
+
 /**
  * Profil de policy (département / équipe / policy1, policy2…).
  */

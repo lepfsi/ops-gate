@@ -7709,7 +7709,8 @@ function PolicyView({
                           setProfDept(p.department || "")
                           setProfHosts((p.enabledHosts || []).join("\n"))
                           setProfScan(!!p.scanUploads)
-                          const pfs = p.fileScan
+                          // Hérite de la policy org si le profil n’a pas de file_scan explicite
+                          const pfs = p.fileScan || policy.fileScan
                           setProfScanConfigs(pfs?.configs !== false)
                           setProfScanDatabases(pfs?.databases !== false)
                           setProfScanOffice(pfs?.office !== false)
@@ -7869,6 +7870,9 @@ function PolicyView({
 
         <div className="pol-section-l" style={{ marginTop: 14 }}>
           {t("policy.fileScanTitle") || "Analyse des fichiers"}
+          <span className="pol-meta" style={{ marginLeft: 8, fontWeight: 500 }}>
+            (profil — écrase la policy org à l’enregistrement)
+          </span>
         </div>
         <label className="pol-toggle pol-toggle-main">
           <input
@@ -7911,6 +7915,11 @@ function PolicyView({
             </label>
           ))}
         </div>
+        <p className="pol-meta" style={{ marginTop: 6 }}>
+          Détections type IBAN, mots de passe, clés API : pack de règles org
+          (onglet Packs) — commun à tous les profils, pas un réglage par
+          policy.
+        </p>
         <div className="policy-block">
           <button
             type="button"
@@ -8153,12 +8162,13 @@ function PolicyView({
                 }
                 setProfName("")
                 setProfGroups([])
-                setProfScan(true)
-                setProfScanConfigs(true)
-                setProfScanDatabases(true)
-                setProfScanOffice(true)
-                setProfScanImages(false)
-                setProfWarnMedia(true)
+                // Reset : reprendre les défauts de la policy org
+                setProfScan(!!policy.scanUploads)
+                setProfScanConfigs(policy.fileScan?.configs !== false)
+                setProfScanDatabases(policy.fileScan?.databases !== false)
+                setProfScanOffice(policy.fileScan?.office !== false)
+                setProfScanImages(policy.fileScan?.images === true)
+                setProfWarnMedia(policy.fileScan?.media_warn !== false)
                 setProfMsgNotice("")
                 setProfMsgAlertTitle("")
                 setProfMsgAlertBody("")
