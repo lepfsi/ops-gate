@@ -126,15 +126,31 @@ function mapDeviceHost(name: string, maps: Maps): string {
   return rep
 }
 
-/** Ne redacte que la *valeur* du secret, garde le mot-clé password/… */
+/**
+ * Ne redacte que la *valeur* du secret, garde le mot-clé password/…
+ * Couvre : password=X, password: X, password is X, pwd "X", set password X
+ */
 function rewritePasswordPhrase(match: string): string {
   const redacted = match
     .replace(
-      /(\b(?:password|passwd|pwd)\b)(\s*(?:=|:|\bis\b)?\s*)(['"]?)(\S+)/gi,
-      (_w, a: string, mid: string, q: string) => `${a}${mid}${q}********`
+      /(\b(?:password|passwd|pwd)\b)(\s*[=:]\s*)(['"]?)([^\s'"]{4,})(\3?)/gi,
+      (_w, a: string, mid: string, q: string) => `${a}${mid}${q}********${q}`
     )
     .replace(
-      /(\bmot\s+de\s+passe\b)(\s*(?:=|:|\best\b|\bis\b)?\s*)(['"]?)(\S+)/gi,
+      /(\b(?:password|passwd|pwd)\b)(\s+(?:is|est)\s+)(['"]?)([^\s'"]{4,})(\3?)/gi,
+      (_w, a: string, mid: string, q: string) => `${a}${mid}${q}********${q}`
+    )
+    .replace(
+      /(\b(?:password|passwd|pwd)\b)(\s+)(['"])([^'"]{4,})(['"])/gi,
+      (_w, a: string, mid: string, q1: string, _v: string, q2: string) =>
+        `${a}${mid}${q1}********${q2}`
+    )
+    .replace(
+      /(\b(?:password|passwd|pwd)\b)(\s+)(?!is\b|est\b|manager\b|reset\b|policy\b)([^\s'"]{6,})/gi,
+      (_w, a: string, mid: string) => `${a}${mid}********`
+    )
+    .replace(
+      /(\bmot\s+de\s+passe\b)(\s*[=:]\s*|\s+(?:est|is)\s+)(['"]?)([^\s'"]{4,})/gi,
       (_w, a: string, mid: string, q: string) => `${a}${mid}${q}********`
     )
     .replace(
@@ -142,6 +158,63 @@ function rewritePasswordPhrase(match: string): string {
       (_w, a: string) => `${a} ********`
     )
   return redacted === match ? "********" : redacted
+}
+
+/** Passe globale password sur tout le texte (filet de sécurité). */
+function rewriteAllPasswordsInText(
+  text: string,
+  changes: RewriteChange[]
+): string {
+  let out = text
+
+  const push = (original: string, replacement: string, ruleId: string) => {
+    if (original === replacement) return replacement
+    if (changes.some((c) => c.original === original && c.replacement === replacement)) {
+      return replacement
+    }
+    changes.push({
+      original,
+      replacement,
+      category: "password",
+      strategy: "full_redact",
+      ruleId
+    })
+    return replacement
+  }
+
+  // password=secret | password: secret
+  out = out.replace(
+    /\b((?:password|passwd|pwd)\s*[=:]\s*)(['"]?)([^\s'"]{4,})\2/gi,
+    (full, prefix: string, q: string, value: string) => {
+      if (/^\*+$/.test(value) || /REDACTED/i.test(value)) return full
+      return push(full, `${prefix}${q}********${q}`, "heuristic-password-eq")
+    }
+  )
+  // password is secret
+  out = out.replace(
+    /\b((?:password|passwd|pwd)\s+(?:is|est)\s+)(['"]?)([^\s'"]{4,})\2/gi,
+    (full, prefix: string, q: string, value: string) => {
+      if (/^\*+$/.test(value) || /REDACTED/i.test(value)) return full
+      return push(full, `${prefix}${q}********${q}`, "heuristic-password-is")
+    }
+  )
+  // mot de passe = secret
+  out = out.replace(
+    /\b((?:mot\s+de\s+passe)\s*[=:]\s*|(?:mot\s+de\s+passe)\s+(?:est|is)\s+)(['"]?)([^\s'"]{4,})\2/gi,
+    (full, prefix: string, q: string, value: string) => {
+      if (/^\*+$/.test(value) || /REDACTED/i.test(value)) return full
+      return push(full, `${prefix}${q}********${q}`, "heuristic-password-fr")
+    }
+  )
+  // set password secret
+  out = out.replace(
+    /\b(set\s+(?:passwd|password)\s+)(\S{4,})/gi,
+    (full, prefix: string, value: string) => {
+      if (/^\*+$/.test(value) || /REDACTED/i.test(value)) return full
+      return push(full, `${prefix}********`, "heuristic-set-password")
+    }
+  )
+  return out
 }
 
 function rewriteApiKeyToken(match: string): string {
@@ -193,10 +266,22 @@ function rewriteMatch(
   const type = (detection.type || "").toLowerCase()
 
   // ── Password : ne pas effacer le mot « password » ──
-  if (/password-assignment|password|passwd/i.test(id) || /mot de passe/i.test(type)) {
-    const rep = rewritePasswordPhrase(match)
-    if (rep === match) return null
-    return { replacement: rep, strategy: "full_redact", category: "password" }
+  if (
+    /password-assignment|password|passwd/i.test(id) ||
+    /mot de passe/i.test(type) ||
+    /mot de passe/i.test(id)
+  ) {
+    let rep = rewritePasswordPhrase(match)
+    // Si le match n’est que la valeur (sans mot-clé), encapsuler
+    if (rep === match && !/\b(?:password|passwd|pwd|mot\s+de\s+passe)\b/i.test(match)) {
+      rep = rewritePasswordPhrase(`password=${match}`)
+    }
+    if (rep === match) rep = "********"
+    return {
+      replacement: rep,
+      strategy: "full_redact",
+      category: "password"
+    }
   }
 
   // ── API / cloud keys ──
@@ -546,14 +631,35 @@ export function secureRewrite(
   // Appliquer (plus longs d’abord)
   let rewritten = text
   pairs.sort((a, b) => b.original.length - a.original.length)
+  const applied: typeof pairs = []
   for (const p of pairs) {
     if (!p.original || p.original === p.replacement) continue
-    if (!rewritten.includes(p.original)) continue
-    rewritten = rewritten.split(p.original).join(p.replacement)
+    let needle = p.original
+    // Ancien match tronqué UI (… / ...) : retomber sur le préfixe
+    if (/[….]{1,3}$/.test(needle) && !rewritten.includes(needle)) {
+      needle = needle.replace(/[….]+$/, "").trim()
+    }
+    if (!needle || !rewritten.includes(needle)) {
+      // Password / clé : tenter une passe locale sur le fragment
+      if (/password|passwd|pwd|mot.de.passe/i.test(p.ruleId + p.category)) {
+        const before = rewritten
+        rewritten = rewriteAllPasswordsInText(rewritten, [])
+        if (rewritten !== before) {
+          applied.push({
+            ...p,
+            original: p.original,
+            replacement: p.replacement
+          })
+        }
+      }
+      continue
+    }
+    rewritten = rewritten.split(needle).join(p.replacement)
+    applied.push({ ...p, original: needle })
   }
 
-  const changes: RewriteChange[] = pairs
-    .filter((p) => text.includes(p.original) && p.original !== p.replacement)
+  const changes: RewriteChange[] = applied
+    .filter((p) => p.original !== p.replacement)
     .map((p) => ({
       original: p.original,
       replacement: p.replacement,
@@ -562,7 +668,8 @@ export function secureRewrite(
       ruleId: p.ruleId
     }))
 
-  // Passe heuristique (IP / sk_ / FW- non couverts par les rules)
+  // Passe password globale (filet) puis IP / sk_ / FW-
+  rewritten = rewriteAllPasswordsInText(rewritten, changes)
   rewritten = heuristicPass(rewritten, maps, changes)
 
   // Dédupliquer changes
