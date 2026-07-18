@@ -1103,6 +1103,40 @@ export interface LicensePool {
   updatedAt: string
 }
 
+/** Options de scan fichiers (sous-flags de scanUploads) */
+export type PolicyFileScan = {
+  /** .conf .json .xml .env .yaml… */
+  configs: boolean
+  /** .sql (+ warn binaires .db) */
+  databases: boolean
+  /** OCR images (Tesseract) */
+  images: boolean
+  /** PDF / DOCX / PPTX / XLSX extraction */
+  office: boolean
+  /** Alerte confirmation audio/vidéo */
+  media_warn: boolean
+}
+
+export const DEFAULT_POLICY_FILE_SCAN: PolicyFileScan = {
+  configs: true,
+  databases: true,
+  images: false,
+  office: true,
+  media_warn: true
+}
+
+export function mergePolicyFileScan(
+  partial?: Partial<PolicyFileScan> | null
+): PolicyFileScan {
+  return {
+    configs: partial?.configs !== false,
+    databases: partial?.databases !== false,
+    images: partial?.images === true,
+    office: partial?.office !== false,
+    media_warn: partial?.media_warn !== false
+  }
+}
+
 /**
  * Profil de policy (département / équipe / policy1, policy2…).
  */
@@ -1116,6 +1150,8 @@ export interface PolicyProfile {
   enabledHosts: string[]
   /** false = pas d'upload de fichiers autorisé pour ce profil */
   scanUploads: boolean
+  /** Sous-options d’analyse fichiers */
+  fileScan?: PolicyFileScan
   eventReporting: boolean
   /**
    * Si true : désenrôlement protégé par mdp admin (si au moins un admin actif).
@@ -1150,6 +1186,8 @@ export interface Policy {
   defaultAction: DefaultAction
   enabledHosts: string[]
   scanUploads: boolean
+  /** Sous-options d’analyse fichiers (sync agent) */
+  fileScan?: PolicyFileScan
   eventReporting: boolean
   /** Version du pack actuellement servi aux agents */
   rulesPackVersion: string

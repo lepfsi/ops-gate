@@ -151,8 +151,10 @@ export interface FileScanOptions {
   scanConfigs?: boolean
   /** Scanner SQL / tenter texte DB - défaut true */
   scanDatabases?: boolean
-  /** OCR images - stub : non implémenté (warn / skip) */
+  /** OCR images (Tesseract) - défaut false */
   scanImages?: boolean
+  /** PDF / DOCX / PPTX / XLSX - défaut true */
+  scanOffice?: boolean
   /** Toujours demander confirmation pour audio/vidéo */
   warnMedia?: boolean
 }
@@ -202,7 +204,8 @@ export function isScannableFile(file: File, opts: FileScanOptions = {}): boolean
   if (cat === "media") return false // warn only
   if (cat === "image") return !!opts.scanImages
   if (cat === "office") {
-    // PDF / DOCX / PPTX / XLSX extraits ; legacy Office → warn only
+    // PDF / DOCX / PPTX / XLSX extraits si scanOffice !== false
+    if (opts.scanOffice === false) return false
     const ext = extensionOf(file.name)
     return (
       ext === "pdf" ||
@@ -400,6 +403,14 @@ export async function scanFile(
 
   if (category === "office") {
     const ext = extensionOf(file.name)
+    if (opts.scanOffice === false) {
+      return {
+        ...base,
+        status: "office_warn",
+        userHint:
+          "Documents Office/PDF non scannés (policy). Confirmez l'envoi - log enregistré."
+      }
+    }
     // PDF / DOCX / PPTX / XLSX
     if (
       ext === "pdf" ||

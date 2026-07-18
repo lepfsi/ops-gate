@@ -662,10 +662,11 @@ function OptionsPage() {
         </label>
         {(
           [
-            ["scanConfigs", "Configurations"],
-            ["scanDatabases", "Bases de données"],
+            ["scanConfigs", "Configurations (.conf, .json, .xml, .env…)"],
+            ["scanDatabases", "Bases de données (.sql)"],
+            ["scanOffice", "PDF / Office (DOCX, PPTX, XLSX)"],
             ["scanImages", "Images — OCR bitmap (Tesseract local)"],
-            ["warnMedia", "Audio / vidéo"]
+            ["warnMedia", "Audio / vidéo (confirmation)"]
           ] as const
         ).map(([key, title]) => (
           <label
@@ -683,8 +684,10 @@ function OptionsPage() {
                   ? settings.scanImages === true
                   : key === "warnMedia"
                     ? settings.warnMedia !== false
-                    : (settings as unknown as Record<string, unknown>)[key] !==
-                      false
+                    : key === "scanOffice"
+                      ? settings.scanOffice !== false
+                      : (settings as unknown as Record<string, unknown>)[key] !==
+                        false
               }
               disabled={locked || settings.scanUploads === false}
               onChange={(e) =>
@@ -694,7 +697,14 @@ function OptionsPage() {
                 })
               }
             />
-            <div style={{ fontWeight: 650 }}>{title}</div>
+            <div>
+              <div style={{ fontWeight: 650 }}>{title}</div>
+              {locked && (
+                <div style={{ fontSize: 11, color: "#64748b", marginTop: 2 }}>
+                  Piloté par la policy org (sync)
+                </div>
+              )}
+            </div>
           </label>
         ))}
       </section>

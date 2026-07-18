@@ -122,6 +122,7 @@ export type EffectivePolicyBundle = {
     defaultAction: Policy["defaultAction"]
     enabledHosts: string[]
     scanUploads: boolean
+    fileScan?: import("./types").PolicyFileScan
     eventReporting: boolean
     protectUnenroll: boolean
     userMessages?: Partial<import("./types").PolicyUserMessages>
@@ -226,6 +227,7 @@ export interface OpsGateStore {
         | "defaultAction"
         | "enabledHosts"
         | "scanUploads"
+        | "fileScan"
         | "eventReporting"
         | "rulesPackVersion"
         | "managementPasswordHash"
@@ -422,6 +424,7 @@ export interface OpsGateStore {
       defaultAction?: Policy["defaultAction"]
       enabledHosts?: string[]
       scanUploads?: boolean
+      fileScan?: Partial<import("./types").PolicyFileScan>
       eventReporting?: boolean
       protectUnenroll?: boolean
       enabled?: boolean

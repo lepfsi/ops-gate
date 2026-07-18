@@ -724,6 +724,7 @@ export class MemoryStore implements OpsGateStore {
         | "defaultAction"
         | "enabledHosts"
         | "scanUploads"
+        | "fileScan"
         | "eventReporting"
         | "rulesPackVersion"
         | "managementPasswordHash"
@@ -736,9 +737,17 @@ export class MemoryStore implements OpsGateStore {
   ) {
     const policy = this.policies.get(orgId)
     if (!policy) return undefined
+    const { mergePolicyFileScan } = await import("./types")
     const next: Policy = {
       ...policy,
       ...patch,
+      fileScan:
+        patch.fileScan !== undefined
+          ? mergePolicyFileScan({
+              ...(policy.fileScan || {}),
+              ...patch.fileScan
+            })
+          : mergePolicyFileScan(policy.fileScan),
       userMessages:
         patch.userMessages !== undefined
           ? { ...(policy.userMessages || {}), ...patch.userMessages }
@@ -1477,6 +1486,7 @@ export class MemoryStore implements OpsGateStore {
       defaultAction?: Policy["defaultAction"]
       enabledHosts?: string[]
       scanUploads?: boolean
+      fileScan?: Partial<import("./types").PolicyFileScan>
       eventReporting?: boolean
       protectUnenroll?: boolean
       enabled?: boolean
@@ -1488,6 +1498,7 @@ export class MemoryStore implements OpsGateStore {
     }
   ) {
     if (!this.orgs.has(orgId)) return undefined
+    const { mergePolicyFileScan } = await import("./types")
     const list = this.profiles.get(orgId) || []
     const now = new Date().toISOString()
     if (input.id) {
@@ -1502,6 +1513,13 @@ export class MemoryStore implements OpsGateStore {
         enabledHosts: input.enabledHosts ?? prev.enabledHosts,
         scanUploads:
           input.scanUploads !== undefined ? input.scanUploads : prev.scanUploads,
+        fileScan:
+          input.fileScan !== undefined
+            ? mergePolicyFileScan({
+                ...(prev.fileScan || {}),
+                ...input.fileScan
+              })
+            : mergePolicyFileScan(prev.fileScan),
         eventReporting:
           input.eventReporting !== undefined
             ? input.eventReporting
@@ -1547,6 +1565,7 @@ export class MemoryStore implements OpsGateStore {
         "gemini.google.com"
       ],
       scanUploads: input.scanUploads !== false,
+      fileScan: mergePolicyFileScan(input.fileScan),
       eventReporting: input.eventReporting !== false,
       protectUnenroll: !!input.protectUnenroll,
       enabled: input.enabled !== false,
@@ -1705,11 +1724,16 @@ export class MemoryStore implements OpsGateStore {
     const agent = this.agents.get(agentId)
     const profile = this.resolveProfileForAgent(orgId, agent)
 
+    const { mergePolicyFileScan } = await import("./types")
     const effective = profile
       ? {
           defaultAction: profile.defaultAction,
           enabledHosts: profile.enabledHosts,
           scanUploads: profile.scanUploads,
+          fileScan: mergePolicyFileScan({
+            ...(policy.fileScan || {}),
+            ...(profile.fileScan || {})
+          }),
           eventReporting: profile.eventReporting,
           protectUnenroll: profile.protectUnenroll,
           userMessages: {
@@ -1727,6 +1751,7 @@ export class MemoryStore implements OpsGateStore {
           defaultAction: policy.defaultAction,
           enabledHosts: policy.enabledHosts,
           scanUploads: policy.scanUploads,
+          fileScan: mergePolicyFileScan(policy.fileScan),
           eventReporting: policy.eventReporting,
           protectUnenroll: policy.protectUnenroll,
           userMessages: policy.userMessages || {},
