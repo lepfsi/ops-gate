@@ -7,7 +7,8 @@
 OpsGate est une plateforme de **Data Loss Prevention / AI security** pour l’IA générative : extension navigateur (**Chrome / Edge / Firefox / Safari build**, Manifest V3), **Secure Rewrite**, risk scores, Shadow AI, control plane multi-tenant, **proxy local** multi-IA, SSO/MFA/passkeys, audit WORM.
 
 **Statut produit** : [`docs/STATUS-V2.md`](docs/STATUS-V2.md) · **traces** : [`docs/CHANGELOG-TECHNIQUE.md`](docs/CHANGELOG-TECHNIQUE.md) · **backlog V2** : [`docs/V2-BACKLOG.md`](docs/V2-BACKLOG.md) · **V3** : [`docs/V3-BACKLOG.md`](docs/V3-BACKLOG.md) · **concepteur** : [`docs/CAHIER-CONCEPTEUR.md`](docs/CAHIER-CONCEPTEUR.md)  
-**Due diligence technique** : [FR](docs/FAQ-DUE-DILIGENCE-TECHNIQUE.md) · [EN RFP](docs/FAQ-DUE-DILIGENCE-TECHNIQUE-EN.md) · [deck 10Q](docs/FAQ-DUE-DILIGENCE-10Q.pptx)
+**Due diligence technique** : [FR](docs/FAQ-DUE-DILIGENCE-TECHNIQUE.md) · [EN RFP](docs/FAQ-DUE-DILIGENCE-TECHNIQUE-EN.md) · [deck 10Q](docs/FAQ-DUE-DILIGENCE-10Q.pptx)  
+**Backlog 90 j (tickets P0–P2)** : [`docs/BACKLOG-90J-P0-P2.md`](docs/BACKLOG-90J-P0-P2.md) · [CSV import](docs/BACKLOG-90J-import.csv)
 
 **Déploiement client** : [`DEPLOIEMENT-CLIENT.pdf`](docs/DEPLOIEMENT-CLIENT.pdf) · [EN](docs/DEPLOIEMENT-CLIENT-EN.pdf) · [md FR](docs/DEPLOIEMENT-CLIENT.md)  
 **Décideurs** : [`DECIDEURS-V2-FR.pdf`](docs/DECIDEURS-V2-FR.pdf) · [`DECIDEURS-V2-EN.pdf`](docs/DECIDEURS-V2-EN.pdf) · [md FR](docs/DECIDEURS-V2-FR.md)  
