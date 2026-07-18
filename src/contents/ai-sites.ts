@@ -39,6 +39,12 @@ import { DEFAULT_SETTINGS } from "~types"
 initRulesMemoryListener()
 void ensureRulesWarm()
 
+/**
+ * Sites où le content script est injecté (figé au build / package store).
+ * La Policy (enabledHosts) active ou non la protection parmi ces hosts.
+ * Un domaine 100 % nouveau hors liste → rebuild extension (ou entrée produit).
+ * Voir isExtensionEnabledHere().
+ */
 export const config: PlasmoCSConfig = {
   matches: [
     "https://chatgpt.com/*",
@@ -50,7 +56,11 @@ export const config: PlasmoCSConfig = {
     "https://www.bing.com/chat*",
     "https://perplexity.ai/*",
     "https://www.perplexity.ai/*",
+    "https://*.perplexity.ai/*",
     "https://chat.deepseek.com/*",
+    "https://www.deepseek.com/*",
+    "https://deepseek.com/*",
+    "https://*.deepseek.com/*",
     "https://aistudio.google.com/*",
     "https://poe.com/*",
     "https://www.poe.com/*",
@@ -238,80 +248,238 @@ async function logDecision(
   }
 }
 
+/** Normalise un host policy (accepte domaine nu ou URL). */
+function normalizePolicyHost(raw: string): string {
+  let p = (raw || "").trim().toLowerCase()
+  if (!p) return ""
+  p = p.replace(/^https?:\/\//, "")
+  p = p.split("/")[0] || ""
+  p = p.replace(/^www\./, "")
+  // drop port
+  p = p.replace(/:\d+$/, "")
+  return p
+}
+
+/** Hostname page matche un entry policy (exact ou sous-domaine). */
+function hostInPolicyList(
+  hostname: string,
+  hosts: string[] | undefined
+): boolean {
+  const h = normalizePolicyHost(hostname)
+  if (!h || !hosts?.length) return false
+  return hosts.some((raw) => {
+    const p = normalizePolicyHost(raw)
+    if (!p) return false
+    return h === p || h.endsWith("." + p)
+  })
+}
+
+/**
+ * Protection active ici ?
+ * Source de vérité = Policy enabledHosts (sync org), pas la liste hardcodée.
+ */
 function isExtensionEnabledHere(): boolean {
   if (!settings.enabled) return false
   // Unlicensed après grace : protection désactivée
   if (settings.licenseStatus === "unlicensed") return false
   if (settings.securityActive === false) return false
-  const host = location.hostname
-  return settings.enabledHosts.some((h) => host === h || host.endsWith("." + h))
+  return hostInPolicyList(location.hostname, settings.enabledHosts)
 }
 
 /** Flag pour ignorer le prochain change sur un input file (après décision) */
 let bypassFileOnce = false
 let filePending = false
 
+/** Élément visible (évite les ghost nodes SPA). */
+function isVisibleEl(el: HTMLElement): boolean {
+  if (el.offsetParent === null && el.getClientRects().length === 0) return false
+  const st = window.getComputedStyle(el)
+  if (st.display === "none" || st.visibility === "hidden" || st.opacity === "0")
+    return false
+  return true
+}
+
+function readEditableText(el: HTMLElement): string {
+  if (el instanceof HTMLTextAreaElement || el instanceof HTMLInputElement) {
+    return (el.value || "").trim()
+  }
+  return (el.innerText || el.textContent || "").trim()
+}
+
+/**
+ * Composeurs multi-IA (ChatGPT, Claude, Gemini, DeepSeek, Perplexity, …).
+ * Priorise les champs en bas de viewport (zone de saisie typique).
+ */
+function findComposerElements(): HTMLElement[] {
+  const sels = [
+    "#prompt-textarea",
+    '[data-testid="prompt-textarea"]',
+    "rich-textarea div[contenteditable='true']",
+    "rich-textarea",
+    'div[contenteditable="true"].ProseMirror',
+    'div[contenteditable="true"]',
+    '[role="textbox"]',
+    "textarea",
+    'div[class*="input" i][contenteditable="true"]',
+    'div[class*="editor" i][contenteditable="true"]',
+    'div[class*="composer" i] [contenteditable="true"]',
+    'div[class*="prompt" i] [contenteditable="true"]'
+  ]
+  const seen = new Set<HTMLElement>()
+  const out: HTMLElement[] = []
+  for (const s of sels) {
+    try {
+      document.querySelectorAll<HTMLElement>(s).forEach((el) => {
+        if (seen.has(el) || !isVisibleEl(el)) return
+        // Skip OpsGate UI
+        if (el.closest("#opsgate-alert-banner, #opsgate-admin-reply")) return
+        seen.add(el)
+        out.push(el)
+      })
+    } catch {
+      /* selector invalide */
+    }
+  }
+  // Bas de page d’abord (composer chat)
+  out.sort(
+    (a, b) => b.getBoundingClientRect().top - a.getBoundingClientRect().top
+  )
+  return out
+}
+
 function getPromptText(fromEl?: Element | null): string {
   const host = location.hostname
 
+  // ── Host-specific (prioritaire) ──
+  const hostCandidates: HTMLElement[] = []
   if (host.includes("chatgpt.com") || host.includes("chat.openai.com")) {
-    const candidates = [
-      document.querySelector<HTMLElement>("#prompt-textarea"),
-      document.querySelector<HTMLElement>('[data-testid="prompt-textarea"]'),
-      document.querySelector<HTMLElement>('#prompt-textarea [contenteditable="true"]'),
-      document.querySelector<HTMLElement>('div[contenteditable="true"].ProseMirror'),
-      document.querySelector<HTMLElement>('form [contenteditable="true"]'),
-      document.querySelector<HTMLElement>('div[contenteditable="true"][data-placeholder]'),
-      document.querySelector<HTMLElement>('div[contenteditable="true"][id*="prompt" i]')
-    ].filter(Boolean) as HTMLElement[]
-    for (const ta of candidates) {
-      const t = (ta.innerText || ta.textContent || "").trim()
-      if (t.length >= 3) return t
-    }
+    hostCandidates.push(
+      ...([
+        document.querySelector<HTMLElement>("#prompt-textarea"),
+        document.querySelector<HTMLElement>('[data-testid="prompt-textarea"]'),
+        document.querySelector<HTMLElement>(
+          '#prompt-textarea [contenteditable="true"]'
+        ),
+        document.querySelector<HTMLElement>(
+          'div[contenteditable="true"].ProseMirror'
+        ),
+        document.querySelector<HTMLElement>('form [contenteditable="true"]')
+      ].filter(Boolean) as HTMLElement[])
+    )
+  } else if (host.includes("claude.ai")) {
+    hostCandidates.push(
+      ...([
+        document.querySelector<HTMLElement>(
+          'div[contenteditable="true"].ProseMirror'
+        ),
+        document.querySelector<HTMLElement>(
+          'fieldset div[contenteditable="true"]'
+        )
+      ].filter(Boolean) as HTMLElement[])
+    )
+  } else if (host.includes("gemini.google.com") || host.includes("bard.google")) {
+    hostCandidates.push(
+      ...([
+        document.querySelector<HTMLElement>(
+          "rich-textarea div[contenteditable='true']"
+        ),
+        document.querySelector<HTMLElement>(
+          'div[contenteditable="true"][aria-label]'
+        )
+      ].filter(Boolean) as HTMLElement[])
+    )
+  } else if (host.includes("deepseek")) {
+    // DeepSeek : souvent <textarea> ou contenteditable bas de page
+    hostCandidates.push(
+      ...([
+        document.querySelector<HTMLElement>(
+          'textarea[class*="chat" i], textarea[placeholder], textarea'
+        ),
+        document.querySelector<HTMLElement>(
+          'div[contenteditable="true"][class*="input" i]'
+        ),
+        document.querySelector<HTMLElement>('div[contenteditable="true"]')
+      ].filter(Boolean) as HTMLElement[])
+    )
+  } else if (host.includes("perplexity")) {
+    hostCandidates.push(
+      ...([
+        document.querySelector<HTMLElement>(
+          'div[contenteditable="true"][role="textbox"]'
+        ),
+        document.querySelector<HTMLElement>(
+          'div[contenteditable="true"][data-lexical-editor]'
+        ),
+        document.querySelector<HTMLElement>('div[contenteditable="true"]'),
+        document.querySelector<HTMLElement>("textarea")
+      ].filter(Boolean) as HTMLElement[])
+    )
+  } else if (host.includes("mistral") || host.includes("lechat")) {
+    hostCandidates.push(
+      ...([
+        document.querySelector<HTMLElement>(
+          'div[contenteditable="true"].ProseMirror'
+        ),
+        document.querySelector<HTMLElement>("textarea"),
+        document.querySelector<HTMLElement>('div[contenteditable="true"]')
+      ].filter(Boolean) as HTMLElement[])
+    )
+  } else if (
+    host.includes("copilot.microsoft") ||
+    host.includes("bing.com")
+  ) {
+    hostCandidates.push(
+      ...([
+        document.querySelector<HTMLElement>(
+          '#searchbox, textarea[aria-label], textarea'
+        ),
+        document.querySelector<HTMLElement>('div[contenteditable="true"]')
+      ].filter(Boolean) as HTMLElement[])
+    )
+  } else if (host.includes("grok")) {
+    hostCandidates.push(
+      ...([
+        document.querySelector<HTMLElement>("textarea"),
+        document.querySelector<HTMLElement>('div[contenteditable="true"]')
+      ].filter(Boolean) as HTMLElement[])
+    )
   }
 
-  if (host.includes("claude.ai")) {
-    const ta =
-      document.querySelector<HTMLElement>('div[contenteditable="true"].ProseMirror') ||
-      document.querySelector<HTMLElement>('fieldset div[contenteditable="true"]') ||
-      document.querySelector<HTMLElement>('div[contenteditable="true"]')
-    if (ta) return (ta.innerText || ta.textContent || "").trim()
-  }
-
-  if (host.includes("gemini.google.com")) {
-    const ta =
-      document.querySelector<HTMLElement>("rich-textarea div[contenteditable='true']") ||
-      document.querySelector<HTMLElement>('div[contenteditable="true"][aria-label]') ||
-      document.querySelector<HTMLElement>('div[contenteditable="true"]')
-    if (ta) return (ta.innerText || ta.textContent || "").trim()
+  for (const ta of hostCandidates) {
+    if (!isVisibleEl(ta)) continue
+    const t = readEditableText(ta)
+    if (t.length >= 3) return t
   }
 
   if (fromEl) {
     const editable = fromEl.closest(
-      '[contenteditable="true"], textarea'
+      '[contenteditable="true"], textarea, [role="textbox"], input[type="text"]'
     ) as HTMLElement | null
     if (editable) {
-      if (editable instanceof HTMLTextAreaElement) return editable.value.trim()
-      return (editable.innerText || editable.textContent || "").trim()
+      const t = readEditableText(editable)
+      if (t.length >= 3) return t
     }
   }
 
   const active = document.activeElement as HTMLElement | null
   if (active) {
-    if (active instanceof HTMLTextAreaElement) return active.value.trim()
-    if (active.isContentEditable) return (active.innerText || "").trim()
+    if (
+      active instanceof HTMLTextAreaElement ||
+      active instanceof HTMLInputElement
+    ) {
+      const t = (active.value || "").trim()
+      if (t.length >= 3) return t
+    }
+    if (active.isContentEditable || active.getAttribute("role") === "textbox") {
+      const t = (active.innerText || active.textContent || "").trim()
+      if (t.length >= 3) return t
+    }
   }
 
-  // Dernier recours : tout contenteditable visible en bas de page
-  const all = Array.from(
-    document.querySelectorAll<HTMLElement>('[contenteditable="true"], textarea')
-  )
-  for (const el of all.reverse()) {
-    const t =
-      el instanceof HTMLTextAreaElement
-        ? el.value.trim()
-        : (el.innerText || "").trim()
-    if (t.length >= 5) return t
+  // Multi-IA : bas de page (composer)
+  for (const el of findComposerElements()) {
+    const t = readEditableText(el)
+    if (t.length >= 3) return t
   }
 
   return ""
@@ -325,33 +493,62 @@ function setPromptText(text: string): boolean {
     const el =
       document.querySelector<HTMLElement>("#prompt-textarea") ||
       document.querySelector<HTMLElement>('[data-testid="prompt-textarea"]') ||
-      document.querySelector<HTMLElement>('div[contenteditable="true"].ProseMirror')
+      document.querySelector<HTMLElement>(
+        'div[contenteditable="true"].ProseMirror'
+      )
     if (el) candidates.push(el)
   } else if (host.includes("claude.ai")) {
     const el =
-      document.querySelector<HTMLElement>('div[contenteditable="true"].ProseMirror') ||
-      document.querySelector<HTMLElement>('div[contenteditable="true"]')
+      document.querySelector<HTMLElement>(
+        'div[contenteditable="true"].ProseMirror'
+      ) || document.querySelector<HTMLElement>('div[contenteditable="true"]')
     if (el) candidates.push(el)
-  } else if (host.includes("gemini.google.com")) {
+  } else if (host.includes("gemini.google.com") || host.includes("bard.google")) {
     const el =
-      document.querySelector<HTMLElement>("rich-textarea div[contenteditable='true']") ||
+      document.querySelector<HTMLElement>(
+        "rich-textarea div[contenteditable='true']"
+      ) || document.querySelector<HTMLElement>('div[contenteditable="true"]')
+    if (el) candidates.push(el)
+  } else if (host.includes("deepseek") || host.includes("perplexity")) {
+    const el =
+      document.querySelector<HTMLElement>("textarea") ||
+      document.querySelector<HTMLElement>(
+        'div[contenteditable="true"][role="textbox"]'
+      ) ||
       document.querySelector<HTMLElement>('div[contenteditable="true"]')
     if (el) candidates.push(el)
   }
 
   const active = document.activeElement as HTMLElement | null
-  if (active && (active.isContentEditable || active instanceof HTMLTextAreaElement)) {
+  if (
+    active &&
+    (active.isContentEditable ||
+      active instanceof HTMLTextAreaElement ||
+      active.getAttribute("role") === "textbox")
+  ) {
     candidates.unshift(active)
+  }
+
+  // Fallback multi-IA
+  for (const el of findComposerElements()) {
+    if (!candidates.includes(el)) candidates.push(el)
   }
 
   const target = candidates[0]
   if (!target) return false
 
-  if (target instanceof HTMLTextAreaElement) {
-    const proto = HTMLTextAreaElement.prototype
+  if (
+    target instanceof HTMLTextAreaElement ||
+    target instanceof HTMLInputElement
+  ) {
+    const proto =
+      target instanceof HTMLTextAreaElement
+        ? HTMLTextAreaElement.prototype
+        : HTMLInputElement.prototype
     const desc = Object.getOwnPropertyDescriptor(proto, "value")
     desc?.set?.call(target, text)
     target.dispatchEvent(new Event("input", { bubbles: true }))
+    target.dispatchEvent(new Event("change", { bubbles: true }))
     return true
   }
 
@@ -366,7 +563,11 @@ function setPromptText(text: string): boolean {
     if (!ok) {
       target.innerText = text
       target.dispatchEvent(
-        new InputEvent("input", { bubbles: true, inputType: "insertText", data: text })
+        new InputEvent("input", {
+          bubbles: true,
+          inputType: "insertText",
+          data: text
+        })
       )
     }
   } catch {
@@ -387,7 +588,7 @@ function isSendButton(el: Element | null): boolean {
     return false
   }
   const btn = el.closest(
-    "button, [role='button'], div[role='button'], a[role='button']"
+    "button, [role='button'], div[role='button'], a[role='button'], input[type='submit']"
   ) as HTMLElement | null
   if (!btn) return false
   if ((btn as HTMLButtonElement).disabled) return false
@@ -396,31 +597,39 @@ function isSendButton(el: Element | null): boolean {
   const testId = (btn.getAttribute("data-testid") || "").toLowerCase()
   const title = (btn.getAttribute("title") || "").toLowerCase()
   const dataAction = (btn.getAttribute("data-action") || "").toLowerCase()
-  const text = (btn.innerText || btn.textContent || "").trim().toLowerCase()
-  const combined = `${aria} ${testId} ${title} ${dataAction} ${text}`
+  // innerText brut pour CJK (pas lowercased de façon fiable)
+  const textRaw = (btn.innerText || btn.textContent || "").trim()
+  const text = textRaw.toLowerCase()
+  const combined = `${aria} ${testId} ${title} ${dataAction} ${text} ${textRaw}`
 
-  // Exclusions explicites
+  // Exclusions explicites (sauf si « send » est aussi présent)
   if (
-    /attach|upload|micro|voice|photo|speech|stop|dictat|file|image|plus|menu|settings|model|search|sidebar/i.test(
+    /attach|upload|micro|voice|photo|speech|stop|dictat|file|image|plus|menu|settings|model|sidebar|search|regenerate|copy|share|like|dislike|thumb|new chat|nouveau/i.test(
       combined
     ) &&
-    !/send|envoyer|submit/i.test(combined)
+    !/send|envoyer|submit|发送|提交|送出/i.test(combined)
   ) {
     return false
   }
 
+  // Patterns multi-langue (EN / FR / ZH — DeepSeek)
   if (
     testId.includes("send") ||
     aria.includes("send") ||
     title.includes("send") ||
     dataAction.includes("send") ||
-    /send[-_ ]?(prompt|message)?/i.test(combined)
+    /send[-_ ]?(prompt|message|query)?/i.test(combined) ||
+    /envoyer|soumettre/i.test(combined) ||
+    /发送|提交|送出/.test(textRaw) ||
+    aria.includes("envoyer") ||
+    title.includes("envoyer") ||
+    aria.includes("send message") ||
+    aria.includes("envoyer le message") ||
+    aria.includes("submit") ||
+    title.includes("submit")
   ) {
     return true
   }
-  if (aria.includes("envoyer") || title.includes("envoyer")) return true
-  if (aria.includes("send message") || aria.includes("envoyer le message"))
-    return true
   if (testId === "send-button" || testId === "composer-send-button") return true
 
   // Bouton submit dans un form de composer
@@ -431,9 +640,8 @@ function isSendButton(el: Element | null): boolean {
     return true
   }
 
-  // Icône seule près du composer (ChatGPT / Claude) - UI change souvent
-  if (btn.querySelector("svg") && isNearComposer(btn) && text.length <= 4) {
-    // Dernier bouton du form / composer = souvent Send
+  // Icône seule près du composer (ChatGPT / Claude / DeepSeek / Perplexity)
+  if (btn.querySelector("svg") && isNearComposer(btn) && textRaw.length <= 6) {
     const form = btn.closest("form")
     if (form) {
       const buttons = Array.from(
@@ -441,44 +649,82 @@ function isSendButton(el: Element | null): boolean {
       ).filter((b) => !(b as HTMLButtonElement).disabled)
       if (buttons[buttons.length - 1] === btn) return true
     }
-    // Adjacent au prompt-textarea
-    const prompt =
-      document.querySelector("#prompt-textarea") ||
-      document.querySelector('[data-testid="prompt-textarea"]')
-    if (prompt && prompt.parentElement?.contains(btn)) return true
-    if (aria.includes("send") || testId.includes("send")) return true
+    // Conteneur du composer le plus bas
+    const composers = findComposerElements()
+    for (const prompt of composers.slice(0, 3)) {
+      const box =
+        prompt.closest("form") ||
+        prompt.parentElement?.parentElement ||
+        prompt.parentElement
+      if (box?.contains(btn)) return true
+      // Bouton à droite / sous le champ (proximité)
+      const br = btn.getBoundingClientRect()
+      const cr = prompt.getBoundingClientRect()
+      if (
+        Math.abs(br.bottom - cr.bottom) < 100 &&
+        br.left >= cr.left - 40 &&
+        br.top >= cr.top - 80
+      ) {
+        return true
+      }
+    }
   }
 
   return false
 }
 
 function isNearComposer(el: Element): boolean {
+  if (
+    el.closest(
+      'form, [class*="composer" i], [class*="prompt" i], [class*="input" i], [class*="editor" i], [class*="chat-input" i], [class*="query" i], [class*="ask" i], [class*="searchbox" i], [class*="bottom" i]'
+    )
+  ) {
+    return true
+  }
   const prompt =
     document.querySelector("#prompt-textarea") ||
     document.querySelector('[data-testid="prompt-textarea"]')
-  return !!(
-    el.closest("form") ||
-    el.closest('[class*="composer" i]') ||
-    el.closest('[class*="prompt" i]') ||
-    el.closest('[class*="input" i]') ||
-    el.closest("#prompt-textarea")?.parentElement?.contains(el) ||
-    (prompt &&
-      (prompt.contains(el) ||
-        prompt.parentElement?.contains(el) ||
-        prompt.closest("form")?.contains(el)))
-  )
+  if (
+    prompt &&
+    (prompt.contains(el) ||
+      prompt.parentElement?.contains(el) ||
+      prompt.closest("form")?.contains(el))
+  ) {
+    return true
+  }
+  for (const c of findComposerElements().slice(0, 6)) {
+    if (c.contains(el) || c.parentElement?.contains(el)) return true
+    const box =
+      c.closest("form") || c.parentElement?.parentElement || c.parentElement
+    if (box?.contains(el)) return true
+    const br = (el as HTMLElement).getBoundingClientRect?.()
+    const cr = c.getBoundingClientRect()
+    if (
+      br &&
+      Math.abs(br.bottom - cr.bottom) < 140 &&
+      Math.abs(br.left - cr.right) < 280
+    ) {
+      return true
+    }
+  }
+  return false
 }
 
 function isInComposer(el: Element | null): boolean {
   if (!el) return false
-  return !!(
+  if (
     el.closest("#prompt-textarea") ||
     el.closest('[data-testid="prompt-textarea"]') ||
     el.closest('[contenteditable="true"]') ||
+    el.closest('[role="textbox"]') ||
     el.closest("textarea") ||
     el.closest("form") ||
     el.closest("rich-textarea")
-  )
+  ) {
+    return true
+  }
+  // DeepSeek / Perplexity : input bas de page
+  return isNearComposer(el)
 }
 
 /**
@@ -499,11 +745,11 @@ function handlePotentialSend(event: Event, sourceEl?: Element | null): void {
 
   if (!settings.enabled) return
 
+  if (!isExtensionEnabledHere()) {
+    // Pas de log bruyant : script injecté partout, policy décide
+    return
+  }
   const host = location.hostname
-  const allowed = settings.enabledHosts.some(
-    (h) => host === h || host.endsWith("." + h)
-  )
-  if (!allowed) return
 
   const text = getPromptText(sourceEl)
   if (!text || text.length < 5) {
@@ -512,6 +758,12 @@ function handlePotentialSend(event: Event, sourceEl?: Element | null): void {
         "[OpsGate] Intercept: texte trop court pour scan (",
         text.length,
         "car.)"
+      )
+    } else {
+      console.log(
+        "[OpsGate] Intercept: prompt vide sur",
+        host,
+        "— composer non lu (UI SPA ?)"
       )
     }
     return
@@ -1091,13 +1343,16 @@ function retriggerSend(sourceEl?: Element | null) {
     'button[data-testid="composer-send-button"]:not([disabled])',
     'button[aria-label*="Send" i]:not([disabled])',
     'button[aria-label*="Envoyer" i]:not([disabled])',
-    'button[aria-label*="send message" i]:not([disabled])'
+    'button[aria-label*="send message" i]:not([disabled])',
+    'button[aria-label*="Submit" i]:not([disabled])',
+    'button[title*="Send" i]:not([disabled])',
+    'button[type="submit"]:not([disabled])'
   ]
 
   for (const sel of selectors) {
     try {
       const btn = document.querySelector<HTMLElement>(sel)
-      if (btn && !(btn as HTMLButtonElement).disabled) {
+      if (btn && !(btn as HTMLButtonElement).disabled && isNearComposer(btn)) {
         btn.click()
         return
       }
@@ -1106,9 +1361,30 @@ function retriggerSend(sourceEl?: Element | null) {
     }
   }
 
+  // Dernier bouton SVG près du composer (DeepSeek / Perplexity / multi-IA)
+  const composers = findComposerElements()
+  for (const c of composers.slice(0, 2)) {
+    const box =
+      c.closest("form") ||
+      c.parentElement?.parentElement ||
+      c.parentElement
+    if (!box) continue
+    const buttons = Array.from(
+      box.querySelectorAll<HTMLElement>("button, [role='button']")
+    ).filter((b) => !(b as HTMLButtonElement).disabled)
+    const last = buttons[buttons.length - 1]
+    if (last) {
+      last.click()
+      return
+    }
+  }
+
   const editable =
-    (sourceEl as HTMLElement)?.closest?.('[contenteditable="true"], textarea') ||
+    (sourceEl as HTMLElement)?.closest?.(
+      '[contenteditable="true"], textarea, [role="textbox"]'
+    ) ||
     document.querySelector("#prompt-textarea") ||
+    findComposerElements()[0] ||
     document.querySelector('[contenteditable="true"]')
 
   if (editable) {
@@ -1164,6 +1440,7 @@ function showActiveBadge() {
 document.addEventListener(
   "click",
   (e) => {
+    if (!isExtensionEnabledHere()) return
     const target = e.target as Element
     if (isSendButton(target)) {
       handlePotentialSend(e, target)
@@ -1176,6 +1453,7 @@ document.addEventListener(
 document.addEventListener(
   "pointerdown",
   (e) => {
+    if (!isExtensionEnabledHere()) return
     const target = e.target as Element
     if (isSendButton(target)) {
       // Pré-scan : si sensible, bloquer aussi le pointerdown
@@ -1193,6 +1471,7 @@ document.addEventListener(
 document.addEventListener(
   "keydown",
   (e) => {
+    if (!isExtensionEnabledHere()) return
     if (e.key !== "Enter" || e.shiftKey || e.isComposing) return
     const target = e.target as Element
     if (!isInComposer(target)) return
@@ -1204,6 +1483,7 @@ document.addEventListener(
 document.addEventListener(
   "submit",
   (e) => {
+    if (!isExtensionEnabledHere()) return
     handlePotentialSend(e, e.target as Element)
   },
   true
@@ -1236,4 +1516,17 @@ window.addEventListener("pagehide", () => {
 })
 
 showActiveBadge()
-console.log("[OpsGate] Content script actif sur", location.hostname)
+void refreshSettings().then(() => {
+  const ok = isExtensionEnabledHere()
+  console.log(
+    "[OpsGate] Content script actif sur",
+    location.hostname,
+    ok ? "· protection ON" : "· protection OFF (host hors policy / disabled)",
+    "hosts=",
+    (settings.enabledHosts || []).slice(0, 12).join(",") +
+      ((settings.enabledHosts || []).length > 12 ? "…" : "")
+  )
+  if (!ok) {
+    document.getElementById("opsgate-active-badge")?.remove()
+  }
+})

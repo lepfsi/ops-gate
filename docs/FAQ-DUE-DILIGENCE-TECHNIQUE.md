@@ -277,8 +277,11 @@ Doc recovery concepteur séparée (interne).
 ### I1. « HA multi-région ? »
 
 **Hors scope** actuel (documenté). Déploiement client mono-région typique : Postgres + API + console derrière reverse-proxy TLS.  
-Backup config + script DB.  
+Backup config + script DB + **backup auto 7/14/30 j**.  
 Pas de claim « 99.99 multi-AZ global » — honnêteté = crédibilité.
+
+**HA mono-région implémentable** : API multi-instances (stateless + Postgres) derrière LB ; DB managed/replica ; crons sur un worker.  
+Détail : [`architecture/DEPLOY-PROD-HA.md`](./architecture/DEPLOY-PROD-HA.md).
 
 ### I2. « Que se passe-t-il si l’API est down ? »
 

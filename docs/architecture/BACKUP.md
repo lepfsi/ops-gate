@@ -41,9 +41,67 @@ psql $env:DATABASE_URL -f backups\backup-opsgate-….sql
 
 ### Planification (recommandé)
 
-- **Quotidien** `pg_dump` + copie offsite (NAS / S3 / Azure Blob)
+- **Quotidien** `pg_dump` + copie offsite (NAS / S3 / Azure Blob) en prod critique
 - **Hebdo** test de restore sur environnement staging
 - Conserver ≥ 7 j quotidiens + 4 hebdo + 3 mensuels
+
+## C. Backup automatique système
+
+Dump périodique de la base + export de la configuration org.
+
+### Console
+
+1. Paramètres → **Général** → section **Backup automatique (système)**  
+2. Activer · choisir **7 / 14 / 30 jours** · nombre de copies · **dossier de stockage**  
+3. **Enregistrer** · optionnellement **Lancer un backup maintenant** (principal)
+
+### Dossier de stockage
+
+Dans la console : bouton **Parcourir…** → lecteurs / dossiers de la **machine serveur API** (ex. disque D:) ; ou saisie d’un chemin **distant UNC**.  
+**Vérifier l’accès** (probe écriture) est obligatoire avant enregistrement.
+
+Priorité de résolution :
+
+1. **Chemin choisi / vérifié** (`monitoring.autoBackup.directory`)  
+   - Local : navigateur de dossiers serveur  
+   - Distant : UNC `\\nas\share\opsgate`  
+2. Variable d’env `OPSGATE_AUTO_BACKUP_DIR`  
+3. Défaut `./backups/auto` (cwd du process API)
+
+API navigation (principal) :
+
+- `GET /v1/org/backup/fs/roots` — lecteurs  
+- `GET /v1/org/backup/fs/list?path=` — sous-dossiers  
+- `POST /v1/org/backup/fs/verify` — joignable + inscriptible (`create_if_missing`)
+
+### Fichiers générés
+
+```
+<dossier configuré>/
+  backup-opsgate-YYYYMMDD-HHMMSS.sql
+  backup-opsgate-YYYYMMDD-HHMMSS.sql.sha256
+  backup-opsgate-YYYYMMDD-HHMMSS-org-CODE.json
+```
+
+### Variables d’environnement
+
+| Variable | Défaut | Rôle |
+|----------|--------|------|
+| `OPSGATE_AUTO_BACKUP_DIR` | `./backups/auto` | Fallback si l’admin n’a pas saisi de dossier |
+| `OPSGATE_AUTO_BACKUP_CRON_MINUTES` | `60` | Fréquence de vérification du due (0 = off) |
+| `DATABASE_URL` | — | Requis pour le `pg_dump` |
+
+Sans `DATABASE_URL` (store mémoire), seul l’export config JSON est écrit.
+
+### API
+
+- `GET /v1/org/backup/auto` — statut + dernier run  
+- `POST /v1/org/backup/auto/run` — run forcé (principal)  
+- Config persistée dans `monitoring.autoBackup`
+
+### Complément ops
+
+En production critique, un cron OS quotidien (`backup-db.ps1`) + copie offsite reste recommandé **en complément** du planificateur 7/14/30 j.
 
 ## Export auto logs par e-mail
 

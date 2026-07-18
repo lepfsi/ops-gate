@@ -326,6 +326,17 @@ export type MonitoringSettings = {
     formats: Array<"csv" | "json">
     attachFiles: boolean
   }
+  /** Backup auto système (7/14/30 j) — dump PG + config org */
+  autoBackup?: {
+    enabled: boolean
+    intervalDays: 7 | 14 | 30
+    keepCount: number
+    /** Chemin absolu serveur (autre disque, NAS…) */
+    directory?: string
+    lastRunAt?: string | null
+    lastRunOk?: boolean | null
+    lastRunDetail?: string | null
+  }
   lastWeeklyExportAt?: string | null
   logCategories?: LogCategories
   notifications?: NotificationSettings
@@ -1586,6 +1597,74 @@ export const api = {
     request<{ ok: boolean; applied: string[] }>("/v1/org/backup/import", {
       method: "POST",
       body: JSON.stringify({ backup })
+    }),
+
+  orgBackupAutoStatus: () =>
+    request<{
+      ok: boolean
+      auto_backup: {
+        enabled: boolean
+        intervalDays: 7 | 14 | 30
+        keepCount: number
+        directory?: string
+        lastRunAt?: string | null
+        lastRunOk?: boolean | null
+        lastRunDetail?: string | null
+      }
+      due_now: boolean
+      backup_dir: string
+      cron_env: string
+      database_url_set: boolean
+    }>("/v1/org/backup/auto"),
+
+  orgBackupAutoRun: () =>
+    request<{
+      ok: boolean
+      ran: boolean
+      detail: string
+      files: string[]
+    }>("/v1/org/backup/auto/run", { method: "POST", body: "{}" }),
+
+  /** Navigation FS serveur (backup) — principal */
+  backupFsRoots: () =>
+    request<{
+      ok: boolean
+      platform: string
+      roots: Array<{
+        path: string
+        label: string
+        kind: string
+        reachable: boolean
+      }>
+    }>("/v1/org/backup/fs/roots"),
+
+  backupFsList: (dirPath: string) =>
+    request<{
+      ok: boolean
+      path: string
+      parent: string | null
+      entries: Array<{ name: string; path: string }>
+      error?: string
+    }>(
+      `/v1/org/backup/fs/list?path=${encodeURIComponent(dirPath)}`
+    ),
+
+  backupFsVerify: (dirPath: string, createIfMissing = false) =>
+    request<{
+      ok: boolean
+      path: string
+      resolved?: string
+      exists: boolean
+      is_directory: boolean
+      readable: boolean
+      writable: boolean
+      error?: string
+    }>("/v1/org/backup/fs/verify", {
+      method: "POST",
+      body: JSON.stringify({
+        path: dirPath,
+        create_if_missing: createIfMissing
+      })
     }),
 
   webauthnStatus: () =>

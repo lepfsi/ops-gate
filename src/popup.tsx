@@ -179,32 +179,66 @@ function IndexPopup() {
             </div>
           </div>
         </div>
-        <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
-          <button
-            onClick={toggleEnabled}
-            disabled={enrolled || hardLock}
-            title={
-              hardLock
-                ? "Géré par l’organisation"
-                : enrolled
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "flex-end",
+            gap: 4
+          }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <button
+              onClick={toggleEnabled}
+              disabled={enrolled || hardLock}
+              title={
+                hardLock
                   ? "Géré par l’organisation"
-                  : settings.enabled
-                    ? "Désactiver"
-                    : "Activer"
-            }
-            style={{
-              border: "none",
-              borderRadius: 999,
-              padding: "6px 12px",
-              fontSize: 12,
-              fontWeight: 700,
-              cursor: enrolled || hardLock ? "not-allowed" : "pointer",
-              opacity: enrolled || hardLock ? 0.75 : 1,
-              background: settings.enabled ? "#dcfce7" : "#f1f5f9",
-              color: settings.enabled ? "#166534" : "#64748b"
-            }}>
-            {settings.enabled ? "Actif" : "Inactif"}
-          </button>
+                  : enrolled
+                    ? "Géré par l’organisation"
+                    : settings.enabled
+                      ? "Désactiver"
+                      : "Activer"
+              }
+              style={{
+                border: "none",
+                borderRadius: 999,
+                padding: "6px 12px",
+                fontSize: 12,
+                fontWeight: 700,
+                cursor: enrolled || hardLock ? "not-allowed" : "pointer",
+                opacity: enrolled || hardLock ? 0.75 : 1,
+                background: settings.enabled ? "#dcfce7" : "#f1f5f9",
+                color: settings.enabled ? "#166534" : "#64748b"
+              }}>
+              {settings.enabled ? "Actif" : "Inactif"}
+            </button>
+            <button
+              type="button"
+              title="Fermer"
+              aria-label="Fermer"
+              onClick={() => {
+                try {
+                  window.close()
+                } catch {
+                  /* ignore */
+                }
+              }}
+              style={{
+                border: "1px solid #e2e8f0",
+                borderRadius: 8,
+                width: 28,
+                height: 28,
+                padding: 0,
+                fontSize: 16,
+                lineHeight: "26px",
+                fontWeight: 600,
+                cursor: "pointer",
+                background: "#f8fafc",
+                color: "#64748b"
+              }}>
+              ×
+            </button>
+          </div>
           {hardLock && (
             <span style={{ fontSize: 10, fontWeight: 700, color: "#0f766e" }}>
               Géré

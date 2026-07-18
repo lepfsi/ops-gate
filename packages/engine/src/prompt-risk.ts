@@ -101,47 +101,63 @@ function levelFromScore(score: number): RiskLevel {
   return "low"
 }
 
+export type RiskUiLang = "fr" | "en"
+
 function recommendationFor(
   score: number,
-  level: RiskLevel
+  level: RiskLevel,
+  lang: RiskUiLang = "fr"
 ): { rec: RiskRecommendation; label: string } {
+  const en = lang === "en"
   if (level === "critical" || score >= 80) {
     return {
       rec: "secure_rewrite",
-      label: "Anonymiser avant envoi (Secure Rewrite fortement recommandé)"
+      label: en
+        ? "Anonymize before sending (Secure Rewrite strongly recommended)"
+        : "Anonymiser avant envoi (Secure Rewrite fortement recommandé)"
     }
   }
   if (level === "high" || score >= 55) {
     return {
       rec: "secure_rewrite",
-      label: "Anonymiser avant envoi (Secure Rewrite recommandé)"
+      label: en
+        ? "Anonymize before sending (Secure Rewrite recommended)"
+        : "Anonymiser avant envoi (Secure Rewrite recommandé)"
     }
   }
   if (level === "medium" || score >= 30) {
     return {
       rec: "mask",
-      label: "Masquer ou Secure Rewrite avant envoi"
+      label: en
+        ? "Mask or Secure Rewrite before sending"
+        : "Masquer ou Secure Rewrite avant envoi"
     }
   }
   return {
     rec: "allow",
-    label: "Risque faible — vérification manuelle suffisante"
+    label: en
+      ? "Low risk — manual review is enough"
+      : "Risque faible — vérification manuelle suffisante"
   }
 }
 
 /**
  * Score de risque 0–100 pour un prompt (explicable, transparent).
+ * @param opts.lang  Libellés recommendation FR/EN (défaut fr)
  */
 export function calculatePromptRiskScore(
-  detections: Detection[]
+  detections: Detection[],
+  opts?: { lang?: RiskUiLang }
 ): PromptRiskScore {
+  const lang: RiskUiLang = opts?.lang === "en" ? "en" : "fr"
   if (!detections.length) {
     return {
       score: 0,
       level: "low",
       factors: [],
       recommendation: "allow",
-      recommendationLabel: "Aucune détection",
+      recommendationLabel:
+        lang === "en" ? "No detections" : "Aucune détection",
       calculatedAt: new Date().toISOString()
     }
   }
@@ -181,7 +197,7 @@ export function calculatePromptRiskScore(
 
   score = Math.min(100, Math.max(0, score))
   const level = levelFromScore(score)
-  const { rec, label } = recommendationFor(score, level)
+  const { rec, label } = recommendationFor(score, level, lang)
 
   const factors: PromptRiskFactor[] = [...buckets.entries()]
     .map(([category, v]) => ({
@@ -212,8 +228,11 @@ function truncateExample(s: string, max = 42): string {
 /**
  * Simulation Mode : ce qui pourrait fuiter + impact + action suggérée.
  */
-export function buildSimulation(detections: Detection[]): SimulationResult {
-  const riskScore = calculatePromptRiskScore(detections)
+export function buildSimulation(
+  detections: Detection[],
+  opts?: { lang?: RiskUiLang }
+): SimulationResult {
+  const riskScore = calculatePromptRiskScore(detections, opts)
   const items: SimulationItem[] = []
 
   // Grouper par type pour la liste pédagogique

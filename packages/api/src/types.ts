@@ -213,6 +213,12 @@ export interface OrgMonitoringSettings {
    * e-mails destinataires, jour, heure, fuseau, formats.
    */
   scheduledLogExport?: ScheduledLogExportSettings
+  /**
+   * Backup automatique système :
+   * dump Postgres + export config org, intervalle 7 / 14 / 30 jours.
+   * Dossier : autoBackup.directory (admin) → OPSGATE_AUTO_BACKUP_DIR → ./backups/auto.
+   */
+  autoBackup?: AutoSystemBackupSettings
   /** Dernière archive hebdo générée (ISO + weekKey) */
   lastWeeklyExportAt?: string | null
   /** Quels types de logs garder (désactiver = plus d'écriture) */
@@ -444,6 +450,36 @@ export const DEFAULT_SCHEDULED_LOG_EXPORT: ScheduledLogExportSettings = {
   attachFiles: true
 }
 
+/**
+ * Backup auto système (dump DB + config org).
+ * intervalDays : 7 | 14 | 30 (pas quotidien par défaut — charge + rétention).
+ */
+export interface AutoSystemBackupSettings {
+  enabled: boolean
+  intervalDays: 7 | 14 | 30
+  /** Nombre de jeux de backup à conserver sur disque */
+  keepCount: number
+  /**
+   * Dossier de stockage (chemin absolu serveur API).
+   * Ex. D:\Backups\OpsGate ou /mnt/nas/opsgate.
+   * Vide = OPSGATE_AUTO_BACKUP_DIR ou ./backups/auto
+   */
+  directory?: string
+  lastRunAt?: string | null
+  lastRunOk?: boolean | null
+  lastRunDetail?: string | null
+}
+
+export const DEFAULT_AUTO_SYSTEM_BACKUP: AutoSystemBackupSettings = {
+  enabled: false,
+  intervalDays: 7,
+  keepCount: 8,
+  directory: "",
+  lastRunAt: null,
+  lastRunOk: null,
+  lastRunDetail: null
+}
+
 /** Archive d’export logs (semaine / manuel) — téléchargeable avant purge */
 export interface LogExportRecord {
   id: string
@@ -513,6 +549,7 @@ export const DEFAULT_MONITORING_SETTINGS: OrgMonitoringSettings = {
   weeklyExportFormats: ["csv"],
   weeklyExportNotifyEmail: false,
   scheduledLogExport: { ...DEFAULT_SCHEDULED_LOG_EXPORT },
+  autoBackup: { ...DEFAULT_AUTO_SYSTEM_BACKUP },
   lastWeeklyExportAt: null,
   logCategories: { ...DEFAULT_LOG_CATEGORIES },
   notifications: { ...DEFAULT_NOTIFICATION_SETTINGS },
@@ -657,6 +694,45 @@ export function mergeMonitoringSettings(
       merged.attachFiles = fromPartial.attachFiles
     }
     base.scheduledLogExport = merged
+  }
+  // Backup automatique système (7 / 14 / 30 j)
+  {
+    const fromPartial = partial.autoBackup
+    const merged: AutoSystemBackupSettings = {
+      ...DEFAULT_AUTO_SYSTEM_BACKUP,
+      ...(fromPartial && typeof fromPartial === "object" ? fromPartial : {})
+    }
+    if (typeof fromPartial?.enabled === "boolean") {
+      merged.enabled = fromPartial.enabled
+    }
+    if (
+      fromPartial?.intervalDays === 7 ||
+      fromPartial?.intervalDays === 14 ||
+      fromPartial?.intervalDays === 30
+    ) {
+      merged.intervalDays = fromPartial.intervalDays
+    }
+    if (
+      typeof fromPartial?.keepCount === "number" &&
+      fromPartial.keepCount >= 1 &&
+      fromPartial.keepCount <= 60
+    ) {
+      merged.keepCount = Math.floor(fromPartial.keepCount)
+    }
+    if (typeof fromPartial?.directory === "string") {
+      // Chemin absolu serveur (Windows D:\… ou UNC \\server\share ou /mnt/…)
+      merged.directory = fromPartial.directory.trim().slice(0, 512)
+    }
+    if (fromPartial?.lastRunAt !== undefined) {
+      merged.lastRunAt = fromPartial.lastRunAt
+    }
+    if (fromPartial?.lastRunOk !== undefined) {
+      merged.lastRunOk = fromPartial.lastRunOk
+    }
+    if (fromPartial?.lastRunDetail !== undefined) {
+      merged.lastRunDetail = fromPartial.lastRunDetail
+    }
+    base.autoBackup = merged
   }
   if (partial.lastWeeklyExportAt !== undefined) {
     base.lastWeeklyExportAt = partial.lastWeeklyExportAt
@@ -1440,6 +1516,10 @@ export type AdminAuditAction =
   | "inbox_reply"
   | "inbox_close"
   | "inbox_read"
+  | "inbox_user_message"
+  | "backup_auto_run"
+  | "backup_export"
+  | "backup_import"
 
 /** Message utilisateur → admin (inbox type Kaspersky) */
 export type InboxMessageStatus = "open" | "read" | "replied" | "closed"

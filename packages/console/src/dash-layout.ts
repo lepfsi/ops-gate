@@ -12,6 +12,7 @@ export type DashWidgetId =
   | "timeline"
   | "threats"
   | "requesters"
+  | "inbox_unread"
   | "ai_rewrite"
   | "risk_snapshot"
   | "shadow_snapshot"
@@ -25,7 +26,8 @@ export type DashWidgetLayout = {
   h: number
 }
 
-const KEY = "opsgate_dash_layout_v4"
+const KEY = "opsgate_dash_layout_v5"
+const KEY_V4 = "opsgate_dash_layout_v4"
 const KEY_V3 = "opsgate_dash_layout_v3"
 const KEY_V2 = "opsgate_dash_layout_v2"
 const KEY_V1 = "opsgate_dash_layout_v1"
@@ -41,6 +43,7 @@ export const DASH_WIDGET_META: Record<
   timeline: { labelKey: "dash.events14", defaultW: 1, defaultH: 190 },
   threats: { labelKey: "dash.userDecisions", defaultW: 1, defaultH: 210 },
   requesters: { labelKey: "dash.topRequesters", defaultW: 1, defaultH: 210 },
+  inbox_unread: { labelKey: "dash.inboxUnread", defaultW: 1, defaultH: 180 },
   ai_rewrite: { labelKey: "dash.aiRewrite", defaultW: 1, defaultH: 200 },
   risk_snapshot: { labelKey: "dash.riskSnapshot", defaultW: 1, defaultH: 210 },
   shadow_snapshot: { labelKey: "dash.shadowSnapshot", defaultW: 1, defaultH: 200 },
@@ -90,7 +93,8 @@ function ensureNewWidgets(layout: DashWidgetLayout[]): DashWidgetLayout[] {
     "ai_rewrite",
     "risk_snapshot",
     "shadow_snapshot",
-    "proxy_fleet"
+    "proxy_fleet",
+    "inbox_unread"
   ] as const) {
     if (!have.has(id)) {
       next.push({
@@ -105,11 +109,13 @@ function ensureNewWidgets(layout: DashWidgetLayout[]): DashWidgetLayout[] {
 
 export function loadDashLayout(): DashWidgetLayout[] {
   try {
-    const rawV4 = localStorage.getItem(KEY)
+    const rawV5 = localStorage.getItem(KEY)
+    const rawV4 = localStorage.getItem(KEY_V4)
     const rawV3 = localStorage.getItem(KEY_V3)
     const rawV2 = localStorage.getItem(KEY_V2)
     const rawV1 = localStorage.getItem(KEY_V1)
     const parsed =
+      parseLayout(rawV5) ||
       parseLayout(rawV4) ||
       parseLayout(rawV3) ||
       parseLayout(rawV2) ||
@@ -117,8 +123,9 @@ export function loadDashLayout(): DashWidgetLayout[] {
     if (!parsed) return DEFAULT_DASH_LAYOUT.map((x) => ({ ...x }))
     // Tableau vide = utilisateur a retiré toutes les métriques (respecté)
     if (parsed.length === 0) return []
-    const withNew = rawV4 ? parsed : ensureNewWidgets(parsed)
-    if (!rawV4) saveDashLayout(withNew)
+    // Migration douce : injecter inbox_unread si layout d’une version antérieure
+    const withNew = rawV5 ? parsed : ensureNewWidgets(parsed)
+    if (!rawV5) saveDashLayout(withNew)
     return withNew
   } catch {
     return DEFAULT_DASH_LAYOUT.map((x) => ({ ...x }))

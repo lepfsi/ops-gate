@@ -55,6 +55,8 @@ export const DEFAULT_ALLOWLIST = [
   "perplexity.ai",
   "www.perplexity.ai",
   "chat.deepseek.com",
+  "deepseek.com",
+  "www.deepseek.com",
   "chat.mistral.ai",
   "lechat.mistral.ai",
   "console.groq.com",

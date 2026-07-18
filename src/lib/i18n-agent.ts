@@ -32,6 +32,30 @@ const FR: Dict = {
   "banner.pillFile": "Fichier en attente · policy org",
   "banner.pillBlock": "Bloqué par la politique admin",
   "banner.pillForce": "Masquage obligatoire · policy",
+  "banner.orgName": " Organisation : {name}.",
+  "banner.impact": "Impact estimé : {level}",
+  "banner.riskScore": "Risque {n}/100",
+  "banner.riskScoreLabel": "Risk Score : {n}/100",
+  "banner.sev.high": "{n} critique{s}",
+  "banner.sev.medium": "{n} moyenne{s}",
+  "banner.sev.low": "{n} faible{s}",
+  "banner.items": "{n} élément{s}",
+  "banner.sensitiveData": "données sensibles",
+  "banner.detections": "détection(s)",
+  "banner.fileConcerned": "Fichier concerné : « {file} »",
+  "banner.fileShort": "Fichier : « {file} »",
+  "banner.rec.critical":
+    "Anonymiser avant envoi (Secure Rewrite fortement recommandé)",
+  "banner.rec.high": "Anonymiser avant envoi (Secure Rewrite recommandé)",
+  "banner.rec.medium": "Masquer ou Secure Rewrite avant envoi",
+  "banner.rec.low": "Risque faible — vérification manuelle suffisante",
+  "banner.rec.none": "Aucune détection",
+  "banner.contactMsgTitle": "Message à l'administrateur",
+  "banner.contactMsgHint":
+    "Le bandeau d'alerte est masqué le temps de rédiger. Après envoi, les options reviendront.",
+  "banner.contactSend": "Envoyer à l'admin",
+  "banner.originalRisk": "Risque original : {n}/100",
+  "banner.afterRewrite": "Après rewrite : {n}/100",
   "opt.lang": "Langue de l’interface",
   "opt.langHint":
     "Pilotée par l’organisation (fr / en / auto navigateur). En local seul : préférence de ce poste."
@@ -60,6 +84,30 @@ const EN: Dict = {
   "banner.pillFile": "File pending · org policy",
   "banner.pillBlock": "Blocked by admin policy",
   "banner.pillForce": "Masking required · policy",
+  "banner.orgName": " Organization: {name}.",
+  "banner.impact": "Estimated impact: {level}",
+  "banner.riskScore": "Risk {n}/100",
+  "banner.riskScoreLabel": "Risk Score: {n}/100",
+  "banner.sev.high": "{n} critical",
+  "banner.sev.medium": "{n} medium",
+  "banner.sev.low": "{n} low",
+  "banner.items": "{n} item{s}",
+  "banner.sensitiveData": "sensitive data",
+  "banner.detections": "detection(s)",
+  "banner.fileConcerned": "File concerned: “{file}”",
+  "banner.fileShort": "File: “{file}”",
+  "banner.rec.critical":
+    "Anonymize before sending (Secure Rewrite strongly recommended)",
+  "banner.rec.high": "Anonymize before sending (Secure Rewrite recommended)",
+  "banner.rec.medium": "Mask or Secure Rewrite before sending",
+  "banner.rec.low": "Low risk — manual review is enough",
+  "banner.rec.none": "No detections",
+  "banner.contactMsgTitle": "Message to administrator",
+  "banner.contactMsgHint":
+    "The alert banner is hidden while you write. Options will return after send.",
+  "banner.contactSend": "Send to admin",
+  "banner.originalRisk": "Original risk: {n}/100",
+  "banner.afterRewrite": "After rewrite: {n}/100",
   "opt.lang": "Interface language",
   "opt.langHint":
     "Driven by your organization (fr / en / browser auto). Local-only: this device preference."
@@ -163,7 +211,9 @@ export function tAgent(
 
 /**
  * Fusionne messages policy custom par-dessus les defaults de la langue résolue.
- * Si l’admin a customisé un champ (n’importe quelle langue), il prime.
+ * Si l’admin a customisé un champ, il prime — SAUF s’il s’agit du stock FR
+ * renvoyé par l’API (DEFAULT_USER_MESSAGES) alors que l’agent est en EN :
+ * dans ce cas on garde le défaut EN (évite « Cette restriction… » en anglais).
  */
 export function mergeMessagesForLang(
   lang: AgentUiLang,
@@ -171,9 +221,60 @@ export function mergeMessagesForLang(
 ): import("~types").PolicyUserMessages {
   const base = { ...DEFAULT_MESSAGES_BY_LANG[lang] }
   if (!partial || typeof partial !== "object") return base
+  // Stock FR connus (API types + defaults i18n) — ne pas les coller sur l’UI EN
+  const frStock = DEFAULT_MESSAGES_BY_LANG.fr
   for (const key of Object.keys(base) as (keyof typeof base)[]) {
     const v = partial[key]
-    if (typeof v === "string" && v.trim()) base[key] = v.trim()
+    if (typeof v !== "string" || !v.trim()) continue
+    const trimmed = v.trim()
+    if (lang === "en") {
+      const stockFr = frStock[key]
+      if (stockFr && trimmed === stockFr.trim()) continue
+      // Variante API DEFAULT_USER_MESSAGES (souvent un peu différente)
+      if (
+        key === "adminNotice" &&
+        /cette restriction est appliquée/i.test(trimmed)
+      ) {
+        continue
+      }
+      if (
+        key === "alertTitle" &&
+        /données sensibles détectées/i.test(trimmed)
+      ) {
+        continue
+      }
+      if (
+        key === "alertBody" &&
+        /votre administrateur a configuré opsgate/i.test(trimmed)
+      ) {
+        continue
+      }
+      if (
+        key === "blockTitle" &&
+        /envoi non autorisé/i.test(trimmed)
+      ) {
+        continue
+      }
+      if (
+        key === "blockBody" &&
+        /politique de sécurité de votre organisation bloque/i.test(trimmed)
+      ) {
+        continue
+      }
+      if (
+        key === "maskForceTitle" &&
+        /masquage obligatoire/i.test(trimmed)
+      ) {
+        continue
+      }
+      if (
+        key === "maskForceBody" &&
+        /impose le masquage des données sensibles/i.test(trimmed)
+      ) {
+        continue
+      }
+    }
+    base[key] = trimmed
   }
   return base
 }

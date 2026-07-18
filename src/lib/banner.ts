@@ -910,10 +910,8 @@ export function showAlertBanner(
   activeBannerDecision = onDecision
 
   const lang: AgentUiLang = resolveAgentLang(options.agentUiLang)
-  const msgs = mergeMessagesForLang(
-    lang,
-    options.userMessages || DEFAULT_USER_MESSAGES
-  )
+  // Ne pas forcer DEFAULT_USER_MESSAGES (FR) : sinon l’EN est écrasé
+  const msgs = mergeMessagesForLang(lang, options.userMessages)
   const action: DefaultAction = options.defaultAction || "mask_recommend"
   const isBlock = action === "block"
   const isForce = action === "mask_force"
@@ -923,45 +921,65 @@ export function showAlertBanner(
   const medium = detections.filter((d) => d.severity === "medium").length
   const low = detections.filter((d) => d.severity === "low").length
 
+  const plural = (n: number) => (n > 1 ? "s" : "")
   const summaryParts: string[] = []
-  if (high) summaryParts.push(`${high} critique${high > 1 ? "s" : ""}`)
-  if (medium) summaryParts.push(`${medium} moyenne${medium > 1 ? "s" : ""}`)
-  if (low) summaryParts.push(`${low} faible${low > 1 ? "s" : ""}`)
+  if (high)
+    summaryParts.push(
+      tAgent(lang, "banner.sev.high", { n: high, s: plural(high) })
+    )
+  if (medium)
+    summaryParts.push(
+      tAgent(lang, "banner.sev.medium", { n: medium, s: plural(medium) })
+    )
+  if (low)
+    summaryParts.push(
+      tAgent(lang, "banner.sev.low", { n: low, s: plural(low) })
+    )
 
   const fileLabel =
     options.fileNames && options.fileNames.length
       ? options.fileNames.length === 1
         ? options.fileNames[0]
-        : `${options.fileNames.length} fichiers`
-      : "fichier(s)"
+        : lang === "en"
+          ? `${options.fileNames.length} files`
+          : `${options.fileNames.length} fichiers`
+      : lang === "en"
+        ? "file(s)"
+        : "fichier(s)"
 
   let title: string
   let sub: string
+  const itemsStr = tAgent(lang, "banner.items", {
+    n: detections.length,
+    s: plural(detections.length)
+  })
   let pill: string
   if (isBlock) {
     title = msgs.blockTitle
     sub = isFile
-      ? `${msgs.blockBody} Fichier concerné : « ${escapeHtml(fileLabel)} » (${detections.length} élément${detections.length > 1 ? "s" : ""}).`
-      : `${msgs.blockBody} (${detections.length} élément${detections.length > 1 ? "s" : ""} : ${summaryParts.join(", ") || "données sensibles"}).`
+      ? `${msgs.blockBody} ${tAgent(lang, "banner.fileConcerned", { file: escapeHtml(fileLabel) })} (${itemsStr}).`
+      : `${msgs.blockBody} (${itemsStr} : ${summaryParts.join(", ") || tAgent(lang, "banner.sensitiveData")}).`
     pill = tAgent(lang, "banner.pillBlock")
   } else if (isForce) {
     title = msgs.maskForceTitle
     sub = isFile
-      ? `${msgs.maskForceBody} Fichier : « ${escapeHtml(fileLabel)} ».`
-      : `${msgs.maskForceBody} (${summaryParts.join(", ") || detections.length + " détection(s)"}).`
+      ? `${msgs.maskForceBody} ${tAgent(lang, "banner.fileShort", { file: escapeHtml(fileLabel) })}.`
+      : `${msgs.maskForceBody} (${summaryParts.join(", ") || `${detections.length} ${tAgent(lang, "banner.detections")}`}).`
     pill = tAgent(lang, "banner.pillForce")
   } else {
     title = isFile ? msgs.alertTitleFile : msgs.alertTitle
     sub = isFile
-      ? `${msgs.alertBodyFile} « ${escapeHtml(fileLabel)} » - ${detections.length} élément${detections.length > 1 ? "s" : ""} (${summaryParts.join(", ")}).`
-      : `${msgs.alertBody} ${detections.length} élément${detections.length > 1 ? "s" : ""} (${summaryParts.join(", ")}).`
+      ? `${msgs.alertBodyFile} « ${escapeHtml(fileLabel)} » - ${itemsStr} (${summaryParts.join(", ")}).`
+      : `${msgs.alertBody} ${itemsStr} (${summaryParts.join(", ")}).`
     pill = isFile
       ? tAgent(lang, "banner.pillFile")
       : tAgent(lang, "banner.pillAlert")
   }
 
   const orgBit = options.orgName
-    ? ` Organisation : ${escapeHtml(options.orgName)}.`
+    ? tAgent(lang, "banner.orgName", {
+        name: escapeHtml(options.orgName)
+      })
     : ""
 
   // Libellés courts pour le toolbar (messages policy custom en priorité)
@@ -1005,7 +1023,9 @@ export function showAlertBanner(
   const icoMask = `<span class="btn-ico" aria-hidden="true"><svg viewBox="0 0 16 16" fill="none"><path d="M2 8s2.5-4 6-4 6 4 6 4-2.5 4-6 4-6-4-6-4Z" stroke="currentColor" stroke-width="1.35"/><circle cx="8" cy="8" r="1.6" fill="currentColor"/><path d="M3 13 13 3" stroke="currentColor" stroke-width="1.35" stroke-linecap="round"/></svg></span>`
 
   // Risk score (prompt)
-  const promptRisk: PromptRiskScore = calculatePromptRiskScore(detections)
+  const promptRisk: PromptRiskScore = calculatePromptRiskScore(detections, {
+    lang
+  })
   const simThreshold =
     typeof options.simulationThreshold === "number"
       ? options.simulationThreshold
@@ -1073,7 +1093,7 @@ export function showAlertBanner(
     ? `
     <div class="risk-block" id="og-risk-block">
       <div class="risk-row">
-        <span>Risque ${promptRisk.score}/100</span>
+        <span>${escapeHtml(tAgent(lang, "banner.riskScore", { n: promptRisk.score }))}</span>
         <span class="risk-level ${promptRisk.level}">${promptRisk.level}</span>
       </div>
       <div class="risk-bar" aria-hidden="true">${riskScoreBar(promptRisk.score)}</div>
@@ -1087,31 +1107,55 @@ export function showAlertBanner(
   const typeSummary = [
     ...new Set(detections.slice(0, 12).map((d) => d.type).filter(Boolean))
   ].join(", ")
-  const prefillSubject = isBlock
-    ? `Contestation de blocage · ${hostname || "site IA"}`
-    : isForce
-      ? `Demande suite à masquage obligatoire · ${hostname || "site IA"}`
-      : `Question suite à une alerte · ${hostname || "site IA"}`
+  const prefillSubject =
+    lang === "en"
+      ? isBlock
+        ? `Block appeal · ${hostname || "AI site"}`
+        : isForce
+          ? `Request after required masking · ${hostname || "AI site"}`
+          : `Question after alert · ${hostname || "AI site"}`
+      : isBlock
+        ? `Contestation de blocage · ${hostname || "site IA"}`
+        : isForce
+          ? `Demande suite à masquage obligatoire · ${hostname || "site IA"}`
+          : `Question suite à une alerte · ${hostname || "site IA"}`
   const prefillCategory = isBlock
     ? "block_appeal"
     : isForce
       ? "exception"
       : "question"
-  const prefillBody = [
-    isBlock
-      ? "Bonjour, je conteste ce blocage et demande une exception ou un éclaircissement."
-      : "Bonjour, j’ai besoin d’aide concernant cette alerte OpsGate.",
-    "",
-    `Site : ${hostname}`,
-    pageUrl ? `URL : ${pageUrl}` : "",
-    typeSummary ? `Détections : ${typeSummary}` : "",
-    options.fileNames?.length
-      ? `Fichiers : ${options.fileNames.slice(0, 5).join(", ")}`
-      : "",
-    options.orgName ? `Organisation : ${options.orgName}` : ""
-  ]
-    .filter(Boolean)
-    .join("\n")
+  const prefillBody =
+    lang === "en"
+      ? [
+          isBlock
+            ? "Hello, I am appealing this block and request an exception or clarification."
+            : "Hello, I need help regarding this OpsGate alert.",
+          "",
+          `Site: ${hostname}`,
+          pageUrl ? `URL: ${pageUrl}` : "",
+          typeSummary ? `Detections: ${typeSummary}` : "",
+          options.fileNames?.length
+            ? `Files: ${options.fileNames.slice(0, 5).join(", ")}`
+            : "",
+          options.orgName ? `Organization: ${options.orgName}` : ""
+        ]
+          .filter(Boolean)
+          .join("\n")
+      : [
+          isBlock
+            ? "Bonjour, je conteste ce blocage et demande une exception ou un éclaircissement."
+            : "Bonjour, j’ai besoin d’aide concernant cette alerte OpsGate.",
+          "",
+          `Site : ${hostname}`,
+          pageUrl ? `URL : ${pageUrl}` : "",
+          typeSummary ? `Détections : ${typeSummary}` : "",
+          options.fileNames?.length
+            ? `Fichiers : ${options.fileNames.slice(0, 5).join(", ")}`
+            : "",
+          options.orgName ? `Organisation : ${options.orgName}` : ""
+        ]
+          .filter(Boolean)
+          .join("\n")
 
   root.innerHTML = `
     <div class="alert-main">
@@ -1147,15 +1191,15 @@ export function showAlertBanner(
       contactEnabled
         ? `
     <div class="contact-panel" id="og-contact" data-category="${escapeHtml(prefillCategory)}">
-      <p class="contact-title">Message à l'administrateur</p>
-      <p class="contact-hint">Le bandeau d'alerte est masqué le temps de rédiger. Après envoi, les options reviendront.</p>
+      <p class="contact-title">${escapeHtml(tAgent(lang, "banner.contactMsgTitle"))}</p>
+      <p class="contact-hint">${escapeHtml(tAgent(lang, "banner.contactMsgHint"))}</p>
       <p class="contact-status" id="og-contact-status" hidden></p>
-      <label for="og-contact-subject">Objet</label>
+      <label for="og-contact-subject">${lang === "en" ? "Subject" : "Objet"}</label>
       <input id="og-contact-subject" type="text" maxlength="120" value="${escapeHtml(prefillSubject)}" />
-      <label for="og-contact-body">Votre message</label>
+      <label for="og-contact-body">${lang === "en" ? "Your message" : "Votre message"}</label>
       <textarea id="og-contact-body" maxlength="4000">${escapeHtml(prefillBody)}</textarea>
       <div class="contact-actions">
-        <button type="button" class="btn-cta" data-action="send_contact">${escapeHtml(tAgent(lang, "banner.send"))}</button>
+        <button type="button" class="btn-cta" data-action="send_contact">${escapeHtml(tAgent(lang, "banner.contactSend"))}</button>
         <button type="button" class="btn-quiet" data-action="toggle_contact">${escapeHtml(tAgent(lang, "banner.back"))}</button>
       </div>
     </div>`
@@ -1298,7 +1342,7 @@ export function showAlertBanner(
       ) as HTMLButtonElement | null
       if (sendBtn) {
         sendBtn.disabled = false
-        sendBtn.textContent = "Envoyer à l'admin"
+        sendBtn.textContent = tAgent(lang, "banner.contactSend")
       }
       contactSubject?.focus()
     }
@@ -1340,7 +1384,7 @@ export function showAlertBanner(
     score >= 60 ? "high" : score <= 20 ? "low" : ""
 
   const openSimulation = () => {
-    lastSim = buildSimulation(detections)
+    lastSim = buildSimulation(detections, { lang })
     const sim = lastSim
     const riskEl = root.querySelector("#og-sim-risk") as HTMLElement | null
     const impactEl = root.querySelector("#og-sim-impact") as HTMLElement | null
@@ -1350,7 +1394,7 @@ export function showAlertBanner(
       riskEl.innerHTML = `
         <div class="risk-block" style="margin-top:8px">
           <div class="risk-row">
-            <span>Risk Score : ${sim.riskScore.score}/100</span>
+            <span>${escapeHtml(tAgent(lang, "banner.riskScoreLabel", { n: sim.riskScore.score }))}</span>
             <span class="risk-level ${sim.riskScore.level}">${sim.riskScore.level}</span>
           </div>
           <div class="risk-bar">${riskScoreBar(sim.riskScore.score)}</div>
@@ -1358,7 +1402,9 @@ export function showAlertBanner(
     }
     if (impactEl) {
       impactEl.className = `sim-impact ${sim.impact}`
-      impactEl.textContent = `Impact estimé : ${sim.impact}`
+      impactEl.textContent = tAgent(lang, "banner.impact", {
+        level: sim.impact
+      })
     }
     if (listEl) {
       listEl.innerHTML = sim.detectedItems
@@ -1417,9 +1463,9 @@ export function showAlertBanner(
     }
     if (rewriteScores) {
       rewriteScores.innerHTML = `
-        <span class="score-chip ${riskChipClass(result.originalRiskScore)}">Risque original : ${result.originalRiskScore}/100</span>
-        <span class="score-chip ${riskChipClass(result.remainingRiskScore)}">Après rewrite : ${result.remainingRiskScore}/100</span>
-        <span class="score-chip">${result.stats.totalReplacements} remplacement${result.stats.totalReplacements > 1 ? "s" : ""}</span>
+        <span class="score-chip ${riskChipClass(result.originalRiskScore)}">${escapeHtml(tAgent(lang, "banner.originalRisk", { n: result.originalRiskScore }))}</span>
+        <span class="score-chip ${riskChipClass(result.remainingRiskScore)}">${escapeHtml(tAgent(lang, "banner.afterRewrite", { n: result.remainingRiskScore }))}</span>
+        <span class="score-chip">${result.stats.totalReplacements} ${lang === "en" ? "replacement" : "remplacement"}${result.stats.totalReplacements > 1 ? "s" : ""}</span>
       `
     }
     if (rewriteChanges) {
@@ -1524,14 +1570,14 @@ export function showAlertBanner(
         setContactStatus(human, "err")
         if (sendBtn) {
           sendBtn.disabled = false
-          sendBtn.textContent = "Envoyer à l'admin"
+          sendBtn.textContent = tAgent(lang, "banner.contactSend")
         }
       }
     } catch (e) {
       setContactStatus(String(e), "err")
       if (sendBtn) {
         sendBtn.disabled = false
-        sendBtn.textContent = "Envoyer à l'admin"
+        sendBtn.textContent = tAgent(lang, "banner.contactSend")
       }
     } finally {
       contactSending = false
