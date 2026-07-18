@@ -5,7 +5,9 @@
 **Usage** : questions qu’un pair exigeant peut poser pour juger **qualité**, **maîtrise du domaine**, **alignement standards** — avec réponses argumentées.
 
 > Ce document n’est **pas** marketing. Les réponses s’appuient sur l’architecture réelle (extension MV3, `@opsgate/engine`, API Hono, Postgres RLS, proxy MITM, Secure Rewrite, Risk/Shadow).  
-> Synthèse produit : [`STATUS-V2.md`](./STATUS-V2.md) · gap : [`STATUS-GAP-V1-V3.md`](./STATUS-GAP-V1-V3.md) · privacy : [`PRIVACY.md`](./PRIVACY.md)
+> Synthèse produit : [`STATUS-V2.md`](./STATUS-V2.md) · gap : [`STATUS-GAP-V1-V3.md`](./STATUS-GAP-V1-V3.md) · privacy : [`PRIVACY.md`](./PRIVACY.md)  
+> **English (RFP)** : [`FAQ-DUE-DILIGENCE-TECHNIQUE-EN.md`](./FAQ-DUE-DILIGENCE-TECHNIQUE-EN.md)  
+> **Deck 10 questions** : [`FAQ-DUE-DILIGENCE-10Q.pptx`](./FAQ-DUE-DILIGENCE-10Q.pptx) · rebuild : `node scripts/build-faq-due-diligence-pptx.mjs`
 
 ---
 
