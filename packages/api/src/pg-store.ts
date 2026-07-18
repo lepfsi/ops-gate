@@ -43,13 +43,14 @@ import type {
   OrgUser,
   Organization,
   Policy,
+  PolicyFileScan,
   PolicyProfile,
   RulesPackPayload,
   StoredEvent,
   StoredRulePack,
   UserGroup
 } from "./types"
-import { ALL_ADMIN_PERMISSIONS } from "./types"
+import { ALL_ADMIN_PERMISSIONS, mergePolicyFileScan } from "./types"
 import {
   getPgRlsMode,
   getRlsContext,
@@ -207,6 +208,7 @@ function rowPolicy(r: pg.QueryResultRow): Policy {
   const workSchedule = parseJsonObj<Policy["workSchedule"]>(
     r.work_schedule_json
   )
+  const fileScanRaw = parseJsonObj<Partial<PolicyFileScan>>(r.file_scan_json)
   return {
     id: r.id,
     orgId: r.org_id,
@@ -214,6 +216,7 @@ function rowPolicy(r: pg.QueryResultRow): Policy {
     defaultAction: r.default_action,
     enabledHosts: r.enabled_hosts || [],
     scanUploads: r.scan_uploads,
+    fileScan: mergePolicyFileScan(fileScanRaw),
     eventReporting: r.event_reporting,
     rulesPackVersion: r.rules_pack_version,
     managementPasswordHash: r.management_password_hash || "",
@@ -388,6 +391,7 @@ function rowProfile(r: pg.QueryResultRow): PolicyProfile {
   const workSchedule = parseJsonObj<PolicyProfile["workSchedule"]>(
     r.work_schedule_json
   )
+  const fileScanRaw = parseJsonObj<Partial<PolicyFileScan>>(r.file_scan_json)
   return {
     id: r.id,
     orgId: r.org_id,
@@ -396,6 +400,7 @@ function rowProfile(r: pg.QueryResultRow): PolicyProfile {
     defaultAction: r.default_action,
     enabledHosts: r.enabled_hosts || [],
     scanUploads: r.scan_uploads !== false,
+    fileScan: mergePolicyFileScan(fileScanRaw),
     eventReporting: r.event_reporting !== false,
     protectUnenroll: !!r.protect_unenroll,
     enabled: r.enabled !== false && r.enabled !== 0,
@@ -506,6 +511,8 @@ export class PgStore implements OpsGateStore {
       `ALTER TABLE policy_profiles ADD COLUMN IF NOT EXISTS user_messages_json TEXT NOT NULL DEFAULT '{}'`,
       `ALTER TABLE policies ADD COLUMN IF NOT EXISTS work_schedule_json TEXT NOT NULL DEFAULT '{}'`,
       `ALTER TABLE policy_profiles ADD COLUMN IF NOT EXISTS work_schedule_json TEXT NOT NULL DEFAULT '{}'`,
+      `ALTER TABLE policies ADD COLUMN IF NOT EXISTS file_scan_json TEXT NOT NULL DEFAULT '{}'`,
+      `ALTER TABLE policy_profiles ADD COLUMN IF NOT EXISTS file_scan_json TEXT NOT NULL DEFAULT '{}'`,
       `ALTER TABLE policy_profiles ADD COLUMN IF NOT EXISTS enabled BOOLEAN NOT NULL DEFAULT TRUE`,
       `ALTER TABLE policy_profiles ADD COLUMN IF NOT EXISTS priority INT NOT NULL DEFAULT 100`,
       `ALTER TABLE agents ADD COLUMN IF NOT EXISTS device_fingerprint TEXT`,
@@ -1603,6 +1610,7 @@ export class PgStore implements OpsGateStore {
         | "defaultAction"
         | "enabledHosts"
         | "scanUploads"
+        | "fileScan"
         | "eventReporting"
         | "rulesPackVersion"
         | "managementPasswordHash"
@@ -1623,10 +1631,18 @@ export class PgStore implements OpsGateStore {
       patch.userMessages !== undefined
         ? { ...(current.userMessages || {}), ...patch.userMessages }
         : current.userMessages
+    const nextFileScan =
+      patch.fileScan !== undefined
+        ? mergePolicyFileScan({
+            ...(current.fileScan || {}),
+            ...patch.fileScan
+          })
+        : mergePolicyFileScan(current.fileScan)
     const next = {
       ...current,
       ...patch,
       userMessages: nextUserMessages,
+      fileScan: nextFileScan,
       workSchedule:
         patch.workSchedule !== undefined
           ? patch.workSchedule
@@ -1648,7 +1664,8 @@ export class PgStore implements OpsGateStore {
         config_epoch = $10,
         protect_unenroll = $11,
         user_messages_json = $12,
-        work_schedule_json = $13
+        work_schedule_json = $13,
+        file_scan_json = $14
        WHERE org_id = $1`,
       [
         orgId,
@@ -1663,7 +1680,8 @@ export class PgStore implements OpsGateStore {
         next.configEpoch,
         !!next.protectUnenroll,
         JSON.stringify(next.userMessages || {}),
-        JSON.stringify(next.workSchedule || {})
+        JSON.stringify(next.workSchedule || {}),
+        JSON.stringify(next.fileScan || {})
       ]
     )
     return next
@@ -2488,6 +2506,7 @@ export class PgStore implements OpsGateStore {
       defaultAction?: Policy["defaultAction"]
       enabledHosts?: string[]
       scanUploads?: boolean
+      fileScan?: Partial<PolicyFileScan>
       eventReporting?: boolean
       protectUnenroll?: boolean
       enabled?: boolean
@@ -2513,6 +2532,13 @@ export class PgStore implements OpsGateStore {
         input.userMessages !== undefined
           ? { ...(prev.userMessages || {}), ...input.userMessages }
           : prev.userMessages
+      const nextFileScan =
+        input.fileScan !== undefined
+          ? mergePolicyFileScan({
+              ...(prev.fileScan || {}),
+              ...input.fileScan
+            })
+          : mergePolicyFileScan(prev.fileScan)
       const next = {
         name: input.name,
         department: input.department ?? prev.department,
@@ -2520,6 +2546,7 @@ export class PgStore implements OpsGateStore {
         enabledHosts: input.enabledHosts ?? prev.enabledHosts,
         scanUploads:
           input.scanUploads !== undefined ? input.scanUploads : prev.scanUploads,
+        fileScan: nextFileScan,
         eventReporting:
           input.eventReporting !== undefined
             ? input.eventReporting
@@ -2548,7 +2575,7 @@ export class PgStore implements OpsGateStore {
           scan_uploads=$7, event_reporting=$8, protect_unenroll=$9,
           assigned_group_ids=$10::jsonb, assigned_user_ids=$11::jsonb,
           user_messages_json=$12, work_schedule_json=$13, updated_at=$14,
-          enabled=$15, priority=$16
+          enabled=$15, priority=$16, file_scan_json=$17
          WHERE org_id=$1 AND id=$2 RETURNING *`,
         [
           orgId,
@@ -2566,7 +2593,8 @@ export class PgStore implements OpsGateStore {
           JSON.stringify(next.workSchedule || {}),
           now,
           next.enabled,
-          next.priority
+          next.priority,
+          JSON.stringify(next.fileScan || {})
         ]
       )
       const profile = rowProfile(updated[0])
@@ -2581,9 +2609,10 @@ export class PgStore implements OpsGateStore {
       input.priority !== undefined
         ? Math.max(1, Math.floor(input.priority) || 100)
         : 100
+    const createFileScan = mergePolicyFileScan(input.fileScan)
     const { rows } = await this.pool.query(
-      `INSERT INTO policy_profiles (id, org_id, name, department, default_action, enabled_hosts, scan_uploads, event_reporting, protect_unenroll, assigned_group_ids, assigned_user_ids, user_messages_json, work_schedule_json, updated_at, enabled, priority)
-       VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7,$8,$9,$10::jsonb,$11::jsonb,$12,$13,$14,$15,$16) RETURNING *`,
+      `INSERT INTO policy_profiles (id, org_id, name, department, default_action, enabled_hosts, scan_uploads, event_reporting, protect_unenroll, assigned_group_ids, assigned_user_ids, user_messages_json, work_schedule_json, updated_at, enabled, priority, file_scan_json)
+       VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7,$8,$9,$10::jsonb,$11::jsonb,$12,$13,$14,$15,$16,$17) RETURNING *`,
       [
         id,
         orgId,
@@ -2600,7 +2629,8 @@ export class PgStore implements OpsGateStore {
         JSON.stringify(input.workSchedule || {}),
         now,
         en,
-        prio
+        prio,
+        JSON.stringify(createFileScan)
       ]
     )
     const profile = rowProfile(rows[0])
@@ -2763,6 +2793,10 @@ export class PgStore implements OpsGateStore {
           defaultAction: profile.defaultAction,
           enabledHosts: profile.enabledHosts,
           scanUploads: profile.scanUploads,
+          fileScan: mergePolicyFileScan({
+            ...(policy.fileScan || {}),
+            ...(profile.fileScan || {})
+          }),
           eventReporting: profile.eventReporting,
           protectUnenroll: profile.protectUnenroll,
           userMessages: {
@@ -2780,6 +2814,7 @@ export class PgStore implements OpsGateStore {
           defaultAction: policy.defaultAction,
           enabledHosts: policy.enabledHosts,
           scanUploads: policy.scanUploads,
+          fileScan: mergePolicyFileScan(policy.fileScan),
           eventReporting: policy.eventReporting,
           protectUnenroll: policy.protectUnenroll,
           userMessages: policy.userMessages || {},

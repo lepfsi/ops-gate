@@ -518,6 +518,13 @@ export function createApp() {
         default_action: effective.defaultAction,
         enabled_hosts: effective.enabledHosts,
         scan_uploads: effective.scanUploads,
+        file_scan: effective.fileScan || {
+          configs: true,
+          databases: true,
+          images: false,
+          office: true,
+          media_warn: true
+        },
         event_reporting: effective.eventReporting,
         rules_pack_version: pack.version,
         protect_unenroll: effective.protectUnenroll,
@@ -4527,6 +4534,7 @@ export function createApp() {
       default_action?: Policy["defaultAction"]
       enabled_hosts?: string[]
       scan_uploads?: boolean
+      file_scan?: Partial<import("./types").PolicyFileScan>
       event_reporting?: boolean
       protect_unenroll?: boolean
       enabled?: boolean
@@ -4548,6 +4556,7 @@ export function createApp() {
       defaultAction: body.default_action,
       enabledHosts: body.enabled_hosts,
       scanUploads: body.scan_uploads,
+      fileScan: body.file_scan,
       eventReporting: body.event_reporting,
       protectUnenroll: body.protect_unenroll,
       enabled: body.enabled,
@@ -4582,6 +4591,7 @@ export function createApp() {
       default_action?: Policy["defaultAction"]
       enabled_hosts?: string[]
       scan_uploads?: boolean
+      file_scan?: Partial<import("./types").PolicyFileScan>
       event_reporting?: boolean
       protect_unenroll?: boolean
       enabled?: boolean
@@ -4610,6 +4620,8 @@ export function createApp() {
         body.scan_uploads !== undefined
           ? body.scan_uploads
           : existing.scanUploads,
+      fileScan:
+        body.file_scan !== undefined ? body.file_scan : existing.fileScan,
       eventReporting:
         body.event_reporting !== undefined
           ? body.event_reporting
@@ -6384,6 +6396,7 @@ export function createApp() {
       default_action?: Policy["defaultAction"]
       enabled_hosts?: string[]
       scan_uploads?: boolean
+      file_scan?: Partial<import("./types").PolicyFileScan>
       event_reporting?: boolean
       protect_unenroll?: boolean
       user_messages?: Partial<import("./types").PolicyUserMessages>
@@ -6403,6 +6416,10 @@ export function createApp() {
     if (body.enabled_hosts !== undefined)
       patch.enabledHosts = body.enabled_hosts
     if (body.scan_uploads !== undefined) patch.scanUploads = body.scan_uploads
+    if (body.file_scan !== undefined) {
+      const { mergePolicyFileScan } = await import("./types")
+      patch.fileScan = mergePolicyFileScan(body.file_scan)
+    }
     if (body.event_reporting !== undefined)
       patch.eventReporting = body.event_reporting
     if (body.protect_unenroll !== undefined)

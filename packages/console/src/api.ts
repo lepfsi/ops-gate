@@ -456,6 +456,14 @@ export type WorkScheduleDoc = {
   breaks?: Array<{ start: string; end: string }>
 }
 
+export type PolicyFileScan = {
+  configs: boolean
+  databases: boolean
+  images: boolean
+  office: boolean
+  media_warn: boolean
+}
+
 export type PolicyDoc = {
   id: string
   orgId: string
@@ -464,6 +472,7 @@ export type PolicyDoc = {
   defaultAction: string
   enabledHosts: string[]
   scanUploads: boolean
+  fileScan?: PolicyFileScan
   eventReporting: boolean
   protectUnenroll?: boolean
   rulesPackVersion: string
@@ -481,6 +490,7 @@ export type ProfileRow = {
   defaultAction: string
   enabledHosts: string[]
   scanUploads: boolean
+  fileScan?: PolicyFileScan
   eventReporting: boolean
   protectUnenroll?: boolean
   enabled?: boolean
@@ -1042,6 +1052,7 @@ export const api = {
     default_action?: string
     enabled_hosts?: string[]
     scan_uploads?: boolean
+    file_scan?: Partial<PolicyFileScan>
     event_reporting?: boolean
     protect_unenroll?: boolean
     management_password?: string
@@ -1071,6 +1082,7 @@ export const api = {
     default_action?: string
     enabled_hosts?: string[]
     scan_uploads?: boolean
+    file_scan?: Partial<PolicyFileScan>
     event_reporting?: boolean
     protect_unenroll?: boolean
     enabled?: boolean
@@ -1092,6 +1104,7 @@ export const api = {
       default_action?: string
       enabled_hosts?: string[]
       scan_uploads?: boolean
+      file_scan?: Partial<PolicyFileScan>
       event_reporting?: boolean
       user_messages?: PolicyUserMessages
       protect_unenroll?: boolean

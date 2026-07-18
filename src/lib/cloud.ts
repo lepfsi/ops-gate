@@ -38,6 +38,13 @@ export interface ConfigResponse {
     default_action: string
     enabled_hosts: string[]
     scan_uploads: boolean
+    file_scan?: {
+      configs?: boolean
+      databases?: boolean
+      images?: boolean
+      office?: boolean
+      media_warn?: boolean
+    }
     event_reporting: boolean
     rules_pack_version: string
     protect_unenroll?: boolean
@@ -320,6 +327,12 @@ export async function syncConfig(
           ? false
           : body.policy.event_reporting !== false,
       scanUploads: body.policy.scan_uploads !== false,
+      // Sous-flags fichiers : pilotés par policy (sync écrase le local)
+      scanConfigs: body.policy.file_scan?.configs !== false,
+      scanDatabases: body.policy.file_scan?.databases !== false,
+      scanImages: body.policy.file_scan?.images === true,
+      scanOffice: body.policy.file_scan?.office !== false,
+      warnMedia: body.policy.file_scan?.media_warn !== false,
       enabledHosts: hosts,
       lastRulesSyncAt: pack.syncedAt,
       lastSyncError: undefined,

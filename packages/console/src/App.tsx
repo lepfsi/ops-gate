@@ -7145,6 +7145,11 @@ function PolicyView({
 }) {
   const [hosts, setHosts] = useState("")
   const [scanUploads, setScanUploads] = useState(true)
+  const [scanConfigs, setScanConfigs] = useState(true)
+  const [scanDatabases, setScanDatabases] = useState(true)
+  const [scanImages, setScanImages] = useState(false)
+  const [scanOffice, setScanOffice] = useState(true)
+  const [warnMedia, setWarnMedia] = useState(true)
   const [eventReporting, setEventReporting] = useState(true)
   const [protectUnenroll, setProtectUnenroll] = useState(false)
   const [defaultAction, setDefaultAction] = useState("mask_recommend")
@@ -7210,6 +7215,12 @@ function PolicyView({
     if (!policy) return
     setHosts((policy.enabledHosts || []).join("\n"))
     setScanUploads(!!policy.scanUploads)
+    const fs = policy.fileScan
+    setScanConfigs(fs?.configs !== false)
+    setScanDatabases(fs?.databases !== false)
+    setScanImages(fs?.images === true)
+    setScanOffice(fs?.office !== false)
+    setWarnMedia(fs?.media_warn !== false)
     setEventReporting(!!policy.eventReporting)
     setProtectUnenroll(!!policy.protectUnenroll)
     setDefaultAction(policy.defaultAction || "mask_recommend")
@@ -7254,6 +7265,13 @@ function PolicyView({
           .map((l) => l.trim())
           .filter(Boolean),
         scan_uploads: scanUploads,
+        file_scan: {
+          configs: scanConfigs,
+          databases: scanDatabases,
+          images: scanImages,
+          office: scanOffice,
+          media_warn: warnMedia
+        },
         event_reporting: eventReporting,
         protect_unenroll: protectUnenroll,
         default_action: defaultAction,
@@ -7294,15 +7312,15 @@ function PolicyView({
   }
 
   return (
-    <>
+    <div className="pol-page">
       {/* Policy org par défaut : ligne distincte */}
-      <div className="card policy-default-card">
-        <div className="policy-default-row">
+      <div className="pol-card">
+        <div className="pol-card-head">
           <div>
-            <span className="policy-default-badge">{t("policy.defaultBadge")}</span>
-            <strong style={{ marginLeft: 8 }}>{t("policy.defaultTitle")}</strong>
-            <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
-              v{policy.version} · epoch {policy.configEpoch ?? " - "} ·{" "}
+            <span className="pol-badge">{t("policy.defaultBadge")}</span>
+            <strong className="pol-title">{t("policy.defaultTitle")}</strong>
+            <div className="pol-meta">
+              v{policy.version} · epoch {policy.configEpoch ?? "—"} ·{" "}
               {policy.defaultAction} · {(policy.enabledHosts || []).length}{" "}
               sites · pack {policy.rulesPackVersion}
             </div>
@@ -7315,10 +7333,8 @@ function PolicyView({
           </button>
         </div>
         {editDefaultOpen && (
-          <div className="policy-default-editor">
-            <h3 style={{ fontSize: "0.95rem", marginTop: 0 }}>
-              {t("policy.editDefault")}
-            </h3>
+          <div className="pol-card-body">
+            <div className="pol-section-l">{t("policy.editDefault")}</div>
         <label className="field-label">{t("policy.aiSites")}</label>
         <HostPicker
           value={hosts
@@ -7328,35 +7344,63 @@ function PolicyView({
           onChange={(list) => setHosts(list.join("\n"))}
         />
 
-        <div className="row" style={{ marginTop: 14, gap: 20, flexWrap: "wrap" }}>
-          <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            <input
-              type="checkbox"
-              checked={scanUploads}
-              onChange={(e) => setScanUploads(e.target.checked)}
-            />
-            {t("policy.scanUploads")}
-          </label>
-          <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        <div className="pol-section-l" style={{ marginTop: 14 }}>
+          {t("policy.protection") || "Protection"}
+        </div>
+        <div className="pol-toggles">
+          <label className="pol-toggle">
             <input
               type="checkbox"
               checked={eventReporting}
               onChange={(e) => setEventReporting(e.target.checked)}
             />
-            {t("policy.eventReporting")}
+            <span>{t("policy.eventReporting")}</span>
           </label>
-          <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <label className="pol-toggle">
             <input
               type="checkbox"
               checked={protectUnenroll}
               onChange={(e) => setProtectUnenroll(e.target.checked)}
             />
-            {t("policy.protectUnenroll")}
+            <span>{t("policy.protectUnenroll")}</span>
           </label>
         </div>
-        <p className="muted" style={{ fontSize: 12, marginTop: 6 }}>
-          {t("policy.scanHint")}
-        </p>
+
+        <div className="pol-section-l" style={{ marginTop: 14 }}>
+          {t("policy.fileScanTitle") || "Analyse des fichiers"}
+        </div>
+        <label className="pol-toggle pol-toggle-main">
+          <input
+            type="checkbox"
+            checked={scanUploads}
+            onChange={(e) => setScanUploads(e.target.checked)}
+          />
+          <span>
+            <strong>{t("policy.scanUploads")}</strong>
+            <em>{t("policy.scanHint")}</em>
+          </span>
+        </label>
+        <div className={`pol-toggles pol-toggles-sub${scanUploads ? "" : " is-off"}`}>
+          {(
+            [
+              [scanConfigs, setScanConfigs, t("policy.scanConfigs") || "Configurations (.conf, .json, .xml, .env…)"],
+              [scanDatabases, setScanDatabases, t("policy.scanDatabases") || "Bases de données (.sql)"],
+              [scanOffice, setScanOffice, t("policy.scanOffice") || "PDF / Office (DOCX, PPTX, XLSX)"],
+              [scanImages, setScanImages, t("policy.scanImages") || "Images — OCR (Tesseract)"],
+              [warnMedia, setWarnMedia, t("policy.warnMedia") || "Audio / vidéo (confirmation)"]
+            ] as const
+          ).map(([val, setVal, label], i) => (
+            <label key={i} className="pol-toggle">
+              <input
+                type="checkbox"
+                checked={!!val}
+                disabled={!scanUploads}
+                onChange={(e) => setVal(e.target.checked)}
+              />
+              <span>{label}</span>
+            </label>
+          ))}
+        </div>
         <div className="policy-block">
           <label className="field-label">{t("policy.defaultAction")}</label>
           <select
@@ -7546,15 +7590,18 @@ function PolicyView({
             }}>
             {t("policy.forceSync")}
           </button>
-            </div>
+        </div>
           </div>
         )}
       </div>
 
       {/* Policies par département (priorité type firewall) */}
-      <div className="card">
-        <h2>{t("policy.profilesTitle")}</h2>
-        <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>
+      <div className="pol-card" style={{ marginTop: 12 }}>
+        <div className="pol-card-head">
+          <strong className="pol-title">{t("policy.profilesTitle")}</strong>
+        </div>
+        <div className="pol-card-body">
+        <p className="pol-meta" style={{ marginTop: 0 }}>
           {t("policy.profilesHint")}
         </p>
         {sortedProfiles.length === 0 ? (
@@ -8067,8 +8114,110 @@ function PolicyView({
             </button>
           )}
         </div>
+        </div>
       </div>
-    </>
+      <style>{`
+        .pol-page { display: flex; flex-direction: column; gap: 0; }
+        .pol-card {
+          border: 1px solid var(--line, #e2e8f0);
+          border-radius: 10px;
+          background: var(--surface, #fff);
+          margin-bottom: 12px;
+          overflow: hidden;
+        }
+        .pol-card-head {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 12px;
+          padding: 10px 14px;
+          border-bottom: 1px solid var(--line, #e2e8f0);
+          background: var(--surface-2, #f8fafc);
+        }
+        .pol-card-body { padding: 12px 14px 14px; }
+        .pol-badge {
+          display: inline-block;
+          font-size: 10px;
+          font-weight: 700;
+          text-transform: uppercase;
+          letter-spacing: 0.03em;
+          padding: 2px 7px;
+          border-radius: 999px;
+          background: #ccfbf1;
+          color: #0f766e;
+          margin-right: 8px;
+        }
+        .pol-title {
+          font-size: 13px;
+          font-weight: 700;
+          color: var(--text, #0f172a);
+        }
+        .pol-meta {
+          font-size: 11px;
+          color: #64748b;
+          margin-top: 3px;
+        }
+        .pol-section-l {
+          font-size: 10px;
+          font-weight: 700;
+          text-transform: uppercase;
+          letter-spacing: 0.03em;
+          color: #64748b;
+          margin-bottom: 8px;
+        }
+        .pol-toggles {
+          display: grid;
+          grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+          gap: 6px 12px;
+        }
+        .pol-toggles-sub {
+          margin-top: 8px;
+          padding: 10px 12px;
+          border-radius: 8px;
+          border: 1px solid var(--line, #e2e8f0);
+          background: var(--surface-2, #f8fafc);
+        }
+        .pol-toggles-sub.is-off { opacity: 0.45; pointer-events: none; }
+        .pol-toggle {
+          display: flex;
+          align-items: flex-start;
+          gap: 8px;
+          font-size: 12px;
+          color: var(--text, #0f172a);
+          cursor: pointer;
+        }
+        .pol-toggle input { margin-top: 2px; }
+        .pol-toggle-main {
+          padding: 8px 10px;
+          border-radius: 8px;
+          border: 1px solid var(--line, #e2e8f0);
+          background: #fff;
+        }
+        .pol-toggle-main span { display: flex; flex-direction: column; gap: 2px; }
+        .pol-toggle-main em {
+          font-style: normal;
+          font-size: 11px;
+          color: #64748b;
+          font-weight: 500;
+        }
+        .pol-page .field-label {
+          font-size: 11px;
+          margin-top: 10px;
+          margin-bottom: 4px;
+        }
+        .pol-page .input {
+          font-size: 12px;
+          min-height: 32px;
+        }
+        .pol-page .table th {
+          font-size: 10px;
+          text-transform: uppercase;
+          letter-spacing: 0.03em;
+          padding: 6px 10px;
+        }
+        .pol-page .table td { padding: 7px 10px; font-size: 12px; }
+      `}</style>
+    </div>
   )
 }
 

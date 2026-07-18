@@ -109,8 +109,10 @@ export interface OpsGateSettings {
   scanConfigs?: boolean
   /** Scanner .sql / warn .db (défaut true) */
   scanDatabases?: boolean
-  /** OCR images — stub V1 (défaut false) */
+  /** OCR images Tesseract (défaut false, piloté par policy) */
   scanImages?: boolean
+  /** PDF / DOCX / PPTX / XLSX extraction (défaut true) */
+  scanOffice?: boolean
   /** Warning obligatoire audio/vidéo (défaut true) */
   warnMedia?: boolean
   mode: AgentMode
@@ -193,6 +195,7 @@ export const DEFAULT_SETTINGS: OpsGateSettings = {
   scanConfigs: true,
   scanDatabases: true,
   scanImages: false,
+  scanOffice: true,
   warnMedia: true,
   mode: "local_only",
   apiBaseUrl: "http://127.0.0.1:8787",

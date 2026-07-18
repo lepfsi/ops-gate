@@ -769,6 +769,7 @@ async function processQuarantinedFiles(
       scanConfigs: settings.scanConfigs !== false,
       scanDatabases: settings.scanDatabases !== false,
       scanImages: settings.scanImages === true,
+      scanOffice: settings.scanOffice !== false,
       warnMedia: settings.warnMedia !== false
     }
     const scans = await scanFiles(frozen, rules, scanOpts)
