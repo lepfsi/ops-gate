@@ -51,6 +51,11 @@ ops-gate/
 | File scan profils | resolveEffectiveFileScan | policy + console PolicyView |
 | Dashboard soft load | pas de flash busy si cache | `App.tsx` loadTab |
 | Risk pagination | 20 / page | `RiskShadowViews.tsx` |
+| Inbox admin pop-up | Poll 12 s + modal messages `open` ; Acknowledge = mark read multi-admin | `App.tsx` |
+| Chart Events 14 j étendu | barres en **px** (pas %) + CSS hauteur fixe mode expanded | `App.tsx`, `styles.css` |
+| Labels dashboard sans « V3 » | i18n widgets Rewrite / Risk / Shadow | `i18n.ts` |
+| Backup auto 7/14/30 j | Cron + monitoring.autoBackup + dossier admin + UI Général | `backup-cron.ts`, `BACKUP.md` |
+| Deploy prod / HA | Doc recommandation Docker vs DB externe + HA | `architecture/DEPLOY-PROD-HA.md` |
 
 **Commandes utiles**
 

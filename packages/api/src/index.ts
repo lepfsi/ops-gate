@@ -101,6 +101,17 @@ async function main() {
     )
   }
 
+  // Backup auto système (7 / 14 / 30 j — style KSC)
+  try {
+    const { startAutoBackupCron } = await import("./backup-cron")
+    startAutoBackupCron(store)
+  } catch (e) {
+    console.warn(
+      "[opsgate-api] Auto-backup cron init skipped:",
+      e instanceof Error ? e.message : e
+    )
+  }
+
   // Soft-delete RGPD → hard purge après délai de grâce
   try {
     const { startGdprCron } = await import("./gdpr-cron")

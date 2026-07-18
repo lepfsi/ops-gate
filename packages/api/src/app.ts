@@ -649,6 +649,31 @@ export function createApp() {
         status
       )
     }
+    // Journal audit : message user → admin (collecté pour SOC / historique)
+    try {
+      const cats = await orgLogCategories(orgId)
+      if (cats.adminAudit !== false) {
+        await store.appendAdminAudit({
+          orgId,
+          adminId: "agent",
+          adminEmail: `agent:${agentId}`,
+          adminLabel:
+            agent?.deviceLabel ||
+            agent?.hostName ||
+            agentId.slice(0, 12),
+          action: "inbox_user_message",
+          detail: `Message user → admin : ${result.message.subject.slice(0, 80)}`,
+          meta: {
+            message_id: result.message.id,
+            agent_id: agentId,
+            category: result.message.category,
+            status: result.message.status
+          }
+        })
+      }
+    } catch {
+      /* ne bloque pas l’envoi */
+    }
     return c.json(
       { ok: true, message: serializeInboxMessage(result.message) },
       201
@@ -6427,6 +6452,122 @@ export function createApp() {
       users_count: users.length,
       note: "Scores calculés à la volée depuis les events (pas de cache obligatoire)."
     })
+  })
+
+  /**
+   * Racines / lecteurs du serveur API (navigation backup).
+   * GET /v1/org/backup/fs/roots — principal
+   */
+  v1.get("/org/backup/fs/roots", async (c) => {
+    const gate = await requireConsoleAuth(c, "console_access")
+    if (!gate.ok) return c.json({ error: gate.error }, gate.status)
+    if (!gate.admin.isPrincipal) {
+      return c.json({ error: "principal_only" }, 403)
+    }
+    const { listFsRoots } = await import("./fs-browse")
+    const roots = await listFsRoots()
+    return c.json({ ok: true, roots, platform: process.platform })
+  })
+
+  /**
+   * Liste sous-dossiers d’un chemin serveur.
+   * GET /v1/org/backup/fs/list?path=
+   */
+  v1.get("/org/backup/fs/list", async (c) => {
+    const gate = await requireConsoleAuth(c, "console_access")
+    if (!gate.ok) return c.json({ error: gate.error }, gate.status)
+    if (!gate.admin.isPrincipal) {
+      return c.json({ error: "principal_only" }, 403)
+    }
+    const p = (c.req.query("path") || "").trim()
+    if (!p) return c.json({ error: "path_required" }, 400)
+    const { listFsDirectories } = await import("./fs-browse")
+    const r = await listFsDirectories(p)
+    // Toujours 200 : le client lit r.ok / r.error (évite throw générique HTTP 400)
+    return c.json(r)
+  })
+
+  /**
+   * Vérifie qu’un dossier est joignable et inscriptible (probe write).
+   * POST /v1/org/backup/fs/verify  { path, create_if_missing? }
+   */
+  v1.post("/org/backup/fs/verify", async (c) => {
+    const gate = await requireConsoleAuth(c, "console_access")
+    if (!gate.ok) return c.json({ error: gate.error }, gate.status)
+    if (!gate.admin.isPrincipal) {
+      return c.json({ error: "principal_only" }, 403)
+    }
+    let body: { path?: string; create_if_missing?: boolean }
+    try {
+      body = await c.req.json()
+    } catch {
+      return c.json({ error: "invalid_json" }, 400)
+    }
+    const p = (body.path || "").trim()
+    if (!p) return c.json({ error: "path_required" }, 400)
+    const { verifyFsDirectory } = await import("./fs-browse")
+    const r = await verifyFsDirectory(p, {
+      createIfMissing: body.create_if_missing === true
+    })
+    return c.json(r)
+  })
+
+  /**
+   * Statut backup auto (planification + dernier run).
+   * GET /v1/org/backup/auto
+   */
+  v1.get("/org/backup/auto", async (c) => {
+    const gate = await requireConsoleAuth(c, "console_access")
+    if (!gate.ok) return c.json({ error: gate.error }, gate.status)
+    const org = await store.getOrg(gate.orgId)
+    if (!org) return c.json({ error: "no_org" }, 404)
+    const { mergeMonitoringSettings } = await import("./types")
+    const mon = mergeMonitoringSettings(org.monitoring)
+    const ab = mon.autoBackup
+    const { getAutoBackupDir, isAutoBackupDue } = await import("./backup-cron")
+    return c.json({
+      ok: true,
+      auto_backup: ab,
+      due_now: isAutoBackupDue(
+        ab || { enabled: false, intervalDays: 7, keepCount: 8 }
+      ),
+      backup_dir: getAutoBackupDir(ab?.directory),
+      cron_env: process.env.OPSGATE_AUTO_BACKUP_CRON_MINUTES ?? "60",
+      database_url_set: !!(process.env.DATABASE_URL || "").trim()
+    })
+  })
+
+  /**
+   * Forcer un backup auto immédiat (principal).
+   * POST /v1/org/backup/auto/run
+   */
+  v1.post("/org/backup/auto/run", async (c) => {
+    const gate = await requireConsoleAuth(c, "console_access")
+    if (!gate.ok) return c.json({ error: gate.error }, gate.status)
+    if (!gate.admin.isPrincipal) {
+      return c.json(
+        {
+          error: "principal_required",
+          message: "Backup forcé réservé au principal."
+        },
+        403
+      )
+    }
+    const { runAutoBackupForOrg } = await import("./backup-cron")
+    const r = await runAutoBackupForOrg(store, gate.orgId, {
+      force: true,
+      doSqlDump: true
+    })
+    await store.appendAdminAudit({
+      orgId: gate.orgId,
+      adminId: gate.admin.id,
+      adminEmail: gate.admin.email,
+      adminLabel: gate.admin.label,
+      action: "backup_auto_run",
+      detail: r.detail.slice(0, 200),
+      meta: { ok: r.ok, files: r.files }
+    })
+    return c.json({ ok: r.ok, ran: r.ran, detail: r.detail, files: r.files })
   })
 
   /**

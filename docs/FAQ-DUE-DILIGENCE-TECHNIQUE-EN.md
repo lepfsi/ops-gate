@@ -275,8 +275,11 @@ Prod: `DATABASE_URL`, signing keys, SMTP, Stripe — **env**, not commit.
 ### I1. “Multi-region HA?”
 
 **Out of current scope** (documented). Typical customer deploy: Postgres + API + console behind TLS reverse-proxy.  
-Config backup + DB script.  
+Config backup + DB script + **auto backup 7/14/30 days**.  
 No false “99.99 multi-AZ global” claim.
+
+**Single-region HA is implementable**: multi-instance API (stateless + Postgres) behind LB; managed/replica DB; crons on one worker.  
+Details: [`architecture/DEPLOY-PROD-HA.md`](./architecture/DEPLOY-PROD-HA.md).
 
 ### I2. “If the API is down?”
 

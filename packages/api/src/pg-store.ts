@@ -125,7 +125,10 @@ const DEFAULT_HOSTS = [
   "bard.google.com",
   "copilot.microsoft.com",
   "perplexity.ai",
+  "www.perplexity.ai",
   "chat.deepseek.com",
+  "deepseek.com",
+  "www.deepseek.com",
   "aistudio.google.com",
   "poe.com",
   "you.com",
@@ -1467,9 +1470,35 @@ export class PgStore implements OpsGateStore {
       "chat.openai.com",
       "claude.ai",
       "gemini.google.com",
+      "bard.google.com",
       "copilot.microsoft.com",
       "perplexity.ai",
-      "grok.com"
+      "www.perplexity.ai",
+      "chat.deepseek.com",
+      "deepseek.com",
+      "www.deepseek.com",
+      "aistudio.google.com",
+      "poe.com",
+      "you.com",
+      "chat.mistral.ai",
+      "lechat.mistral.ai",
+      "console.groq.com",
+      "grok.x.ai",
+      "grok.com",
+      "huggingface.co",
+      "phind.com",
+      "meta.ai",
+      "pi.ai",
+      "character.ai",
+      "notebooklm.google.com",
+      "openrouter.ai",
+      "together.ai",
+      "fireworks.ai",
+      "blackbox.ai",
+      "chat.lmsys.org",
+      "lmarena.ai",
+      "typingmind.com",
+      "chat.qwen.ai"
     ]
     const client = await this.pool.connect()
     try {
@@ -1559,7 +1588,13 @@ export class PgStore implements OpsGateStore {
             ...(org.monitoring?.ldap || {}),
             ...monitoring.ldap
           }
-        : org.monitoring?.ldap
+        : org.monitoring?.ldap,
+      autoBackup: monitoring.autoBackup
+        ? {
+            ...(org.monitoring?.autoBackup || {}),
+            ...monitoring.autoBackup
+          }
+        : org.monitoring?.autoBackup
     })
     await this.pool.query(
       `UPDATE organizations SET monitoring_json = $2 WHERE id = $1`,

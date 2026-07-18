@@ -9,7 +9,9 @@ const AI_HOST_PRESETS = [
   "bard.google.com",
   "copilot.microsoft.com",
   "perplexity.ai",
+  "www.perplexity.ai",
   "chat.deepseek.com",
+  "deepseek.com",
   "aistudio.google.com",
   "poe.com",
   "you.com",
@@ -59,13 +61,15 @@ const GROUPS: { title: string; hosts: string[] }[] = [
       "grok.com",
       "grok.x.ai",
       "meta.ai",
-      "perplexity.ai"
+      "perplexity.ai",
+      "www.perplexity.ai"
     ]
   },
   {
     title: "Open source / cloud",
     hosts: [
       "chat.deepseek.com",
+      "deepseek.com",
       "chat.mistral.ai",
       "lechat.mistral.ai",
       "console.groq.com",

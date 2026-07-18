@@ -8,6 +8,7 @@ import {
   type PointerEvent as ReactPointerEvent,
   type ReactNode
 } from "react"
+import { createPortal } from "react-dom"
 
 import {
   api,
@@ -45,6 +46,7 @@ import { RiskView, ShadowAiView } from "./RiskShadowViews"
 import {
   addWidget,
   availableWidgets,
+  DASH_WIDGET_META,
   loadDashLayout,
   moveWidget,
   patchWidget,
@@ -56,8 +58,13 @@ import {
 } from "./dash-layout"
 import {
   COMMON_TIMEZONES,
+  TIMEZONE_OPTIONS,
+  applyOrgTimezoneToPrefs,
+  formatDateTimeAny,
+  formatDateTimeIso,
   loadDateTimePrefs,
   saveDateTimePrefs,
+  useDateTimePrefs,
   type DateFormatPref,
   type DateTimePrefs,
   type TimeFormatPref
@@ -140,6 +147,14 @@ export default function App() {
   const [info, setInfoRaw] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [inboxUnread, setInboxUnread] = useState(0)
+  /** Pop-up messages user non acknowledge (status open) */
+  const [inboxAlertOpen, setInboxAlertOpen] = useState(false)
+  const [inboxAlertMsgs, setInboxAlertMsgs] = useState<
+    import("./api").InboxMessage[]
+  >([])
+  const [inboxAlertBusy, setInboxAlertBusy] = useState(false)
+  /** IDs snooze session (« Plus tard ») — sans mark-read → autres admins voient encore le pop-up */
+  const inboxSnoozedRef = useRef<Set<string>>(new Set())
   const [theme, setTheme] = useState<"light" | "dark">(() => {
     try {
       return localStorage.getItem("opsgate_theme") === "dark" ? "dark" : "light"
@@ -640,23 +655,36 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionAdmin?.id])
 
-  // Badge non-lus inbox (poll léger)
+  // Badge non-lus + pop-up messages user (poll fréquent — l’admin ne refresh pas)
   useEffect(() => {
     if (!sessionAdmin || !getToken()) {
       setInboxUnread(0)
+      setInboxAlertMsgs([])
+      setInboxAlertOpen(false)
       return
     }
     let cancelled = false
     const tick = async () => {
       try {
-        const r = await api.inboxUnreadCount()
-        if (!cancelled) setInboxUnread(r.unread || 0)
+        const [countR, listR] = await Promise.all([
+          api.inboxUnreadCount(),
+          api.inboxList({ status: "open", limit: 30 })
+        ])
+        if (cancelled) return
+        setInboxUnread(countR.unread || 0)
+        const open = (listR.messages || []).filter(
+          (m) => m.status === "open" && !inboxSnoozedRef.current.has(m.id)
+        )
+        setInboxAlertMsgs(open)
+        if (open.length > 0) setInboxAlertOpen(true)
+        else setInboxAlertOpen(false)
       } catch {
         /* ignore */
       }
     }
     void tick()
-    const id = window.setInterval(() => void tick(), 60_000)
+    // 12 s : réactivité admin sans saturer l’API
+    const id = window.setInterval(() => void tick(), 12_000)
     return () => {
       cancelled = true
       window.clearInterval(id)
@@ -1533,6 +1561,7 @@ export default function App() {
         <SummaryView
           summary={summary}
           dashV3={dashV3}
+          inboxUnread={inboxUnread}
           busy={busy}
           dashSection={dashSection}
           setDashSection={setDashSection}
@@ -1542,6 +1571,7 @@ export default function App() {
           onRefresh={() => void loadTab("summary")}
           onGoRisk={() => goTab("risk")}
           onGoShadow={() => goTab("shadow")}
+          onGoInbox={() => goTab("support")}
           onGoEventsProxy={() => {
             try {
               sessionStorage.setItem("opsgate_events_preset", "proxy")
@@ -1807,6 +1837,152 @@ export default function App() {
       )}
       {tab === "help" && <HelpView t={t} />}
 
+      {inboxAlertOpen && inboxAlertMsgs.length > 0 && (
+        <div
+          className="modal-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="inbox-alert-title">
+          <div
+            className="card modal-card"
+            style={{ maxWidth: 520, maxHeight: "85vh", overflow: "auto" }}>
+            <h2 id="inbox-alert-title" style={{ marginTop: 0 }}>
+              {inboxAlertMsgs.length === 1
+                ? t("inbox.alertTitle")
+                : t("inbox.alertTitleN", { n: inboxAlertMsgs.length })}
+            </h2>
+            <p className="muted" style={{ fontSize: 13, lineHeight: 1.45 }}>
+              {t("inbox.alertHint")}
+            </p>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {inboxAlertMsgs.slice(0, 8).map((m) => (
+                <div
+                  key={m.id}
+                  style={{
+                    padding: 12,
+                    borderRadius: 10,
+                    border: "1px solid var(--line)",
+                    background: "var(--surface-2, rgba(15,118,110,0.06))"
+                  }}>
+                  <div
+                    className="muted"
+                    style={{ fontSize: 11, marginBottom: 4 }}>
+                    {t("inbox.alertFrom")}:{" "}
+                    <strong style={{ color: "inherit" }}>
+                      {m.device_label || m.agent_id.slice(0, 12)}
+                    </strong>
+                    {" · "}
+                    {formatDateTimeIso(
+                      m.created_at,
+                      loadDateTimePrefs()
+                    )}
+                  </div>
+                  <div style={{ fontWeight: 650, fontSize: 14 }}>
+                    {m.subject}
+                  </div>
+                  <p
+                    style={{
+                      whiteSpace: "pre-wrap",
+                      margin: "6px 0 0",
+                      fontSize: 13,
+                      lineHeight: 1.4
+                    }}>
+                    {m.body.length > 400 ? `${m.body.slice(0, 400)}…` : m.body}
+                  </p>
+                  {(m.context_hostname || m.context_url) && (
+                    <p className="muted" style={{ fontSize: 11, margin: "6px 0 0" }}>
+                      {m.context_hostname || m.context_url}
+                    </p>
+                  )}
+                  <div
+                    className="row"
+                    style={{ gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+                    <button
+                      type="button"
+                      className="btn btn-sm"
+                      disabled={inboxAlertBusy}
+                      onClick={async () => {
+                        setInboxAlertBusy(true)
+                        try {
+                          await api.inboxMarkRead(m.id)
+                          setInboxAlertMsgs((prev) => {
+                            const next = prev.filter((x) => x.id !== m.id)
+                            if (next.length === 0) setInboxAlertOpen(false)
+                            return next
+                          })
+                          setInboxUnread((n) => Math.max(0, n - 1))
+                        } catch (e) {
+                          setError(String(e))
+                        } finally {
+                          setInboxAlertBusy(false)
+                        }
+                      }}>
+                      {t("inbox.ack")}
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div
+              className="row"
+              style={{
+                gap: 8,
+                marginTop: 16,
+                flexWrap: "wrap",
+                justifyContent: "flex-end"
+              }}>
+              <button
+                type="button"
+                className="btn secondary btn-sm"
+                disabled={inboxAlertBusy}
+                onClick={() => {
+                  for (const m of inboxAlertMsgs) {
+                    inboxSnoozedRef.current.add(m.id)
+                  }
+                  setInboxAlertOpen(false)
+                }}>
+                {t("inbox.alertLater")}
+              </button>
+              <button
+                type="button"
+                className="btn secondary btn-sm"
+                disabled={inboxAlertBusy}
+                onClick={() => {
+                  setInboxAlertOpen(false)
+                  goTab("support")
+                }}>
+                {t("inbox.alertOpenInbox")}
+              </button>
+              {inboxAlertMsgs.length > 1 && (
+                <button
+                  type="button"
+                  className="btn btn-sm"
+                  disabled={inboxAlertBusy}
+                  onClick={async () => {
+                    setInboxAlertBusy(true)
+                    try {
+                      const ids = inboxAlertMsgs.map((m) => m.id)
+                      await Promise.all(
+                        ids.map((id) => api.inboxMarkRead(id).catch(() => null))
+                      )
+                      setInboxAlertMsgs([])
+                      setInboxAlertOpen(false)
+                      const r = await api.inboxUnreadCount()
+                      setInboxUnread(r.unread || 0)
+                    } catch (e) {
+                      setError(String(e))
+                    } finally {
+                      setInboxAlertBusy(false)
+                    }
+                  }}>
+                  {t("inbox.ackAll")}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       <footer className="console-footer">
         OpsGate Console <strong>1.2.0</strong>
         {" · "}
@@ -2020,6 +2196,7 @@ function ForcePasswordModal({ onDone }: { onDone: () => void }) {
 function SummaryView({
   summary,
   dashV3,
+  inboxUnread = 0,
   busy,
   dashSection,
   setDashSection,
@@ -2032,6 +2209,7 @@ function SummaryView({
   onRevokeAgent,
   onGoRisk,
   onGoShadow,
+  onGoInbox,
   onGoEventsProxy,
   onGoProxySettings,
   setError,
@@ -2066,6 +2244,8 @@ function SummaryView({
       block_events: number
     } | null
   }
+  /** Messages user → admin non lus (status open) */
+  inboxUnread?: number
   busy?: boolean
   dashSection: "overview" | "licenses" | "connectivity" | "activity" | "rules"
   setDashSection: (
@@ -2080,6 +2260,7 @@ function SummaryView({
   onMerged?: () => void
   onGoRisk?: () => void
   onGoShadow?: () => void
+  onGoInbox?: () => void
   onGoEventsProxy?: () => void
   onGoProxySettings?: () => void
   setError?: (e: string | null) => void
@@ -2087,6 +2268,7 @@ function SummaryView({
   setBusy?: (b: boolean) => void
   t: (k: string, vars?: Record<string, string | number>) => string
 }) {
+  const dtPrefs = useDateTimePrefs()
   const [drill, setDrill] = useState<string | null>(null)
   const [drillEvents, setDrillEvents] = useState<EventRow[]>([])
   const [drillBusy, setDrillBusy] = useState(false)
@@ -2653,7 +2835,7 @@ function SummaryView({
                   {drillEvents.slice(0, 80).map((e) => (
                     <tr key={e.id || `${e.ts}-${e.decision}-${e.hostname}`}>
                       <td className="muted">
-                        {e.ts ? new Date(e.ts).toLocaleString("fr-FR") : " - "}
+                        {e.ts ? formatDateTimeAny(e.ts, dtPrefs) : " - "}
                       </td>
                       <td>
                         <strong>
@@ -3168,22 +3350,32 @@ function SummaryView({
                 "timeline",
                 t("dash.events14"),
                 <div className="dash-timeline">
-                  {(summary.events_by_day || []).map((d) => (
-                    <div
-                      key={d.day}
-                      className="dash-tl-col"
-                      title={`${d.day}: ${d.count}`}>
-                      <div className="dash-tl-bar-wrap">
-                        <div
-                          className="dash-tl-bar"
-                          style={{
-                            height: `${Math.max(4, (d.count / maxDay) * 100)}%`
-                          }}
-                        />
+                  {(summary.events_by_day || []).map((d) => {
+                    /* px explicites : % height échoue si parent en height:auto (mode étendu) */
+                    const barPx = Math.max(
+                      4,
+                      Math.round((d.count / maxDay) * (dashExpanded ? 140 : 96))
+                    )
+                    return (
+                      <div
+                        key={d.day}
+                        className="dash-tl-col"
+                        title={`${d.day}: ${d.count}`}>
+                        <div className="dash-tl-bar-wrap">
+                          <div
+                            className="dash-tl-bar"
+                            style={{ height: `${barPx}px` }}
+                          />
+                        </div>
+                        <span className="dash-tl-lbl">
+                          {d.day.slice(8)}
+                          {dashExpanded ? (
+                            <span className="dash-tl-n">{d.count}</span>
+                          ) : null}
+                        </span>
                       </div>
-                      <span className="dash-tl-lbl">{d.day.slice(8)}</span>
-                    </div>
-                  ))}
+                    )
+                  })}
                   {!(summary.events_by_day || []).length && (
                     <p className="muted">{t("dash.noSeries")}</p>
                   )}
@@ -3282,6 +3474,80 @@ function SummaryView({
                 )
               )
             }
+            if (lay.id === "inbox_unread") {
+              const n = Math.max(0, Math.floor(inboxUnread || 0))
+              return wrapWidget(
+                "inbox_unread",
+                t("dash.inboxUnread"),
+                <div
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "stretch",
+                    gap: 12,
+                    height: "100%",
+                    justifyContent: "center"
+                  }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 14
+                    }}>
+                    <div
+                      style={{
+                        width: 56,
+                        height: 56,
+                        borderRadius: 14,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        fontWeight: 800,
+                        fontSize: n > 99 ? 16 : 22,
+                        background:
+                          n > 0
+                            ? "rgba(15, 118, 110, 0.18)"
+                            : "var(--surface-2, #f1f5f9)",
+                        color: n > 0 ? "#0f766e" : "var(--muted)",
+                        border:
+                          n > 0
+                            ? "1px solid rgba(15, 118, 110, 0.35)"
+                            : "1px solid var(--line)"
+                      }}>
+                      {n > 99 ? "99+" : n}
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div
+                        style={{
+                          fontSize: 15,
+                          fontWeight: 700,
+                          lineHeight: 1.25
+                        }}>
+                        {n === 0
+                          ? t("dash.inboxUnreadNone")
+                          : n === 1
+                            ? t("inbox.alertTitle")
+                            : t("inbox.alertTitleN", { n })}
+                      </div>
+                      <p
+                        className="muted"
+                        style={{ fontSize: 12, margin: "4px 0 0" }}>
+                        {t("dash.inboxUnreadHint")}
+                      </p>
+                    </div>
+                  </div>
+                  {onGoInbox ? (
+                    <button
+                      type="button"
+                      className={n > 0 ? "btn btn-sm" : "btn secondary btn-sm"}
+                      onClick={() => onGoInbox()}>
+                      {t("dash.inboxUnreadOpen")}
+                    </button>
+                  ) : null}
+                </div>,
+                n > 0 ? "dash-widget--inbox-hot" : "dash-widget--inbox"
+              )
+            }
             return null
           })}
           {dups.length > 0 && !dashExpanded && (
@@ -3348,21 +3614,7 @@ function SummaryView({
                           persistLayout(addWidget(dashLayout, id))
                           setAddMetricOpen(false)
                         }}>
-                        + {t(
-                          id === "licenses"
-                            ? "nav.licenses"
-                            : id === "connectivity"
-                              ? "nav.connectivity"
-                              : id === "protection"
-                                ? "dash.protection"
-                                : id === "activity"
-                                  ? "dash.activity"
-                                  : id === "timeline"
-                                    ? "dash.events14"
-                                    : id === "threats"
-                                      ? "dash.userDecisions"
-                                      : "dash.topRequesters"
-                        )}
+                        + {t(DASH_WIDGET_META[id]?.labelKey || id)}
                       </button>
                     ))}
                   </div>
@@ -3614,10 +3866,21 @@ function DateTimePrefsPanel({
 }) {
   const [prefs, setPrefs] = useState<DateTimePrefs>(() => loadDateTimePrefs())
 
+  // Rester aligné si un seed org (rare) ou un autre onglet met à jour les prefs
+  useEffect(() => {
+    const onPrefs = (e: Event) => {
+      const d = (e as CustomEvent<DateTimePrefs>).detail
+      setPrefs(d || loadDateTimePrefs())
+    }
+    window.addEventListener("opsgate-datetime-prefs", onPrefs)
+    return () => window.removeEventListener("opsgate-datetime-prefs", onPrefs)
+  }, [])
+
   const update = (patch: Partial<DateTimePrefs>) => {
     const next = { ...prefs, ...patch }
     setPrefs(next)
-    saveDateTimePrefs(next)
+    // source "user" : verrouille le fuseau d’affichage (ne plus l’écraser au save settings)
+    saveDateTimePrefs(next, "user")
     setInfo(t("dt.saved"))
   }
 
@@ -3635,11 +3898,15 @@ function DateTimePrefsPanel({
           onChange={(e) => update({ timezone: e.target.value })}>
           {[
             ...new Set([prefs.timezone, ...COMMON_TIMEZONES])
-          ].map((z) => (
-            <option key={z} value={z}>
-              {z}
-            </option>
-          ))}
+          ].map((z) => {
+            const lab =
+              TIMEZONE_OPTIONS.find(([id]) => id === z)?.[1] || z
+            return (
+              <option key={z} value={z}>
+                {lab}
+              </option>
+            )
+          })}
         </select>
         <label className="field-label">{t("dt.dateFormat")}</label>
         <select
@@ -3686,6 +3953,426 @@ function DateTimePrefsPanel({
   )
 }
 
+/** Sélecteur de dossier sur le serveur API (portal body — hors overflow shell). */
+function BackupFsPickerModal({
+  t,
+  initialPath,
+  onCancel,
+  onSelect
+}: {
+  t: (k: string, vars?: Record<string, string | number>) => string
+  initialPath?: string
+  onCancel: () => void
+  onSelect: (path: string, createIfMissing: boolean) => void
+}) {
+  const [roots, setRoots] = useState<
+    Array<{ path: string; label: string; kind: string; reachable: boolean }>
+  >([])
+  /** Dossier actuellement affiché (liste des enfants) */
+  const [browsing, setBrowsing] = useState("")
+  /** Dossier choisi pour validation */
+  const [selected, setSelected] = useState(initialPath?.trim() || "")
+  const [parent, setParent] = useState<string | null>(null)
+  const [entries, setEntries] = useState<Array<{ name: string; path: string }>>(
+    []
+  )
+  const [remote, setRemote] = useState("")
+  const [createIfMissing, setCreateIfMissing] = useState(true)
+  const [loading, setLoading] = useState(true)
+  const [err, setErr] = useState<string | null>(null)
+
+  const openPath = async (p: string, alsoSelect = true) => {
+    const target = p.trim()
+    if (!target) return
+    setLoading(true)
+    setErr(null)
+    try {
+      const r = await api.backupFsList(target)
+      if (!r.ok) {
+        setErr(r.error || t("backup.fsError"))
+        setBrowsing(r.path || target)
+        setParent(r.parent ?? null)
+        setEntries([])
+        if (alsoSelect) setSelected(r.path || target)
+      } else {
+        setBrowsing(r.path)
+        setParent(r.parent)
+        setEntries(r.entries || [])
+        if (alsoSelect) setSelected(r.path)
+      }
+    } catch (e) {
+      setErr(String(e))
+      setEntries([])
+      if (alsoSelect) setSelected(target)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      setLoading(true)
+      setErr(null)
+      try {
+        const r = await api.backupFsRoots()
+        if (cancelled) return
+        setRoots(r.roots || [])
+        const start =
+          initialPath?.trim() ||
+          r.roots?.find((x) => x.kind === "drive")?.path ||
+          r.roots?.[0]?.path ||
+          ""
+        if (start) {
+          await openPath(start, true)
+        } else {
+          setLoading(false)
+        }
+      } catch (e) {
+        if (!cancelled) {
+          setErr(String(e))
+          setLoading(false)
+        }
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault()
+        onCancel()
+      }
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [onCancel])
+
+  const chosen = (selected || browsing || "").trim()
+  const validateLabel =
+    t("backup.fsValidate") === "backup.fsValidate"
+      ? "Valider ce dossier"
+      : t("backup.fsValidate")
+
+  const confirm = () => {
+    const path = chosen
+    if (!path) return
+    onSelect(path, createIfMissing)
+  }
+
+  const modal = (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="backup-fs-title"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onCancel()
+      }}
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 10000,
+        background: "rgba(15, 23, 42, 0.6)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 16,
+        boxSizing: "border-box"
+      }}>
+      <div
+        className="card"
+        style={{
+          width: "min(640px, 96vw)",
+          maxHeight: "min(92vh, 720px)",
+          display: "flex",
+          flexDirection: "column",
+          overflow: "hidden",
+          margin: 0,
+          boxShadow: "0 20px 50px rgba(0,0,0,0.35)",
+          padding: 0
+        }}
+        onClick={(e) => e.stopPropagation()}>
+        {/* Header */}
+        <div
+          style={{
+            padding: "14px 16px 8px",
+            borderBottom: "1px solid var(--line)",
+            flexShrink: 0
+          }}>
+          <div
+            className="row"
+            style={{
+              justifyContent: "space-between",
+              alignItems: "flex-start",
+              gap: 8
+            }}>
+            <h2 id="backup-fs-title" style={{ margin: 0, fontSize: "1.1rem" }}>
+              {t("backup.fsTitle")}
+            </h2>
+            <button
+              type="button"
+              className="btn secondary btn-sm"
+              onClick={onCancel}
+              aria-label={t("backup.fsCancel")}>
+              ✕
+            </button>
+          </div>
+          <p className="muted" style={{ fontSize: 12, margin: "6px 0 0" }}>
+            {t("backup.fsHint")}
+          </p>
+        </div>
+
+        {/* Corps scrollable */}
+        <div
+          style={{
+            flex: "1 1 auto",
+            minHeight: 0,
+            overflow: "auto",
+            padding: "12px 16px"
+          }}>
+          <div style={{ marginBottom: 10 }}>
+            <div className="muted" style={{ fontSize: 11, marginBottom: 4 }}>
+              {t("backup.fsRoots")}
+            </div>
+            <div className="row" style={{ gap: 6, flexWrap: "wrap" }}>
+              {roots.map((r) => (
+                <button
+                  key={r.path}
+                  type="button"
+                  className={`btn btn-sm ${
+                    browsing === r.path || selected === r.path
+                      ? ""
+                      : "secondary"
+                  }`}
+                  disabled={loading}
+                  title={r.path}
+                  onClick={() => void openPath(r.path, true)}>
+                  {r.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div
+            className="row"
+            style={{
+              gap: 8,
+              alignItems: "center",
+              marginBottom: 8,
+              flexWrap: "wrap"
+            }}>
+            <button
+              type="button"
+              className="btn secondary btn-sm"
+              disabled={loading || !parent}
+              onClick={() => parent && void openPath(parent, true)}>
+              {t("backup.fsUp")}
+            </button>
+            <button
+              type="button"
+              className="btn secondary btn-sm"
+              disabled={loading || !browsing}
+              onClick={() => setSelected(browsing)}>
+              {t("backup.fsUseCurrent")}
+            </button>
+            <span
+              className="mono"
+              style={{
+                fontSize: 12,
+                flex: 1,
+                minWidth: 0,
+                wordBreak: "break-all"
+              }}>
+              <span className="muted">{t("backup.fsCurrent")}: </span>
+              {browsing || "—"}
+            </span>
+          </div>
+
+          {err ? (
+            <p className="err" style={{ fontSize: 12, margin: "0 0 8px" }}>
+              {err}
+            </p>
+          ) : null}
+
+          <div
+            style={{
+              minHeight: 120,
+              maxHeight: 200,
+              overflow: "auto",
+              border: "1px solid var(--line)",
+              borderRadius: 8,
+              background: "var(--surface-2, rgba(0,0,0,0.03))"
+            }}>
+            {loading ? (
+              <p className="muted" style={{ padding: 12, margin: 0 }}>
+                {t("backup.fsLoading")}
+              </p>
+            ) : entries.length === 0 ? (
+              <p className="muted" style={{ padding: 12, margin: 0 }}>
+                {t("backup.fsEmpty")}
+              </p>
+            ) : (
+              <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
+                {entries.map((e) => {
+                  const isSel = selected === e.path
+                  return (
+                    <li key={e.path}>
+                      <div
+                        style={{
+                          display: "grid",
+                          gridTemplateColumns: "1fr auto",
+                          gap: 4,
+                          alignItems: "center",
+                          borderBottom: "1px solid var(--line)",
+                          background: isSel
+                            ? "rgba(15, 118, 110, 0.14)"
+                            : "transparent"
+                        }}>
+                        <button
+                          type="button"
+                          onClick={() => setSelected(e.path)}
+                          onDoubleClick={() => void openPath(e.path, true)}
+                          style={{
+                            display: "block",
+                            width: "100%",
+                            textAlign: "left",
+                            padding: "8px 12px",
+                            border: "none",
+                            background: "transparent",
+                            cursor: "pointer",
+                            font: "inherit",
+                            color: "inherit",
+                            fontSize: 13,
+                            fontWeight: isSel ? 650 : 400
+                          }}>
+                          📁 {e.name}
+                        </button>
+                        <button
+                          type="button"
+                          className="btn secondary btn-sm"
+                          disabled={loading}
+                          style={{ marginRight: 8 }}
+                          onClick={() => void openPath(e.path, true)}>
+                          {t("backup.fsOpen")}
+                        </button>
+                      </div>
+                    </li>
+                  )
+                })}
+              </ul>
+            )}
+          </div>
+
+          <div
+            style={{
+              marginTop: 10,
+              padding: "8px 10px",
+              borderRadius: 8,
+              border: "1px solid var(--accent, #0f766e)",
+              background: "rgba(15, 118, 110, 0.08)"
+            }}>
+            <div className="muted" style={{ fontSize: 11 }}>
+              {t("backup.fsSelected")}
+            </div>
+            <div
+              className="mono"
+              style={{
+                fontSize: 13,
+                wordBreak: "break-all",
+                fontWeight: 700
+              }}>
+              {chosen || "—"}
+            </div>
+          </div>
+
+          <div style={{ marginTop: 10 }}>
+            <label className="field-label">{t("backup.fsRemote")}</label>
+            <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+              <input
+                className="input mono"
+                style={{ flex: 1, minWidth: 160 }}
+                value={remote}
+                placeholder={t("backup.fsRemotePlaceholder")}
+                onChange={(e) => setRemote(e.target.value)}
+                spellCheck={false}
+              />
+              <button
+                type="button"
+                className="btn secondary btn-sm"
+                disabled={loading || !remote.trim()}
+                onClick={() => {
+                  setSelected(remote.trim())
+                  void openPath(remote.trim(), true)
+                }}>
+                {t("backup.fsGo")}
+              </button>
+            </div>
+          </div>
+
+          <label
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              fontSize: 12,
+              marginTop: 10
+            }}>
+            <input
+              type="checkbox"
+              checked={createIfMissing}
+              onChange={(e) => setCreateIfMissing(e.target.checked)}
+            />
+            {t("backup.fsCreate")}
+          </label>
+        </div>
+
+        {/* Pied de page FIXE : toujours visible */}
+        <div
+          style={{
+            flexShrink: 0,
+            padding: "12px 16px",
+            borderTop: "2px solid var(--line)",
+            background: "var(--surface, #fff)",
+            display: "flex",
+            gap: 10,
+            justifyContent: "flex-end",
+            flexWrap: "wrap",
+            alignItems: "center",
+            boxShadow: "0 -4px 12px rgba(0,0,0,0.06)"
+          }}>
+          <button
+            type="button"
+            className="btn secondary"
+            onClick={onCancel}
+            style={{ minWidth: 100 }}>
+            {t("backup.fsCancel")}
+          </button>
+          <button
+            type="button"
+            className="btn"
+            disabled={!chosen}
+            onClick={confirm}
+            style={{
+              minWidth: 180,
+              fontWeight: 700,
+              fontSize: 14,
+              padding: "10px 18px"
+            }}>
+            {validateLabel}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+
+  if (typeof document === "undefined") return null
+  return createPortal(modal, document.body)
+}
+
 function SystemSettingsView({
   busy,
   setBusy,
@@ -3713,6 +4400,7 @@ function SystemSettingsView({
   onMfaChange?: (enabled: boolean) => void
   t: (k: string, vars?: Record<string, string | number>) => string
 }) {
+  const dtPrefs = useDateTimePrefs()
   const [settingsTab, setSettingsTab] = useState<SettingsSection>(() => {
     try {
       const h = parseConsoleHash(window.location.hash)
@@ -3771,6 +4459,28 @@ function SystemSettingsView({
   const [days, setDays] = useState<number[]>([1, 2, 3, 4, 5])
   const [retentionDays, setRetentionDays] = useState(90)
   const [auditLegalDays, setAuditLegalDays] = useState(365)
+  const [autoBackupOn, setAutoBackupOn] = useState(false)
+  const [autoBackupInterval, setAutoBackupInterval] = useState<7 | 14 | 30>(7)
+  const [autoBackupKeep, setAutoBackupKeep] = useState(8)
+  const [autoBackupDirectory, setAutoBackupDirectory] = useState("")
+  /** Chemin vérifié joignable+inscriptible côté serveur (null = pas encore vérifié) */
+  const [autoBackupVerifiedPath, setAutoBackupVerifiedPath] = useState<
+    string | null
+  >(null)
+  const [autoBackupVerifyBusy, setAutoBackupVerifyBusy] = useState(false)
+  const [autoBackupVerifyMsg, setAutoBackupVerifyMsg] = useState<string | null>(
+    null
+  )
+  const [autoBackupFsOpen, setAutoBackupFsOpen] = useState(false)
+  const [autoBackupLast, setAutoBackupLast] = useState<string | null>(null)
+  const [autoBackupLastOk, setAutoBackupLastOk] = useState<boolean | null>(
+    null
+  )
+  const [autoBackupLastDetail, setAutoBackupLastDetail] = useState<
+    string | null
+  >(null)
+  const [autoBackupDirResolved, setAutoBackupDirResolved] = useState("")
+  const [autoBackupDbSet, setAutoBackupDbSet] = useState(false)
   const [schedExpOn, setSchedExpOn] = useState(false)
   const [schedExpEmails, setSchedExpEmails] = useState("")
   const [schedExpDay, setSchedExpDay] = useState(1)
@@ -3925,6 +4635,10 @@ function SystemSettingsView({
         setOfflineMin(Math.round((m.offlineLongMs || 7200000) / 60000))
         setSchedOn(!!m.schedule?.enabled)
         setTz(m.schedule?.timezone || "Europe/Paris")
+        // Alignement affichage logs/messages sur le fuseau org
+        if (m.schedule?.timezone) {
+          applyOrgTimezoneToPrefs(m.schedule.timezone)
+        }
         setWorkStart(m.schedule?.workStart || "08:00")
         setWorkEnd(m.schedule?.workEnd || "17:00")
         setDays(m.schedule?.workDays || [1, 2, 3, 4, 5])
@@ -3946,6 +4660,66 @@ function SystemSettingsView({
           setSchedExpCsv(fmts.includes("csv"))
           setSchedExpJson(fmts.includes("json"))
           setSchedExpAttach(s?.attachFiles !== false)
+        }
+        {
+          const ab = m.autoBackup as
+            | {
+                enabled?: boolean
+                intervalDays?: number
+                keepCount?: number
+                directory?: string
+                lastRunAt?: string | null
+                lastRunOk?: boolean | null
+                lastRunDetail?: string | null
+              }
+            | undefined
+          setAutoBackupOn(!!ab?.enabled)
+          setAutoBackupInterval(
+            ab?.intervalDays === 14 || ab?.intervalDays === 30
+              ? ab.intervalDays
+              : 7
+          )
+          setAutoBackupKeep(
+            typeof ab?.keepCount === "number" && ab.keepCount >= 1
+              ? ab.keepCount
+              : 8
+          )
+          setAutoBackupDirectory(
+            typeof ab?.directory === "string" ? ab.directory : ""
+          )
+          setAutoBackupVerifiedPath(null)
+          setAutoBackupVerifyMsg(null)
+          setAutoBackupLast(ab?.lastRunAt || null)
+          setAutoBackupLastOk(
+            typeof ab?.lastRunOk === "boolean" ? ab.lastRunOk : null
+          )
+          setAutoBackupLastDetail(ab?.lastRunDetail || null)
+        }
+        try {
+          const st = await api.orgBackupAutoStatus()
+          setAutoBackupDirResolved(st.backup_dir || "")
+          setAutoBackupDbSet(!!st.database_url_set)
+          if (st.auto_backup) {
+            setAutoBackupOn(!!st.auto_backup.enabled)
+            setAutoBackupInterval(
+              st.auto_backup.intervalDays === 14 ||
+                st.auto_backup.intervalDays === 30
+                ? st.auto_backup.intervalDays
+                : 7
+            )
+            setAutoBackupKeep(st.auto_backup.keepCount || 8)
+            setAutoBackupDirectory(st.auto_backup.directory || "")
+            setAutoBackupVerifiedPath(null)
+            setAutoBackupLast(st.auto_backup.lastRunAt || null)
+            setAutoBackupLastOk(
+              typeof st.auto_backup.lastRunOk === "boolean"
+                ? st.auto_backup.lastRunOk
+                : null
+            )
+            setAutoBackupLastDetail(st.auto_backup.lastRunDetail || null)
+          }
+        } catch {
+          /* ignore */
         }
         const br = m.schedule?.breaks?.[0]
         if (br) {
@@ -4124,10 +4898,67 @@ function SystemSettingsView({
       ? Math.min(1, licStats.seats_used / licStats.seats)
       : 0
 
+  const verifyAutoBackupDir = async (
+    dir: string,
+    createIfMissing = true
+  ): Promise<{ ok: boolean; path?: string; error?: string }> => {
+    const p = dir.trim()
+    if (!p) {
+      return { ok: false, error: t("backup.autoDirRequired") }
+    }
+    setAutoBackupVerifyBusy(true)
+    setAutoBackupVerifyMsg(null)
+    try {
+      const r = await api.backupFsVerify(p, createIfMissing)
+      if (r.ok) {
+        const resolved = r.resolved || r.path || p
+        setAutoBackupDirectory(resolved)
+        setAutoBackupVerifiedPath(resolved)
+        setAutoBackupDirResolved(resolved)
+        setAutoBackupVerifyMsg(t("backup.autoDirVerified"))
+        return { ok: true, path: resolved }
+      }
+      setAutoBackupVerifiedPath(null)
+      const err = r.error || t("backup.autoDirUnreachable")
+      setAutoBackupVerifyMsg(err)
+      return { ok: false, error: err }
+    } catch (e) {
+      setAutoBackupVerifiedPath(null)
+      const err = String(e)
+      setAutoBackupVerifyMsg(err)
+      return { ok: false, error: err }
+    } finally {
+      setAutoBackupVerifyBusy(false)
+    }
+  }
+
   const saveMonitoring = async () => {
     setBusy(true)
     setError(null)
     try {
+      // Backup auto : dossier obligatoire + vérif joignable avant save
+      let backupDir = autoBackupDirectory.trim()
+      if (autoBackupOn) {
+        if (!backupDir) {
+          setError(t("backup.autoDirRequired"))
+          setBusy(false)
+          return
+        }
+        if (
+          !autoBackupVerifiedPath ||
+          autoBackupVerifiedPath.trim().toLowerCase() !==
+            backupDir.toLowerCase()
+        ) {
+          const v = await verifyAutoBackupDir(backupDir, true)
+          if (!v.ok) {
+            setError(v.error || t("backup.autoDirMustVerify"))
+            setBusy(false)
+            return
+          }
+          backupDir = v.path || backupDir
+        }
+      }
+
       const daysClamped = Math.min(
         3650,
         Math.max(1, Math.floor(retentionDays) || 90)
@@ -4186,6 +5017,12 @@ function SystemSettingsView({
           adminLogin: logLogin,
           adminAudit: logAudit,
           agentLifecycle: logAgentLife
+        },
+        autoBackup: {
+          enabled: autoBackupOn,
+          intervalDays: autoBackupInterval,
+          keepCount: Math.min(60, Math.max(1, Math.floor(autoBackupKeep) || 8)),
+          directory: backupDir
         },
         notifications: {
           licenseExpiring: notifLicExp,
@@ -4259,6 +5096,8 @@ function SystemSettingsView({
       } catch {
         /* ignore */
       }
+      // Fuseau org → affichage logs / messages (GMT+4, etc.)
+      if (tz?.trim()) applyOrgTimezoneToPrefs(tz.trim())
       setInfo(t("settings.saved"))
     } catch (e) {
       setError(String(e))
@@ -4784,6 +5623,232 @@ function SystemSettingsView({
           <p className="muted" style={{ fontSize: 11, marginTop: 8 }}>
             {t("backup.dbHint")}
           </p>
+
+          <h3 style={{ marginTop: 28 }}>{t("backup.autoTitle")}</h3>
+          <p className="muted" style={{ fontSize: 12 }}>
+            {t("backup.autoHint")}
+          </p>
+          <div className="form-stack" style={{ maxWidth: 520 }}>
+            <label
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                fontSize: 13
+              }}>
+              <input
+                type="checkbox"
+                checked={autoBackupOn}
+                onChange={(e) => setAutoBackupOn(e.target.checked)}
+              />
+              {t("backup.autoEnable")}
+            </label>
+            <label className="field-label">{t("backup.autoInterval")}</label>
+            <select
+              className="input"
+              value={autoBackupInterval}
+              disabled={!autoBackupOn}
+              onChange={(e) => {
+                const v = Number(e.target.value)
+                setAutoBackupInterval(
+                  v === 14 || v === 30 ? (v as 14 | 30) : 7
+                )
+              }}>
+              <option value={7}>{t("backup.autoInterval7")}</option>
+              <option value={14}>{t("backup.autoInterval14")}</option>
+              <option value={30}>{t("backup.autoInterval30")}</option>
+            </select>
+            <label className="field-label">{t("backup.autoKeep")}</label>
+            <input
+              className="input"
+              type="number"
+              min={1}
+              max={60}
+              disabled={!autoBackupOn}
+              value={autoBackupKeep}
+              onChange={(e) =>
+                setAutoBackupKeep(Number(e.target.value) || 8)
+              }
+            />
+            <label className="field-label">{t("backup.autoDir")}</label>
+            <div
+              className="row"
+              style={{ gap: 8, flexWrap: "wrap", alignItems: "stretch" }}>
+              <input
+                className="input mono"
+                type="text"
+                style={{ flex: "1 1 220px", minWidth: 0 }}
+                disabled={!autoBackupOn}
+                value={autoBackupDirectory}
+                placeholder={t("backup.autoDirPlaceholder")}
+                onChange={(e) => {
+                  setAutoBackupDirectory(e.target.value)
+                  setAutoBackupVerifiedPath(null)
+                  setAutoBackupVerifyMsg(null)
+                }}
+                spellCheck={false}
+                readOnly={false}
+              />
+              <button
+                type="button"
+                className="btn secondary"
+                disabled={!autoBackupOn || busy}
+                onClick={() => setAutoBackupFsOpen(true)}>
+                {t("backup.autoDirBrowse")}
+              </button>
+              <button
+                type="button"
+                className="btn secondary"
+                disabled={
+                  !autoBackupOn ||
+                  busy ||
+                  autoBackupVerifyBusy ||
+                  !autoBackupDirectory.trim()
+                }
+                onClick={() =>
+                  void verifyAutoBackupDir(autoBackupDirectory, true)
+                }>
+                {autoBackupVerifyBusy
+                  ? t("backup.fsLoading")
+                  : t("backup.autoDirVerify")}
+              </button>
+            </div>
+            <p className="muted" style={{ fontSize: 11, margin: 0 }}>
+              {t("backup.autoDirHint")}
+            </p>
+            {autoBackupVerifyMsg ? (
+              <p
+                className={
+                  autoBackupVerifiedPath ? "ok" : "err"
+                }
+                style={{ fontSize: 12, margin: 0 }}>
+                {autoBackupVerifiedPath ? "✓ " : "✗ "}
+                {autoBackupVerifyMsg}
+                {autoBackupVerifiedPath
+                  ? ` · ${autoBackupVerifiedPath}`
+                  : ""}
+              </p>
+            ) : null}
+            <p className="muted" style={{ fontSize: 12, margin: 0 }}>
+              {t("backup.autoLast")}:{" "}
+              {autoBackupLast
+                ? `${formatDateTimeIso(autoBackupLast, dtPrefs, { withSeconds: true })} · ${
+                    autoBackupLastOk === false
+                      ? "⚠"
+                      : autoBackupLastOk
+                        ? "OK"
+                        : "—"
+                  }${autoBackupLastDetail ? ` · ${autoBackupLastDetail}` : ""}`
+                : t("backup.autoNever")}
+            </p>
+            {autoBackupDirResolved ? (
+              <p className="muted mono" style={{ fontSize: 11, margin: 0 }}>
+                → {autoBackupDirResolved}
+                {!autoBackupDbSet
+                  ? " · (DATABASE_URL absent → config JSON seulement)"
+                  : " · + pg_dump"}
+              </p>
+            ) : null}
+            {autoBackupFsOpen ? (
+              <BackupFsPickerModal
+                t={t}
+                initialPath={autoBackupDirectory}
+                onCancel={() => setAutoBackupFsOpen(false)}
+                onSelect={async (selected, createIfMissing) => {
+                  setAutoBackupDirectory(selected)
+                  setAutoBackupFsOpen(false)
+                  const v = await verifyAutoBackupDir(
+                    selected,
+                    createIfMissing
+                  )
+                  if (!v.ok) {
+                    setError(v.error || t("backup.autoDirUnreachable"))
+                  }
+                }}
+              />
+            ) : null}
+            <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+              <button
+                type="button"
+                className="btn secondary"
+                disabled={busy || autoBackupVerifyBusy}
+                onClick={() =>
+                  void saveMonitoring().then(() => {
+                    if (!busy) setInfo(t("backup.autoSaved"))
+                  })
+                }>
+                {t("backup.autoSave")}
+              </button>
+              <button
+                type="button"
+                className="btn"
+                disabled={busy || autoBackupVerifyBusy}
+                onClick={async () => {
+                  setBusy(true)
+                  setError(null)
+                  try {
+                    let dir = autoBackupDirectory.trim()
+                    if (autoBackupOn) {
+                      if (!dir) {
+                        setError(t("backup.autoDirRequired"))
+                        return
+                      }
+                      if (
+                        !autoBackupVerifiedPath ||
+                        autoBackupVerifiedPath.trim().toLowerCase() !==
+                          dir.toLowerCase()
+                      ) {
+                        const v = await verifyAutoBackupDir(dir, true)
+                        if (!v.ok) {
+                          setError(
+                            v.error || t("backup.autoDirMustVerify")
+                          )
+                          return
+                        }
+                        dir = v.path || dir
+                      }
+                    }
+                    await api.updateMonitoring({
+                      autoBackup: {
+                        enabled: autoBackupOn,
+                        intervalDays: autoBackupInterval,
+                        keepCount: Math.min(
+                          60,
+                          Math.max(1, Math.floor(autoBackupKeep) || 8)
+                        ),
+                        directory: dir
+                      }
+                    })
+                    const r = await api.orgBackupAutoRun()
+                    setInfo(
+                      r.ok
+                        ? `${t("backup.autoRunOk")} · ${(r.files || []).join(", ") || r.detail}`
+                        : r.detail || t("backup.autoRunOk")
+                    )
+                    const st = await api.orgBackupAutoStatus()
+                    setAutoBackupDirResolved(st.backup_dir || "")
+                    if (st.auto_backup) {
+                      setAutoBackupDirectory(st.auto_backup.directory || "")
+                      setAutoBackupLast(st.auto_backup.lastRunAt || null)
+                      setAutoBackupLastOk(
+                        typeof st.auto_backup.lastRunOk === "boolean"
+                          ? st.auto_backup.lastRunOk
+                          : null
+                      )
+                      setAutoBackupLastDetail(
+                        st.auto_backup.lastRunDetail || null
+                      )
+                    }
+                  } catch (e) {
+                    setError(String(e))
+                  } finally {
+                    setBusy(false)
+                  }
+                }}>
+                {t("backup.autoRunNow")}
+              </button>
+            </div>
+          </div>
         </div>
         )}
 
@@ -5526,21 +6591,17 @@ function SystemSettingsView({
                       className="input"
                       value={schedExpTz}
                       onChange={(e) => setSchedExpTz(e.target.value)}>
-                      {(
-                        [
-                          "Europe/Paris",
-                          "Europe/Brussels",
-                          "Europe/London",
-                          "Africa/Douala",
-                          "Africa/Nairobi",
-                          "America/New_York",
-                          "UTC"
-                        ] as const
-                      ).map((z) => (
-                        <option key={z} value={z}>
-                          {z}
-                        </option>
-                      ))}
+                      {[
+                        ...new Set([schedExpTz, ...COMMON_TIMEZONES])
+                      ].map((z) => {
+                        const lab =
+                          TIMEZONE_OPTIONS.find(([id]) => id === z)?.[1] || z
+                        return (
+                          <option key={z} value={z}>
+                            {lab}
+                          </option>
+                        )
+                      })}
                     </select>
                   </div>
                 </div>
@@ -5907,21 +6968,18 @@ function SystemSettingsView({
                   className="input"
                   value={tz}
                   onChange={(e) => setTz(e.target.value)}>
-                  {(
-                    [
-                      ["Europe/Paris", "GMT+1/+2 · Europe/Paris (France)"],
-                      ["Europe/Brussels", "GMT+1/+2 · Europe/Brussels"],
-                      ["Europe/London", "GMT+0/+1 · Europe/London"],
-                      ["Africa/Douala", "GMT+1 · Africa/Douala (Cameroun)"],
-                      ["Africa/Nairobi", "GMT+3 · Africa/Nairobi"],
+                  {[
+                    ...new Map(
                       [
-                        "Africa/Antananarivo",
-                        "GMT+3 · Africa/Antananarivo"
-                      ],
-                      ["America/New_York", "GMT−5/−4 · America/New_York"],
-                      ["UTC", "GMT+0 · UTC"]
-                    ] as const
-                  ).map(([v, lab]) => (
+                        ...(tz
+                          ? ([[tz, tz] as const] as Array<
+                              readonly [string, string]
+                            >)
+                          : []),
+                        ...TIMEZONE_OPTIONS
+                      ].map((p) => [p[0], p] as const)
+                    ).values()
+                  ].map(([v, lab]) => (
                     <option key={v} value={v}>
                       {lab}
                     </option>
@@ -6527,6 +7585,7 @@ function SupportView({
   t: (k: string) => string
   onUnreadChange?: (n: number) => void
 }) {
+  const dtPrefs = useDateTimePrefs()
   const [filter, setFilter] = useState<
     "all" | "unread" | "open" | "read" | "replied" | "closed"
   >("all")
@@ -6704,7 +7763,7 @@ function SupportView({
                     <span style={{ fontSize: 12 }}>{catLabel(m.category)}</span>
                     <span style={{ fontSize: 12 }}>{stLabel(m.status)}</span>
                     <span style={{ fontSize: 12 }}>
-                      {String(m.created_at).slice(0, 16).replace("T", " ")}
+                      {formatDateTimeIso(m.created_at, dtPrefs)}
                     </span>
                   </button>
                   {open && (
@@ -6784,6 +7843,7 @@ function SupportView({
                                 className="btn secondary btn-sm"
                                 type="button"
                                 disabled={busy}
+                                title={t("inbox.alertHint")}
                                 onClick={async () => {
                                   setBusy(true)
                                   try {
@@ -6795,7 +7855,7 @@ function SupportView({
                                     setBusy(false)
                                   }
                                 }}>
-                                {t("inbox.markRead")}
+                                {t("inbox.ack")}
                               </button>
                             )}
                             <button
@@ -7836,6 +8896,9 @@ function PolicyView({
           <div className="pol-card-body">
             <div className="pol-section-l">{t("policy.editDefault")}</div>
         <label className="field-label">{t("policy.aiSites")}</label>
+        <p className="muted" style={{ fontSize: 12, margin: "0 0 8px", maxWidth: 560 }}>
+          {t("policy.aiSitesHint")}
+        </p>
         <HostPicker
           value={hosts
             .split("\n")
@@ -7945,11 +9008,15 @@ function PolicyView({
                 className="input"
                 value={schedTz}
                 onChange={(e) => setSchedTz(e.target.value)}>
-                <option value="Europe/Paris">Europe/Paris</option>
-                <option value="Africa/Douala">Africa/Douala</option>
-                <option value="Africa/Nairobi">Africa/Nairobi</option>
-                <option value="Africa/Antananarivo">Africa/Antananarivo</option>
-                <option value="UTC">UTC</option>
+                {[...new Set([schedTz, ...COMMON_TIMEZONES])].map((z) => {
+                  const lab =
+                    TIMEZONE_OPTIONS.find(([id]) => id === z)?.[1] || z
+                  return (
+                    <option key={z} value={z}>
+                      {lab}
+                    </option>
+                  )
+                })}
               </select>
               <div className="row">
                 <div>
@@ -8448,11 +9515,15 @@ function PolicyView({
                 className="input"
                 value={profSchedTz}
                 onChange={(e) => setProfSchedTz(e.target.value)}>
-                <option value="Europe/Paris">Europe/Paris</option>
-                <option value="Africa/Douala">Africa/Douala</option>
-                <option value="Africa/Nairobi">Africa/Nairobi</option>
-                <option value="Africa/Antananarivo">Africa/Antananarivo</option>
-                <option value="UTC">UTC</option>
+                {[...new Set([profSchedTz, ...COMMON_TIMEZONES])].map((z) => {
+                  const lab =
+                    TIMEZONE_OPTIONS.find(([id]) => id === z)?.[1] || z
+                  return (
+                    <option key={z} value={z}>
+                      {lab}
+                    </option>
+                  )
+                })}
               </select>
               <div className="row">
                 <div>
@@ -10010,6 +11081,7 @@ function AgentsView({
   setInfo: (i: string | null) => void
   onReload: () => void
 }) {
+  const dtPrefs = useDateTimePrefs()
   const [stats, setStats] = useState<{
     licensed_agents: number
     unlicensed_agents: number
@@ -10707,11 +11779,11 @@ function AgentsView({
                     </select>
                   </td>
                   <td className="cell-narrow muted">
-                    {new Date(a.last_seen_at).toLocaleString("fr-FR")}
+                    {formatDateTimeAny(a.last_seen_at, dtPrefs)}
                   </td>
                   <td className="cell-narrow muted" style={{ fontSize: 11 }}>
                     {a.enrolled_at
-                      ? new Date(a.enrolled_at).toLocaleString("fr-FR")
+                      ? formatDateTimeAny(a.enrolled_at, dtPrefs)
                       : "-"}
                   </td>
                   <td className="cell-actions">
@@ -10980,6 +12052,7 @@ function EventsView({
   setInfo?: (i: string | null) => void
   t: (k: string, vars?: Record<string, string | number>) => string
 }) {
+  const dtPrefs = useDateTimePrefs()
   const [decisionF, setDecisionF] = useState("")
   const [severityF, setSeverityF] = useState("")
   const [sourceF, setSourceF] = useState(() => {
@@ -11464,7 +12537,9 @@ function EventsView({
                   {pagedEvents.map((e) => (
                     <tr key={e.id}>
                       <td className="muted">
-                        {e.ts ? new Date(e.ts).toLocaleString("fr-FR") : " - "}
+                        {e.ts
+                          ? formatDateTimeAny(e.ts, dtPrefs)
+                          : " - "}
                       </td>
                       <td>
                         <strong>
@@ -12018,6 +13093,7 @@ function AuditView({
   isPrincipal: boolean
   t: (k: string, vars?: Record<string, string | number>) => string
 }) {
+  const dtPrefs = useDateTimePrefs()
   const [rows, setRows] = useState<
     Array<{
       id: string
@@ -12338,7 +13414,7 @@ function AuditView({
                   <tr key={r.id}>
                     <td className="muted">
                       {r.createdAt
-                        ? new Date(r.createdAt).toLocaleString("fr-FR")
+                        ? formatDateTimeIso(r.createdAt, dtPrefs)
                         : " - "}
                     </td>
                     <td>
@@ -12485,129 +13561,278 @@ function MovingRulesView({
   }
 
   const validConds = conds.filter((c) => c.value.trim())
+  const activeCount = rules.filter((r) => r.enabled !== false).length
+  const inactiveCount = rules.length - activeCount
+
+  const fieldLabel = (f: string) =>
+    f === "host_name" ? "Hostname" : "Label appareil"
+  const opLabel = (op: string) => {
+    if (op === "starts_with") return "commence par"
+    if (op === "contains") return "contient"
+    if (op === "equals") return "égal"
+    if (op === "regex") return "regex"
+    return op
+  }
+
+  const saveRule = async () => {
+    setBusy(true)
+    try {
+      const body = {
+        name: name.trim(),
+        conditions: validConds.map((c) => ({
+          ...c,
+          value: c.value.trim()
+        })),
+        target_group_id: groupId,
+        priority,
+        only_if_unassigned: onlyUnassigned && !permanent,
+        condition_logic: condLogic,
+        permanent,
+        enabled
+      }
+      if (editId) {
+        const r = await api.patchMovingRule(editId, body)
+        setInfo(
+          `Règle mise à jour · ${r.agents_applied ?? 0} agent(s) déplacé(s)`
+        )
+      } else {
+        const r = await api.createMovingRule(body)
+        setInfo(
+          `Règle créée · ${r.agents_applied ?? 0} agent(s) déplacé(s)`
+        )
+      }
+      resetForm()
+      setFormOpen(false)
+      await load()
+    } catch (e) {
+      setError(String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
 
   return (
-    <>
-      <div className="card">
-        <h2>Règles d’affectation</h2>
+    <div className="mv-page">
+      {/* Hero */}
+      <header className="mv-hero">
+        <div className="mv-hero-glow" aria-hidden />
+        <div className="mv-hero-inner">
+          <div className="mv-hero-copy">
+            <span className="mv-kicker">Automatisation flotte</span>
+            <h1 className="mv-title">Règles de migration automatique</h1>
+            <p className="mv-lead">
+              Affectez les agents à un groupe dès qu’un label ou un hostname
+              matche — priorité ordonnée, logique AND/OR, application
+              permanente ou seulement si non assigné.
+            </p>
+            <div className="mv-stats">
+              <div className="mv-stat">
+                <span className="mv-stat-n">{rules.length}</span>
+                <span className="mv-stat-l">règle{rules.length > 1 ? "s" : ""}</span>
+              </div>
+              <div className="mv-stat mv-stat--ok">
+                <span className="mv-stat-n">{activeCount}</span>
+                <span className="mv-stat-l">active{activeCount > 1 ? "s" : ""}</span>
+              </div>
+              <div className="mv-stat mv-stat--mute">
+                <span className="mv-stat-n">{inactiveCount}</span>
+                <span className="mv-stat-l">inactive{inactiveCount > 1 ? "s" : ""}</span>
+              </div>
+              <div className="mv-stat">
+                <span className="mv-stat-n">{groups.length}</span>
+                <span className="mv-stat-l">groupe{groups.length > 1 ? "s" : ""}</span>
+              </div>
+            </div>
+          </div>
+          <div className="mv-hero-actions">
+            <button
+              type="button"
+              className="btn mv-btn-primary"
+              disabled={busy}
+              onClick={() => {
+                resetForm()
+                setFormOpen(true)
+              }}>
+              + Nouvelle règle
+            </button>
+            <button
+              type="button"
+              className="btn secondary mv-btn-ghost"
+              disabled={busy || rules.length === 0}
+              onClick={async () => {
+                setBusy(true)
+                try {
+                  const r = await api.applyMovingRules()
+                  setInfo(
+                    `Ré-évaluation : ${r.applied} agent(s) affecté(s) / ${r.total}`
+                  )
+                } catch (e) {
+                  setError(String(e))
+                } finally {
+                  setBusy(false)
+                }
+              }}>
+              ↻ Ré-évaluer la flotte
+            </button>
+          </div>
+        </div>
+      </header>
+
+      {/* Flow hint */}
+      <div className="mv-flow" aria-hidden>
+        <div className="mv-flow-step">
+          <span className="mv-flow-ico">①</span>
+          <span>Conditions</span>
+        </div>
+        <span className="mv-flow-arrow">→</span>
+        <div className="mv-flow-step">
+          <span className="mv-flow-ico">②</span>
+          <span>Priorité</span>
+        </div>
+        <span className="mv-flow-arrow">→</span>
+        <div className="mv-flow-step">
+          <span className="mv-flow-ico">③</span>
+          <span>Groupe cible</span>
+        </div>
+        <span className="mv-flow-arrow">→</span>
+        <div className="mv-flow-step">
+          <span className="mv-flow-ico">④</span>
+          <span>Agents affectés</span>
+        </div>
+      </div>
+
+      {/* Rules list */}
+      <section className="mv-list-section">
+        <div className="mv-list-head">
+          <h2 className="mv-list-title">Pipeline de règles</h2>
+          <p className="mv-list-sub muted">
+            Plus haut = évalué en premier. Glissez l’ordre avec ↑ ↓ ou éditez la
+            priorité.
+          </p>
+        </div>
+
         {rules.length === 0 ? (
-          <div className="empty">Aucune règle</div>
+          <div className="mv-empty">
+            <div className="mv-empty-icon" aria-hidden>
+              ⇄
+            </div>
+            <h3>Aucune règle pour l’instant</h3>
+            <p className="muted">
+              Créez votre première règle pour basculer automatiquement les
+              agents vers le bon groupe (ex. label commence par{" "}
+              <code>DIR-</code>).
+            </p>
+            <button
+              type="button"
+              className="btn mv-btn-primary"
+              onClick={() => {
+                resetForm()
+                setFormOpen(true)
+              }}>
+              Créer ma première règle
+            </button>
+          </div>
         ) : (
-          <div className="table-wrap">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Ordre</th>
-                  <th>Nom</th>
-                  <th>Conditions (AND)</th>
-                  <th>Groupe</th>
-                  <th>Prio</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                {rules.map((r, idx) => (
-                  <tr
-                    key={r.id}
-                    style={
-                      r.enabled
-                        ? undefined
-                        : {
-                            background: "var(--warn-soft)",
-                            opacity: 0.92
-                          }
-                    }>
-                    <td>
-                      <div className="row" style={{ gap: 4 }}>
-                        <button
-                          className="btn secondary btn-sm"
-                          type="button"
-                          disabled={busy || idx === 0}
-                          title="Monter (plus prioritaire)"
-                          onClick={() => void swapPriority(idx, -1)}>
-                          ↑
-                        </button>
-                        <button
-                          className="btn secondary btn-sm"
-                          type="button"
-                          disabled={busy || idx === rules.length - 1}
-                          title="Descendre"
-                          onClick={() => void swapPriority(idx, 1)}>
-                          ↓
-                        </button>
-                      </div>
-                    </td>
-                    <td>
-                      <strong
-                        style={
-                          r.enabled
-                            ? undefined
-                            : { textDecoration: "line-through", color: "var(--warn)" }
-                        }>
-                        {r.name}
-                      </strong>
-                      {!r.enabled && (
-                        <span
-                          className="badge warning"
-                          style={{
-                            marginLeft: 8,
-                            fontWeight: 700,
-                            letterSpacing: "0.04em"
-                          }}
-                          title="Cette règle n’est pas évaluée">
-                          INACTIF
-                        </span>
-                      )}
-                    </td>
-                    <td className="mono" style={{ fontSize: 12 }}>
-                      {condsOf(r).map((c, i) => (
-                        <div key={i}>
-                          {c.field} {c.op} « {c.value} »
+          <ol className="mv-rules">
+            {rules.map((r, idx) => {
+              const gName =
+                groups.find((g) => g.id === r.targetGroupId)?.name ||
+                r.targetGroupId
+              const cs = condsOf(r)
+              const logic = r.conditionLogic === "or" ? "OR" : "AND"
+              return (
+                <li
+                  key={r.id}
+                  className={`mv-rule ${r.enabled === false ? "is-off" : ""}`}>
+                  <div className="mv-rule-rail">
+                    <span className="mv-rule-idx">{idx + 1}</span>
+                    <div className="mv-rule-order">
+                      <button
+                        type="button"
+                        className="mv-icon-btn"
+                        disabled={busy || idx === 0}
+                        title="Monter (plus prioritaire)"
+                        onClick={() => void swapPriority(idx, -1)}>
+                        ↑
+                      </button>
+                      <button
+                        type="button"
+                        className="mv-icon-btn"
+                        disabled={busy || idx === rules.length - 1}
+                        title="Descendre"
+                        onClick={() => void swapPriority(idx, 1)}>
+                        ↓
+                      </button>
+                    </div>
+                  </div>
+                  <div className="mv-rule-body">
+                    <div className="mv-rule-top">
+                      <div className="mv-rule-name-row">
+                        <h3 className="mv-rule-name">{r.name}</h3>
+                        <div className="mv-badges">
+                          {r.enabled === false ? (
+                            <span className="mv-badge mv-badge--off">Inactif</span>
+                          ) : (
+                            <span className="mv-badge mv-badge--on">Actif</span>
+                          )}
+                          {r.permanent ? (
+                            <span className="mv-badge mv-badge--perm">
+                              Permanent
+                            </span>
+                          ) : null}
+                          {r.onlyIfUnassigned && !r.permanent ? (
+                            <span className="mv-badge mv-badge--soft">
+                              Si sans groupe
+                            </span>
+                          ) : null}
+                          <span className="mv-badge mv-badge--logic">{logic}</span>
                         </div>
-                      ))}
-                    </td>
-                    <td>
-                      {groups.find((g) => g.id === r.targetGroupId)?.name ||
-                        r.targetGroupId}
-                    </td>
-                    <td>
-                      <input
-                        className="input"
-                        type="number"
-                        style={{ width: 72 }}
-                        defaultValue={r.priority}
-                        key={`${r.id}-${r.priority}`}
-                        disabled={busy}
-                        onBlur={async (e) => {
-                          const p = Number(e.target.value)
-                          if (Number.isNaN(p) || p === r.priority) return
-                          setBusy(true)
-                          try {
-                            await api.patchMovingRule(r.id, { priority: p })
-                            setInfo(`Priorité « ${r.name} » → ${p}`)
-                            await load()
-                          } catch (err) {
-                            setError(String(err))
-                          } finally {
-                            setBusy(false)
-                          }
-                        }}
-                      />
-                    </td>
-                    <td>
-                      <div className="row" style={{ gap: 4 }}>
+                      </div>
+                      <div className="mv-rule-actions">
+                        <label className="mv-prio" title="Priorité (petit = d’abord)">
+                          <span>Prio</span>
+                          <input
+                            className="input mv-prio-input"
+                            type="number"
+                            defaultValue={r.priority}
+                            key={`${r.id}-${r.priority}`}
+                            disabled={busy}
+                            onBlur={async (e) => {
+                              const p = Number(e.target.value)
+                              if (Number.isNaN(p) || p === r.priority) return
+                              setBusy(true)
+                              try {
+                                await api.patchMovingRule(r.id, {
+                                  priority: p
+                                })
+                                setInfo(`Priorité « ${r.name} » → ${p}`)
+                                await load()
+                              } catch (err) {
+                                setError(String(err))
+                              } finally {
+                                setBusy(false)
+                              }
+                            }}
+                          />
+                        </label>
                         <button
-                          className="btn secondary btn-sm"
                           type="button"
+                          className="btn secondary btn-sm"
                           disabled={busy}
                           onClick={() => openEdit(r)}>
                           Modifier
                         </button>
                         <button
-                          className="btn danger btn-sm"
                           type="button"
+                          className="btn danger btn-sm"
                           disabled={busy}
                           onClick={async () => {
+                            if (
+                              !confirm(
+                                `Supprimer la règle « ${r.name} » ?`
+                              )
+                            )
+                              return
                             setBusy(true)
                             try {
                               await api.deleteMovingRule(r.id)
@@ -12622,259 +13847,258 @@ function MovingRulesView({
                           Suppr.
                         </button>
                       </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-        <button
-          className="btn secondary"
-          type="button"
-          style={{ marginTop: 12 }}
-          disabled={busy}
-          onClick={async () => {
-            setBusy(true)
-            try {
-              const r = await api.applyMovingRules()
-              setInfo(
-                `Ré-évaluation : ${r.applied} agent(s) affecté(s) / ${r.total}`
+                    </div>
+                    <div className="mv-rule-flow">
+                      <div className="mv-chips">
+                        {cs.map((c, i) => (
+                          <span key={i} className="mv-chip">
+                            <span className="mv-chip-f">{fieldLabel(c.field)}</span>
+                            <span className="mv-chip-op">{opLabel(c.op)}</span>
+                            <span className="mv-chip-v">« {c.value} »</span>
+                          </span>
+                        ))}
+                      </div>
+                      <span className="mv-then" aria-hidden>
+                        →
+                      </span>
+                      <div className="mv-target">
+                        <span className="mv-target-lbl">Groupe</span>
+                        <strong>{gName}</strong>
+                      </div>
+                    </div>
+                  </div>
+                </li>
               )
-            } catch (e) {
-              setError(String(e))
-            } finally {
-              setBusy(false)
+            })}
+          </ol>
+        )}
+      </section>
+
+      {/* Formulaire création / édition */}
+      {formOpen ? (
+        <div
+          className="mv-form-overlay"
+          role="dialog"
+          aria-modal="true"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) {
+              setFormOpen(false)
+              resetForm()
             }
           }}>
-          Ré-évaluer tous les agents
-        </button>
-      </div>
-      <div className="card">
-        {!formOpen ? (
-          <button
-            className="btn"
-            type="button"
-            onClick={() => {
-              resetForm()
-              setFormOpen(true)
-            }}>
-            + Nouvelle règle
-          </button>
-        ) : (
-          <>
-            <div
-              className="row"
-              style={{ justifyContent: "space-between", marginBottom: 8 }}>
-              <h2 style={{ margin: 0 }}>
-                {editId ? "Modifier la règle" : "Nouvelle règle"}
-              </h2>
+          <div className="mv-form-card" onClick={(e) => e.stopPropagation()}>
+            <div className="mv-form-head">
+              <div>
+                <span className="mv-kicker">
+                  {editId ? "Édition" : "Création"}
+                </span>
+                <h2 className="mv-form-title">
+                  {editId ? "Modifier la règle" : "Nouvelle règle"}
+                </h2>
+              </div>
               <button
-                className="btn secondary btn-sm"
                 type="button"
+                className="mv-icon-btn mv-icon-btn--lg"
+                aria-label="Fermer"
                 onClick={() => {
                   setFormOpen(false)
                   resetForm()
                 }}>
-                Fermer
+                ×
               </button>
             </div>
-            <div className="form-stack" style={{ maxWidth: 560 }}>
-              <label className="field-label">Nom</label>
-              <input
-                className="input"
-                placeholder="ex. Direction (label DIR*)"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-              />
-              <label className="field-label">
-                Conditions (AND  -  toutes doivent matcher)
-              </label>
-              {conds.map((c, i) => (
-                <div
-                  key={i}
-                  className="row"
-                  style={{ flexWrap: "wrap", gap: 6, alignItems: "center" }}>
+
+            <div className="mv-form-grid">
+              <div className="mv-form-block">
+                <label className="field-label">Nom de la règle</label>
+                <input
+                  className="input"
+                  placeholder="ex. Direction · label DIR*"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                />
+              </div>
+
+              <div className="mv-form-block mv-form-block--full">
+                <div className="mv-form-block-head">
+                  <label className="field-label" style={{ margin: 0 }}>
+                    Conditions
+                  </label>
                   <select
-                    className="input"
-                    value={c.field}
-                    onChange={(e) => {
-                      const next = [...conds]
-                      next[i] = {
-                        ...c,
-                        field: e.target.value as CondDraft["field"]
-                      }
-                      setConds(next)
-                    }}>
-                    <option value="device_label">Label appareil</option>
-                    <option value="host_name">Hostname / DNS PC</option>
-                  </select>
-                  <select
-                    className="input"
-                    value={c.op}
-                    onChange={(e) => {
-                      const next = [...conds]
-                      next[i] = {
-                        ...c,
-                        op: e.target.value as CondDraft["op"]
-                      }
-                      setConds(next)
-                    }}>
-                    <option value="starts_with">commence par</option>
-                    <option value="contains">contient</option>
-                    <option value="equals">égal</option>
-                    <option value="regex">regex</option>
-                  </select>
-                  <input
-                    className="input"
-                    placeholder="valeur"
-                    value={c.value}
-                    onChange={(e) => {
-                      const next = [...conds]
-                      next[i] = { ...c, value: e.target.value }
-                      setConds(next)
-                    }}
-                  />
-                  <button
-                    className="btn secondary btn-sm"
-                    type="button"
-                    disabled={conds.length <= 1}
-                    onClick={() =>
-                      setConds(conds.filter((_, j) => j !== i))
+                    className="input mv-logic-select"
+                    value={condLogic}
+                    onChange={(e) =>
+                      setCondLogic(e.target.value === "or" ? "or" : "and")
                     }>
-                    −
-                  </button>
+                    <option value="and">ET (toutes)</option>
+                    <option value="or">OU (au moins une)</option>
+                  </select>
                 </div>
-              ))}
-              <button
-                className="btn secondary btn-sm"
-                type="button"
-                onClick={() => setConds([...conds, emptyCond()])}>
-                + Condition
-              </button>
-              <label className="field-label">Logique multi-conditions</label>
-              <select
-                className="input"
-                value={condLogic}
-                onChange={(e) =>
-                  setCondLogic(e.target.value === "or" ? "or" : "and")
-                }>
-                <option value="and">AND - toutes les conditions</option>
-                <option value="or">OR - au moins une condition</option>
-              </select>
-              <label className="field-label">Priorité (plus petit = d’abord)</label>
-              <input
-                className="input"
-                type="number"
-                value={priority}
-                onChange={(e) => setPriority(Number(e.target.value) || 0)}
-              />
-              <label className="field-label">Groupe cible</label>
-              <select
-                className="input"
-                value={groupId}
-                onChange={(e) => setGroupId(e.target.value)}>
-                <option value=""> - </option>
-                {groups.map((g) => (
-                  <option key={g.id} value={g.id}>
-                    {g.name}
-                  </option>
-                ))}
-              </select>
-              <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                <input
-                  type="checkbox"
-                  checked={permanent}
-                  onChange={(e) => {
-                    setPermanent(e.target.checked)
-                    if (e.target.checked) setOnlyUnassigned(false)
-                  }}
-                />
-                Permanent - s’applique même si l’agent a déjà un groupe
-              </label>
-              <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                <input
-                  type="checkbox"
-                  checked={onlyUnassigned && !permanent}
-                  disabled={permanent}
-                  onChange={(e) => setOnlyUnassigned(e.target.checked)}
-                />
-                Uniquement si agent sans groupe
-              </label>
-              <p className="muted" style={{ fontSize: 11, margin: 0 }}>
-                Ex. label « contient mon » matche « mon-pc ». Après création, les
-                agents déjà enrollés sont réévalués automatiquement.
-              </p>
-              <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                <input
-                  type="checkbox"
-                  checked={enabled}
-                  onChange={(e) => setEnabled(e.target.checked)}
-                />
-                Règle active
-              </label>
-              <div className="row">
+                <div className="mv-cond-list">
+                  {conds.map((c, i) => (
+                    <div key={i} className="mv-cond-row">
+                      <select
+                        className="input"
+                        value={c.field}
+                        onChange={(e) => {
+                          const next = [...conds]
+                          next[i] = {
+                            ...c,
+                            field: e.target.value as CondDraft["field"]
+                          }
+                          setConds(next)
+                        }}>
+                        <option value="device_label">Label appareil</option>
+                        <option value="host_name">Hostname / DNS PC</option>
+                      </select>
+                      <select
+                        className="input"
+                        value={c.op}
+                        onChange={(e) => {
+                          const next = [...conds]
+                          next[i] = {
+                            ...c,
+                            op: e.target.value as CondDraft["op"]
+                          }
+                          setConds(next)
+                        }}>
+                        <option value="starts_with">commence par</option>
+                        <option value="contains">contient</option>
+                        <option value="equals">égal</option>
+                        <option value="regex">regex</option>
+                      </select>
+                      <input
+                        className="input"
+                        placeholder="valeur (ex. DIR-)"
+                        value={c.value}
+                        onChange={(e) => {
+                          const next = [...conds]
+                          next[i] = { ...c, value: e.target.value }
+                          setConds(next)
+                        }}
+                      />
+                      <button
+                        type="button"
+                        className="mv-icon-btn"
+                        disabled={conds.length <= 1}
+                        title="Retirer"
+                        onClick={() =>
+                          setConds(conds.filter((_, j) => j !== i))
+                        }>
+                        −
+                      </button>
+                    </div>
+                  ))}
+                </div>
                 <button
-                  className="btn"
                   type="button"
-                  disabled={
-                    busy ||
-                    !name.trim() ||
-                    validConds.length === 0 ||
-                    !groupId
-                  }
-                  onClick={async () => {
-                    setBusy(true)
-                    try {
-                      const body = {
-                        name: name.trim(),
-                        conditions: validConds.map((c) => ({
-                          ...c,
-                          value: c.value.trim()
-                        })),
-                        target_group_id: groupId,
-                        priority,
-                        only_if_unassigned: onlyUnassigned && !permanent,
-                        condition_logic: condLogic,
-                        permanent,
-                        enabled
-                      }
-                      if (editId) {
-                        const r = await api.patchMovingRule(editId, body)
-                        setInfo(
-                          `Règle mise à jour · ${r.agents_applied ?? 0} agent(s) déplacé(s)`
-                        )
-                      } else {
-                        const r = await api.createMovingRule(body)
-                        setInfo(
-                          `Règle créée · ${r.agents_applied ?? 0} agent(s) déplacé(s)`
-                        )
-                      }
-                      resetForm()
-                      setFormOpen(false)
-                      await load()
-                    } catch (e) {
-                      setError(String(e))
-                    } finally {
-                      setBusy(false)
-                    }
-                  }}>
-                  {editId ? "Enregistrer" : "Créer la règle"}
-                </button>
-                <button
-                  className="btn secondary"
-                  type="button"
-                  onClick={() => {
-                    resetForm()
-                    setFormOpen(false)
-                  }}>
-                  Annuler
+                  className="btn secondary btn-sm"
+                  onClick={() => setConds([...conds, emptyCond()])}>
+                  + Ajouter une condition
                 </button>
               </div>
+
+              <div className="mv-form-block">
+                <label className="field-label">
+                  Priorité{" "}
+                  <span className="muted">(petit = évalué d’abord)</span>
+                </label>
+                <input
+                  className="input"
+                  type="number"
+                  value={priority}
+                  onChange={(e) => setPriority(Number(e.target.value) || 0)}
+                />
+              </div>
+
+              <div className="mv-form-block">
+                <label className="field-label">Groupe cible</label>
+                <select
+                  className="input"
+                  value={groupId}
+                  onChange={(e) => setGroupId(e.target.value)}>
+                  <option value="">Choisir un groupe…</option>
+                  {groups.map((g) => (
+                    <option key={g.id} value={g.id}>
+                      {g.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="mv-form-block mv-form-block--full mv-toggles">
+                <label className="mv-toggle">
+                  <input
+                    type="checkbox"
+                    checked={enabled}
+                    onChange={(e) => setEnabled(e.target.checked)}
+                  />
+                  <span>
+                    <strong>Règle active</strong>
+                    <small>Désactivez pour garder la config sans l’évaluer</small>
+                  </span>
+                </label>
+                <label className="mv-toggle">
+                  <input
+                    type="checkbox"
+                    checked={permanent}
+                    onChange={(e) => {
+                      setPermanent(e.target.checked)
+                      if (e.target.checked) setOnlyUnassigned(false)
+                    }}
+                  />
+                  <span>
+                    <strong>Permanent</strong>
+                    <small>S’applique même si l’agent a déjà un groupe</small>
+                  </span>
+                </label>
+                <label className={`mv-toggle ${permanent ? "is-disabled" : ""}`}>
+                  <input
+                    type="checkbox"
+                    checked={onlyUnassigned && !permanent}
+                    disabled={permanent}
+                    onChange={(e) => setOnlyUnassigned(e.target.checked)}
+                  />
+                  <span>
+                    <strong>Uniquement si sans groupe</strong>
+                    <small>Ne touche pas aux agents déjà assignés</small>
+                  </span>
+                </label>
+              </div>
+
+              <p className="mv-form-hint muted">
+                Exemple : label <em>contient</em> « mon » matche « mon-pc ». Après
+                création ou modification, les agents enrollés sont réévalués
+                automatiquement.
+              </p>
             </div>
-          </>
-        )}
-      </div>
-    </>
+
+            <div className="mv-form-foot">
+              <button
+                type="button"
+                className="btn secondary"
+                onClick={() => {
+                  resetForm()
+                  setFormOpen(false)
+                }}>
+                Annuler
+              </button>
+              <button
+                type="button"
+                className="btn mv-btn-primary"
+                disabled={
+                  busy ||
+                  !name.trim() ||
+                  validConds.length === 0 ||
+                  !groupId
+                }
+                onClick={() => void saveRule()}>
+                {editId ? "Enregistrer les changements" : "Créer la règle"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </div>
   )
 }
