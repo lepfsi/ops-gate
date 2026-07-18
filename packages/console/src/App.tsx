@@ -238,7 +238,7 @@ export default function App() {
   }, [])
 
   const [summary, setSummary] = useState<Summary | null>(null)
-  /** Snapshot V3 pour widgets dashboard (Risk 7j + Shadow) */
+  /** Snapshot V3 pour widgets dashboard (Risk 7j + Shadow + Proxy) */
   const [dashV3, setDashV3] = useState<{
     risk: {
       average_score: number
@@ -256,7 +256,15 @@ export default function App() {
       authorized: number
       unknown: number
     } | null
-  }>({ risk: null, shadow: null })
+    proxy: {
+      enabled: boolean
+      mode: "observe" | "enforce"
+      agents: number
+      online: number
+      observe_events: number
+      block_events: number
+    } | null
+  }>({ risk: null, shadow: null, proxy: null })
   const [packs, setPacks] = useState<PackListItem[]>([])
   const [activeVersion, setActiveVersion] = useState<string | undefined>()
   const [agents, setAgents] = useState<AgentRow[]>([])
@@ -668,10 +676,12 @@ export default function App() {
     if (!softDash) setBusy(true)
     try {
       if (t === "summary") {
-        const [sum, riskRaw, shadowRaw] = await Promise.all([
+        const [sum, riskRaw, shadowRaw, agentsRes, monRes] = await Promise.all([
           api.summary(),
           api.riskSummary("7d").catch(() => null),
-          api.shadowAi({ period: "7d" }).catch(() => null)
+          api.shadowAi({ period: "7d" }).catch(() => null),
+          api.agents().catch(() => null),
+          api.monitoring().catch(() => null)
         ])
         setSummary(sum)
         const r = riskRaw as Record<string, unknown> | null
@@ -683,6 +693,19 @@ export default function App() {
             unknown?: number
           }
         } | null
+        const mon = monRes?.monitoring
+        const agentList = agentsRes?.agents || []
+        const proxyAgents = agentList.filter(
+          (a) =>
+            a.device_type === "proxy" ||
+            (a.app_version || "").toLowerCase().startsWith("proxy")
+        )
+        const onlineMs = mon?.onlineMs || 15 * 60 * 1000
+        const proxyOnline = proxyAgents.filter((a) => {
+          const last = a.last_seen_at ? Date.parse(a.last_seen_at) : 0
+          return last && Date.now() - last <= onlineMs
+        }).length
+        const dec = sum.by_decision || {}
         setDashV3({
           risk: r
             ? {
@@ -712,7 +735,24 @@ export default function App() {
                 authorized: s.counts.authorized ?? 0,
                 unknown: s.counts.unknown ?? 0
               }
-            : null
+            : null,
+          proxy: mon
+            ? {
+                enabled: mon.proxy?.enabled !== false,
+                mode: mon.proxy?.mode === "observe" ? "observe" : "enforce",
+                agents: proxyAgents.length,
+                online: proxyOnline,
+                observe_events: Number(dec.observe || 0),
+                block_events: Number(dec.block || 0)
+              }
+            : {
+                enabled: true,
+                mode: "enforce",
+                agents: proxyAgents.length,
+                online: proxyOnline,
+                observe_events: Number(dec.observe || 0),
+                block_events: Number(dec.block || 0)
+              }
         })
       } else if (t === "policy") {
         const [p, pr, g] = await Promise.all([
@@ -1502,6 +1542,30 @@ export default function App() {
           onRefresh={() => void loadTab("summary")}
           onGoRisk={() => goTab("risk")}
           onGoShadow={() => goTab("shadow")}
+          onGoEventsProxy={() => {
+            try {
+              sessionStorage.setItem("opsgate_events_preset", "proxy")
+            } catch {
+              /* ignore */
+            }
+            goTab("events")
+          }}
+          onGoProxySettings={() => {
+            try {
+              sessionStorage.setItem(
+                "opsgate_console_settings_tab",
+                "monitoring"
+              )
+            } catch {
+              /* ignore */
+            }
+            goTab("settings")
+            window.dispatchEvent(
+              new CustomEvent("opsgate-settings-tab", {
+                detail: "monitoring"
+              })
+            )
+          }}
           onForceSync={async () => {
             setBusy(true)
             setError(null)
@@ -1968,6 +2032,8 @@ function SummaryView({
   onRevokeAgent,
   onGoRisk,
   onGoShadow,
+  onGoEventsProxy,
+  onGoProxySettings,
   setError,
   setInfo,
   setBusy,
@@ -1991,6 +2057,14 @@ function SummaryView({
       authorized: number
       unknown: number
     } | null
+    proxy?: {
+      enabled: boolean
+      mode: "observe" | "enforce"
+      agents: number
+      online: number
+      observe_events: number
+      block_events: number
+    } | null
   }
   busy?: boolean
   dashSection: "overview" | "licenses" | "connectivity" | "activity" | "rules"
@@ -2006,6 +2080,8 @@ function SummaryView({
   onMerged?: () => void
   onGoRisk?: () => void
   onGoShadow?: () => void
+  onGoEventsProxy?: () => void
+  onGoProxySettings?: () => void
   setError?: (e: string | null) => void
   setInfo?: (i: string | null) => void
   setBusy?: (b: boolean) => void
@@ -2314,6 +2390,7 @@ function SummaryView({
     : 0
   const v3Risk = dashV3?.risk
   const v3Shadow = dashV3?.shadow
+  const v3Proxy = dashV3?.proxy
   const maxRule = Math.max(
     1,
     ...(summary.top_rules || []).map((r) => r.count)
@@ -3000,6 +3077,85 @@ function SummaryView({
                           {t("dash.openShadow")}
                         </button>
                       ) : null}
+                    </>
+                  ) : (
+                    <div className="empty">{t("dash.v3Loading")}</div>
+                  )}
+                </div>
+              )
+            }
+            if (lay.id === "proxy_fleet") {
+              const mode = v3Proxy?.mode || "enforce"
+              const modeLabel =
+                mode === "observe"
+                  ? t("proxy.mode.observe")
+                  : t("proxy.mode.enforce")
+              return wrapWidget(
+                "proxy_fleet",
+                t("dash.proxyFleet"),
+                <div className="dash-v3">
+                  {v3Proxy ? (
+                    <>
+                      <div className="dash-v3-hero">
+                        <span className="dash-v3-num">{v3Proxy.agents}</span>
+                        <span className="dash-v3-lbl">
+                          {t("dash.proxyAgents")} ·{" "}
+                          <span
+                            className={
+                              v3Proxy.enabled
+                                ? mode === "enforce"
+                                  ? "dash-proxy-mode dash-proxy-mode--enforce"
+                                  : "dash-proxy-mode dash-proxy-mode--observe"
+                                : "dash-proxy-mode dash-proxy-mode--off"
+                            }>
+                            {v3Proxy.enabled
+                              ? mode === "enforce"
+                                ? "ENFORCE"
+                                : "OBSERVE"
+                              : "OFF"}
+                          </span>
+                        </span>
+                      </div>
+                      <ul className="dash-status-list">
+                        <li>
+                          <span className="dash-dot ok" /> {t("dash.proxyOnline")}{" "}
+                          <strong>
+                            {v3Proxy.online}/{v3Proxy.agents}
+                          </strong>
+                        </li>
+                        <li>
+                          <span className="dash-dot warn" />{" "}
+                          {t("dash.observe")}{" "}
+                          <strong>{v3Proxy.observe_events}</strong>
+                        </li>
+                        <li>
+                          <span className="dash-dot crit" /> {t("dash.block")}{" "}
+                          <strong>{v3Proxy.block_events}</strong>
+                        </li>
+                        <li className="muted" style={{ fontSize: 11 }}>
+                          {modeLabel}
+                        </li>
+                      </ul>
+                      <div className="row" style={{ gap: 6, marginTop: 8 }}>
+                        {onGoEventsProxy ? (
+                          <button
+                            type="button"
+                            className="btn btn-sm"
+                            style={{ flex: 1 }}
+                            onClick={() => onGoEventsProxy()}>
+                            {t("dash.proxyEvents")}
+                          </button>
+                        ) : null}
+                        {onGoProxySettings ? (
+                          <button
+                            type="button"
+                            className="btn secondary btn-sm"
+                            style={{ flex: 1 }}
+                            onClick={() => onGoProxySettings()}>
+                            {t("dash.proxySettings")}
+                          </button>
+                        ) : null}
+                      </div>
                     </>
                   ) : (
                     <div className="empty">{t("dash.v3Loading")}</div>
@@ -10822,11 +10978,22 @@ function EventsView({
   events: EventRow[]
   setError?: (e: string | null) => void
   setInfo?: (i: string | null) => void
-  t: (k: string) => string
+  t: (k: string, vars?: Record<string, string | number>) => string
 }) {
   const [decisionF, setDecisionF] = useState("")
   const [severityF, setSeverityF] = useState("")
-  const [sourceF, setSourceF] = useState("")
+  const [sourceF, setSourceF] = useState(() => {
+    try {
+      const p = sessionStorage.getItem("opsgate_events_preset")
+      if (p === "proxy") {
+        sessionStorage.removeItem("opsgate_events_preset")
+        return "proxy"
+      }
+    } catch {
+      /* ignore */
+    }
+    return ""
+  })
   const [labelF, setLabelF] = useState("")
   const [dateFrom, setDateFrom] = useState("")
   const [dateTo, setDateTo] = useState("")
@@ -10836,6 +11003,19 @@ function EventsView({
   const [pageSize, setPageSize] = useState(50)
   const [page, setPage] = useState(1)
   const [exportBusy, setExportBusy] = useState(false)
+
+  // Deep-link / dashboard : preset source=proxy après navigation
+  useEffect(() => {
+    try {
+      const p = sessionStorage.getItem("opsgate_events_preset")
+      if (p === "proxy") {
+        setSourceF("proxy")
+        sessionStorage.removeItem("opsgate_events_preset")
+      }
+    } catch {
+      /* ignore */
+    }
+  }, [events.length])
   const [manualFmt, setManualFmt] = useState<"csv" | "json">(() => {
     try {
       return localStorage.getItem("opsgate_report_format") === "json"
@@ -11136,6 +11316,48 @@ function EventsView({
         </div>
       ) : (
         <>
+          <div
+            className="events-source-chips"
+            role="group"
+            aria-label={t("events.sourceChips")}>
+            {(
+              [
+                ["", t("events.sourceAll"), events.length],
+                [
+                  "proxy",
+                  t("events.sourceProxy"),
+                  events.filter((e) => e.source === "proxy").length
+                ],
+                [
+                  "prompt",
+                  t("events.sourcePrompt"),
+                  events.filter((e) => e.source === "prompt").length
+                ],
+                [
+                  "file",
+                  t("events.sourceFile"),
+                  events.filter((e) => e.source === "file").length
+                ],
+                [
+                  "system",
+                  t("events.sourceSystem"),
+                  events.filter((e) => e.source === "system").length
+                ]
+              ] as const
+            ).map(([val, lab, n]) => (
+              <button
+                key={val || "all"}
+                type="button"
+                className={`events-chip${sourceF === val ? " is-on" : ""}${
+                  val === "proxy" ? " events-chip--proxy" : ""
+                }`}
+                onClick={() => setSourceF(val)}
+                title={lab}>
+                <span>{lab}</span>
+                <strong>{n}</strong>
+              </button>
+            ))}
+          </div>
           <div className="filters-bar" role="search" aria-label="Filtres events">
             <select
               className="input"
