@@ -451,6 +451,16 @@ export interface OpsGateStore {
     mode: "leave" | "outage" | "remote" | null,
     note?: string | null
   ): Promise<Agent | undefined>
+  /**
+   * Sevrage IA agent : blocked=true force block sur sync extension.
+   * byEmail = admin pour audit / affichage.
+   */
+  setAgentAiAccess(
+    orgId: string,
+    agentId: string,
+    blocked: boolean,
+    byEmail?: string | null
+  ): Promise<Agent | undefined>
 
   getEffectivePolicyForAgent(
     orgId: string,

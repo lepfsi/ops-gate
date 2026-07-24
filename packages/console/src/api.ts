@@ -423,6 +423,11 @@ export type AgentRow = {
   device_type?: "extension" | "proxy"
   maintenance_mode?: "leave" | "outage" | "remote" | null
   maintenance_note?: string | null
+  /** allowed | blocked — sevrage IA agent */
+  ai_access?: "allowed" | "blocked"
+  ai_access_blocked?: boolean
+  ai_access_blocked_at?: string | null
+  ai_access_blocked_by?: string | null
 }
 
 export type EventRow = {
@@ -440,6 +445,8 @@ export type EventRow = {
   exit_admin_label?: string
   device_label?: string
   file_names?: string[] | null
+  /** Présent dans le journal API (publicEvent) */
+  agent_id?: string | null
 }
 
 export type PolicyUserMessages = {
@@ -1179,6 +1186,22 @@ export const api = {
         })
       }
     ),
+
+  /** Sevrage IA : blocked = kill switch (force block à la sync extension) */
+  setAgentAiAccess: (agentId: string, blocked: boolean) =>
+    request<{
+      ok: boolean
+      agent: {
+        id: string
+        ai_access: "allowed" | "blocked"
+        ai_access_blocked: boolean
+      }
+    }>(`/v1/org/agents/${encodeURIComponent(agentId)}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        ai_access: blocked ? "blocked" : "allowed"
+      })
+    }),
 
   admins: () =>
     request<{
@@ -2029,6 +2052,7 @@ export function normalizeEvent(raw: Record<string, unknown>): EventRow {
   const files = raw.file_names ?? raw.fileNames
   const types = asStringArray(raw.types)
   const ruleIds = asStringArray(raw.rule_ids ?? raw.ruleIds)
+  const agentRaw = raw.agent_id ?? raw.agentId
   return {
     id: String(raw.id || ""),
     ts: String(raw.ts || raw.received_at || raw.receivedAt || ""),
@@ -2061,6 +2085,7 @@ export function normalizeEvent(raw: Record<string, unknown>): EventRow {
       ? files.map(String)
       : files
         ? asStringArray(files)
-        : null
+        : null,
+    agent_id: agentRaw != null && agentRaw !== "" ? String(agentRaw) : null
   }
 }

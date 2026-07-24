@@ -38,10 +38,12 @@ import {
   type ConsoleRoute,
   type ConsoleTab,
   type DashSection,
+  type GatewaySection,
   type SettingsSection
 } from "./hash-route"
 import { AI_HOST_PRESETS, HostPicker } from "./HostPicker"
 import { getStoredLang, makeT, setStoredLang, type Lang } from "./i18n"
+import { GatewayView } from "./GatewayViews"
 import { RiskView, ShadowAiView } from "./RiskShadowViews"
 import {
   addWidget,
@@ -113,6 +115,9 @@ function readInitialRoute(): ConsoleRoute {
         "packs",
         "agents",
         "events",
+        "gateway",
+        "risk",
+        "shadow",
         "audit",
         "moving",
         "settings",
@@ -136,6 +141,10 @@ export default function App() {
   /** Sous-section tableau de bord (une seule nav latérale) */
   const [dashSection, setDashSection] = useState<DashSection>(
     () => initialRoute.dashSection || "overview"
+  )
+  /** Sous-onglets AI Security Gateway */
+  const [gatewaySection, setGatewaySection] = useState<GatewaySection>(
+    () => initialRoute.gatewaySection || "governance"
   )
   /** Évite boucle hashchange ↔ setState */
   const applyingHash = useRef(false)
@@ -529,8 +538,11 @@ export default function App() {
         settingsSection: h?.settingsSection || "general"
       }
     }
+    if (tab === "gateway") {
+      return { tab, gatewaySection }
+    }
     return { tab }
-  }, [tab, dashSection])
+  }, [tab, dashSection, gatewaySection])
 
   const applyRoute = useCallback(
     (route: ConsoleRoute, opts?: { scroll?: boolean }) => {
@@ -545,6 +557,9 @@ export default function App() {
         setDashExpanded(false)
       } else {
         setDashExpanded(false)
+      }
+      if (route.tab === "gateway") {
+        setGatewaySection(route.gatewaySection || "governance")
       }
       if (route.tab === "settings" && route.settingsSection) {
         try {
@@ -584,8 +599,19 @@ export default function App() {
           ? { tab: t, dashSection: "overview" }
           : t === "settings"
             ? { tab: t, settingsSection }
-            : { tab: t }
+            : t === "gateway"
+              ? { tab: t, gatewaySection: "governance" }
+              : { tab: t }
       applyRoute(route)
+      writeConsoleHash(route, "push")
+    },
+    [applyRoute]
+  )
+
+  const goGatewaySection = useCallback(
+    (id: GatewaySection) => {
+      const route: ConsoleRoute = { tab: "gateway", gatewaySection: id }
+      applyRoute(route, { scroll: false })
       writeConsoleHash(route, "push")
     },
     [applyRoute]
@@ -621,7 +647,7 @@ export default function App() {
     } catch {
       /* ignore */
     }
-  }, [tab, dashSection, sessionAdmin, currentRoute])
+  }, [tab, dashSection, gatewaySection, sessionAdmin, currentRoute])
 
   // Back / forward / lien collé
   useEffect(() => {
@@ -1487,6 +1513,56 @@ export default function App() {
         </button>
         <button
           type="button"
+          className={`shell-nav-item ${tab === "gateway" ? "active" : ""}`}
+          onClick={() => goTab("gateway")}>
+          {t("nav.gateway")}
+        </button>
+        {tab === "gateway" && (
+          <>
+            <button
+              type="button"
+              className={`shell-nav-sub ${
+                gatewaySection === "governance" ? "active" : ""
+              }`}
+              onClick={() => goGatewaySection("governance")}>
+              {t("gw.section.governance")}
+            </button>
+            <button
+              type="button"
+              className={`shell-nav-sub ${
+                gatewaySection === "usage" ? "active" : ""
+              }`}
+              onClick={() => goGatewaySection("usage")}>
+              {t("gw.section.usage")}
+            </button>
+            <button
+              type="button"
+              className={`shell-nav-sub ${
+                gatewaySection === "data" ? "active" : ""
+              }`}
+              onClick={() => goGatewaySection("data")}>
+              {t("gw.section.data")}
+            </button>
+            <button
+              type="button"
+              className={`shell-nav-sub ${
+                gatewaySection === "compliance" ? "active" : ""
+              }`}
+              onClick={() => goGatewaySection("compliance")}>
+              {t("gw.section.compliance")}
+            </button>
+            <button
+              type="button"
+              className={`shell-nav-sub ${
+                gatewaySection === "intelligence" ? "active" : ""
+              }`}
+              onClick={() => goGatewaySection("intelligence")}>
+              {t("gw.section.intelligence")}
+            </button>
+          </>
+        )}
+        <button
+          type="button"
           className={`shell-nav-item ${tab === "risk" ? "active" : ""}`}
           onClick={() => goTab("risk")}>
           {t("nav.risk")}
@@ -1780,6 +1856,35 @@ export default function App() {
           setError={setError}
           setInfo={setInfo}
           t={t}
+        />
+      )}
+      {tab === "gateway" && (
+        <GatewayView
+          t={t}
+          setError={setError}
+          setInfo={setInfo}
+          section={gatewaySection}
+          setSection={goGatewaySection}
+          onOpenShadow={() => goTab("shadow")}
+          onOpenRisk={() => goTab("risk")}
+          onOpenEvents={() => goTab("events")}
+          onOpenAudit={() => goTab("audit")}
+          onOpenReports={() => {
+            try {
+              sessionStorage.setItem(
+                "opsgate_console_settings_tab",
+                "reports"
+              )
+            } catch {
+              /* ignore */
+            }
+            goTab("settings")
+            window.dispatchEvent(
+              new CustomEvent("opsgate-settings-tab", {
+                detail: "reports"
+              })
+            )
+          }}
         />
       )}
       {tab === "risk" && (
@@ -11690,6 +11795,25 @@ function AgentsView({
                             : "remote"}
                       </span>
                     ) : null}
+                    {a.ai_access_blocked || a.ai_access === "blocked" ? (
+                      <span
+                        className="meta-tag"
+                        style={{
+                          marginLeft: 6,
+                          background: "rgba(239, 68, 68, 0.12)",
+                          color: "#b91c1c",
+                          border: "1px solid rgba(239, 68, 68, 0.3)",
+                          fontSize: 10,
+                          fontWeight: 700
+                        }}
+                        title={
+                          a.ai_access_blocked_by
+                            ? `IA bloquée · ${a.ai_access_blocked_by}`
+                            : "Accès IA suspendu (sevrage)"
+                        }>
+                        AI blocked
+                      </span>
+                    ) : null}
                     <div className="mono muted" style={{ fontSize: 11 }}>
                       {a.id}
                       {a.app_version ? ` · ${a.app_version}` : ""}
@@ -11746,37 +11870,79 @@ function AgentsView({
                     </select>
                   </td>
                   <td className="cell-select">
-                    <select
-                      className="input"
-                      disabled={busy}
-                      value={a.maintenance_mode || ""}
-                      title="Mode maintenance - exclut des alertes hors-ligne prolongé"
-                      onChange={async (e) => {
-                        const v = e.target.value
-                        const mode =
-                          v === "leave" || v === "outage" || v === "remote"
-                            ? v
-                            : null
-                        setBusy(true)
-                        try {
-                          await api.setAgentMaintenance(a.id, mode)
-                          setInfo(
-                            mode
-                              ? `Maintenance « ${mode} » → ${a.device_label || a.id}`
-                              : `Maintenance désactivée → ${a.device_label || a.id}`
-                          )
-                          onReload()
-                        } catch (err) {
-                          setError(String(err))
-                        } finally {
-                          setBusy(false)
+                    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                      <select
+                        className="input"
+                        disabled={busy}
+                        value={a.maintenance_mode || ""}
+                        title="Mode maintenance - exclut des alertes hors-ligne prolongé"
+                        onChange={async (e) => {
+                          const v = e.target.value
+                          const mode =
+                            v === "leave" || v === "outage" || v === "remote"
+                              ? v
+                              : null
+                          setBusy(true)
+                          try {
+                            await api.setAgentMaintenance(a.id, mode)
+                            setInfo(
+                              mode
+                                ? `Maintenance « ${mode} » → ${a.device_label || a.id}`
+                                : `Maintenance désactivée → ${a.device_label || a.id}`
+                            )
+                            onReload()
+                          } catch (err) {
+                            setError(String(err))
+                          } finally {
+                            setBusy(false)
+                          }
+                        }}>
+                        <option value="">Actif</option>
+                        <option value="leave">Congé / mission</option>
+                        <option value="outage">Panne</option>
+                        <option value="remote">Hors site</option>
+                      </select>
+                      <button
+                        type="button"
+                        className={
+                          a.ai_access_blocked || a.ai_access === "blocked"
+                            ? "btn secondary btn-sm"
+                            : "btn danger btn-sm"
                         }
-                      }}>
-                      <option value="">Actif</option>
-                      <option value="leave">Congé / mission</option>
-                      <option value="outage">Panne</option>
-                      <option value="remote">Hors site</option>
-                    </select>
+                        disabled={busy}
+                        title="Sevrage IA : force block sur l’extension au prochain sync"
+                        onClick={async () => {
+                          const blocked = !(
+                            a.ai_access_blocked || a.ai_access === "blocked"
+                          )
+                          if (
+                            blocked &&
+                            !window.confirm(
+                              `Suspendre l’accès IA pour « ${a.device_label || a.id} » ? L’agent passera en block au prochain sync.`
+                            )
+                          ) {
+                            return
+                          }
+                          setBusy(true)
+                          try {
+                            await api.setAgentAiAccess(a.id, blocked)
+                            setInfo(
+                              blocked
+                                ? `Accès IA suspendu → ${a.device_label || a.id}`
+                                : `Accès IA rétabli → ${a.device_label || a.id}`
+                            )
+                            onReload()
+                          } catch (err) {
+                            setError(String(err))
+                          } finally {
+                            setBusy(false)
+                          }
+                        }}>
+                        {a.ai_access_blocked || a.ai_access === "blocked"
+                          ? "Rétablir IA"
+                          : "Bloquer IA"}
+                      </button>
+                    </div>
                   </td>
                   <td className="cell-narrow muted">
                     {formatDateTimeAny(a.last_seen_at, dtPrefs)}

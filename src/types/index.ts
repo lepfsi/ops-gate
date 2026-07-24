@@ -177,6 +177,11 @@ export interface OpsGateSettings {
   securityActive?: boolean
   /** Policy action effective (sync) */
   defaultAction?: DefaultAction
+  /**
+   * Sevrage IA individuel (sync policy.ai_access).
+   * true = accès IA bloqué pour cet agent (kill switch admin).
+   */
+  aiAccessBlocked?: boolean
   /** Messages UX custom admin (partial) */
   userMessages?: Partial<PolicyUserMessages>
   /**

@@ -479,7 +479,7 @@ export function createApp() {
 
     const payload = toPayload(pack)
     const etag = policyEtag(
-      `${policy.version}.${policy.configEpoch}.${profile?.id || "default"}.${admins.length}.${licensed ? 1 : 0}`,
+      `${policy.version}.${policy.configEpoch}.${profile?.id || "default"}.${admins.length}.${licensed ? 1 : 0}.${agent?.aiAccessBlocked ? "aib" : "aia"}`,
       pack.version
     )
     const inm = c.req.header("If-None-Match")
@@ -560,6 +560,12 @@ export function createApp() {
           : inGrace
             ? "grace"
             : "unlicensed",
+        /**
+         * Sevrage IA individuel — "blocked" force default_action=block côté agent.
+         * Présent aussi en default_action déjà overridé par getEffectivePolicyForAgent.
+         */
+        ai_access: agent?.aiAccessBlocked ? "blocked" : "allowed",
+        ai_access_blocked_at: agent?.aiAccessBlockedAt || null,
         updated_at: policy.updatedAt
       },
       rules_pack: payload
@@ -3083,7 +3089,11 @@ export function createApp() {
           device_fingerprint: a.deviceFingerprint || null,
           device_type: a.deviceType === "proxy" ? "proxy" : "extension",
           maintenance_mode: a.maintenanceMode || null,
-          maintenance_note: a.maintenanceNote || null
+          maintenance_note: a.maintenanceNote || null,
+          ai_access: a.aiAccessBlocked ? "blocked" : "allowed",
+          ai_access_blocked: !!a.aiAccessBlocked,
+          ai_access_blocked_at: a.aiAccessBlockedAt || null,
+          ai_access_blocked_by: a.aiAccessBlockedBy || null
         }
       })
     )
@@ -3109,7 +3119,7 @@ export function createApp() {
     })
   })
 
-  /** Assigner profil et/ou user / maintenance à un agent */
+  /** Assigner profil et/ou user / maintenance / sevrage IA à un agent */
   v1.patch("/org/agents/:agentId", async (c) => {
     const _gate = await requireConsoleAuth(c, "console_access")
     if (!_gate.ok) return c.json({ error: _gate.error }, _gate.status)
@@ -3120,6 +3130,9 @@ export function createApp() {
       user_id?: string | null
       maintenance_mode?: "leave" | "outage" | "remote" | null
       maintenance_note?: string | null
+      /** "blocked" | "allowed" | boolean */
+      ai_access?: "blocked" | "allowed" | boolean
+      ai_access_blocked?: boolean
     }
     try {
       body = await c.req.json()
@@ -3163,15 +3176,44 @@ export function createApp() {
       )
       if (!agent) return c.json({ error: "agent_not_found" }, 404)
     }
+    const aiAccessRaw =
+      body.ai_access !== undefined
+        ? body.ai_access
+        : body.ai_access_blocked !== undefined
+          ? body.ai_access_blocked
+          : undefined
+    if (aiAccessRaw !== undefined) {
+      const blocked =
+        aiAccessRaw === true ||
+        aiAccessRaw === "blocked" ||
+        aiAccessRaw === "block"
+      if (
+        aiAccessRaw !== true &&
+        aiAccessRaw !== false &&
+        aiAccessRaw !== "blocked" &&
+        aiAccessRaw !== "allowed" &&
+        aiAccessRaw !== "block"
+      ) {
+        return c.json({ error: "invalid_ai_access" }, 400)
+      }
+      agent = await store.setAgentAiAccess(
+        org.id,
+        c.req.param("agentId"),
+        blocked,
+        _gate.admin.email || _gate.admin.label || null
+      )
+      if (!agent) return c.json({ error: "agent_not_found" }, 404)
+    }
     await audit(
       _gate,
       "agent_assign",
-      `Assign agent ${c.req.param("agentId").slice(0, 12)}… · profil=${agent.policyProfileId || "—"} · user=${agent.userId || "—"} · maint=${agent.maintenanceMode || "off"}`,
+      `Assign agent ${c.req.param("agentId").slice(0, 12)}… · profil=${agent.policyProfileId || "—"} · user=${agent.userId || "—"} · maint=${agent.maintenanceMode || "off"} · ai_access=${agent.aiAccessBlocked ? "blocked" : "allowed"}`,
       {
         agent_id: agent.id,
         policy_profile_id: agent.policyProfileId,
         user_id: agent.userId,
-        maintenance_mode: agent.maintenanceMode || null
+        maintenance_mode: agent.maintenanceMode || null,
+        ai_access: agent.aiAccessBlocked ? "blocked" : "allowed"
       }
     )
     return c.json({
@@ -3181,7 +3223,11 @@ export function createApp() {
         policy_profile_id: agent.policyProfileId || null,
         user_id: agent.userId || null,
         maintenance_mode: agent.maintenanceMode || null,
-        maintenance_note: agent.maintenanceNote || null
+        maintenance_note: agent.maintenanceNote || null,
+        ai_access: agent.aiAccessBlocked ? "blocked" : "allowed",
+        ai_access_blocked: !!agent.aiAccessBlocked,
+        ai_access_blocked_at: agent.aiAccessBlockedAt || null,
+        ai_access_blocked_by: agent.aiAccessBlockedBy || null
       }
     })
   })

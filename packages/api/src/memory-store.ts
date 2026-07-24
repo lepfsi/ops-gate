@@ -1706,6 +1706,27 @@ export class MemoryStore implements OpsGateStore {
     return agent
   }
 
+  async setAgentAiAccess(
+    orgId: string,
+    agentId: string,
+    blocked: boolean,
+    byEmail?: string | null
+  ) {
+    const agent = this.agents.get(agentId)
+    if (!agent || agent.orgId !== orgId) return undefined
+    agent.aiAccessBlocked = !!blocked
+    if (blocked) {
+      agent.aiAccessBlockedAt = new Date().toISOString()
+      agent.aiAccessBlockedBy = byEmail?.trim() || null
+    } else {
+      agent.aiAccessBlockedAt = null
+      agent.aiAccessBlockedBy = null
+    }
+    agent.lastSeenAt = new Date().toISOString()
+    await this.forceConfigSync(orgId)
+    return agent
+  }
+
   private resolveProfileForAgent(
     orgId: string,
     agent: Agent | undefined
@@ -1763,7 +1784,7 @@ export class MemoryStore implements OpsGateStore {
     const profile = this.resolveProfileForAgent(orgId, agent)
 
     const { resolveEffectiveFileScan } = await import("./types")
-    const effective = profile
+    let effective = profile
       ? {
           defaultAction: profile.defaultAction,
           enabledHosts: profile.enabledHosts,
@@ -1792,6 +1813,19 @@ export class MemoryStore implements OpsGateStore {
           userMessages: policy.userMessages || {},
           workSchedule: policy.workSchedule || null
         }
+
+    // Sevrage IA agent : kill switch commercial (force block)
+    if (agent?.aiAccessBlocked) {
+      const { AI_ACCESS_BLOCKED_MESSAGES } = await import("./types")
+      effective = {
+        ...effective,
+        defaultAction: "block" as const,
+        userMessages: {
+          ...(effective.userMessages || {}),
+          ...AI_ACCESS_BLOCKED_MESSAGES
+        }
+      }
+    }
 
     const unenrollAdmins = await this.listUnenrollAdmins(orgId)
     const admins = unenrollAdmins.map((a) => ({

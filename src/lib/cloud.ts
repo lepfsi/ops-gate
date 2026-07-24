@@ -358,8 +358,16 @@ export async function syncConfig(
         : undefined,
       licenseGraceMs: body.policy.license_grace_ms || 24 * 60 * 60 * 1000,
       securityActive: body.policy.security_active !== false,
-      defaultAction: (body.policy.default_action as OpsGateSettings["defaultAction"]) ||
-        "mask_recommend",
+      // Sevrage IA : force block (belt & suspenders avec policy.default_action déjà overridé API)
+      aiAccessBlocked:
+        body.policy.ai_access === "blocked" ||
+        body.policy.ai_access_blocked === true,
+      defaultAction:
+        body.policy.ai_access === "blocked" ||
+        body.policy.ai_access_blocked === true
+          ? "block"
+          : (body.policy.default_action as OpsGateSettings["defaultAction"]) ||
+            "mask_recommend",
       userMessages: body.policy.user_messages || {},
       agentUiLang:
         body.policy.agent_ui_lang === "en" ||
@@ -368,6 +376,7 @@ export async function syncConfig(
           ? body.policy.agent_ui_lang
           : "fr",
       // Si unlicensed après grace → désactive la protection locale
+      // ai_access blocked : protection RESTE active (en mode block)
       enabled:
         body.policy.security_active === false
           ? false

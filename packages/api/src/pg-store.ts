@@ -269,7 +269,12 @@ function rowAgent(r: pg.QueryResultRow): Agent {
       maint === "leave" || maint === "outage" || maint === "remote"
         ? maint
         : null,
-    maintenanceNote: r.maintenance_note ?? null
+    maintenanceNote: r.maintenance_note ?? null,
+    aiAccessBlocked: r.ai_access_blocked === true,
+    aiAccessBlockedAt: r.ai_access_blocked_at
+      ? new Date(r.ai_access_blocked_at).toISOString()
+      : null,
+    aiAccessBlockedBy: r.ai_access_blocked_by ?? null
   }
 }
 
@@ -532,6 +537,9 @@ export class PgStore implements OpsGateStore {
       `ALTER TABLE agents ADD COLUMN IF NOT EXISTS device_type TEXT NOT NULL DEFAULT 'extension'`,
       `ALTER TABLE agents ADD COLUMN IF NOT EXISTS maintenance_mode TEXT`,
       `ALTER TABLE agents ADD COLUMN IF NOT EXISTS maintenance_note TEXT`,
+      `ALTER TABLE agents ADD COLUMN IF NOT EXISTS ai_access_blocked BOOLEAN NOT NULL DEFAULT FALSE`,
+      `ALTER TABLE agents ADD COLUMN IF NOT EXISTS ai_access_blocked_at TIMESTAMPTZ`,
+      `ALTER TABLE agents ADD COLUMN IF NOT EXISTS ai_access_blocked_by TEXT`,
       `ALTER TABLE org_admins ADD COLUMN IF NOT EXISTS failed_login_count INT NOT NULL DEFAULT 0`,
       `ALTER TABLE org_admins ADD COLUMN IF NOT EXISTS locked_at TIMESTAMPTZ`,
       `ALTER TABLE org_admins ADD COLUMN IF NOT EXISTS totp_enabled BOOLEAN NOT NULL DEFAULT FALSE`,
@@ -2780,6 +2788,26 @@ export class PgStore implements OpsGateStore {
     return rowAgent(rows[0])
   }
 
+  async setAgentAiAccess(
+    orgId: string,
+    agentId: string,
+    blocked: boolean,
+    byEmail?: string | null
+  ) {
+    const { rows } = await this.pool.query(
+      `UPDATE agents SET
+         ai_access_blocked = $3,
+         ai_access_blocked_at = CASE WHEN $3 THEN NOW() ELSE NULL END,
+         ai_access_blocked_by = CASE WHEN $3 THEN $4 ELSE NULL END,
+         last_seen_at = NOW()
+       WHERE org_id = $1 AND id = $2 RETURNING *`,
+      [orgId, agentId, !!blocked, byEmail?.trim() || null]
+    )
+    if (!rows[0]) return undefined
+    await this.forceConfigSync(orgId)
+    return rowAgent(rows[0])
+  }
+
   private async resolveProfileForAgent(
     orgId: string,
     agent: Agent | undefined
@@ -2833,7 +2861,7 @@ export class PgStore implements OpsGateStore {
     const agent = agents.find((a) => a.id === agentId)
     const profile = await this.resolveProfileForAgent(orgId, agent)
 
-    const effective = profile
+    let effective = profile
       ? {
           defaultAction: profile.defaultAction,
           enabledHosts: profile.enabledHosts,
@@ -2862,6 +2890,18 @@ export class PgStore implements OpsGateStore {
           userMessages: policy.userMessages || {},
           workSchedule: policy.workSchedule || null
         }
+
+    if (agent?.aiAccessBlocked) {
+      const { AI_ACCESS_BLOCKED_MESSAGES } = await import("./types")
+      effective = {
+        ...effective,
+        defaultAction: "block" as const,
+        userMessages: {
+          ...(effective.userMessages || {}),
+          ...AI_ACCESS_BLOCKED_MESSAGES
+        }
+      }
+    }
 
     const unenroll = await this.listUnenrollAdmins(orgId)
     const admins = unenroll.map((a) => ({

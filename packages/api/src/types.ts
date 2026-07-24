@@ -1368,6 +1368,27 @@ export interface Agent {
    */
   maintenanceMode?: "leave" | "outage" | "remote" | null
   maintenanceNote?: string | null
+  /**
+   * Sevrage IA (produit) — true = accès IA bloqué pour cet agent.
+   * Force defaultAction=block à la sync, indépendamment du profil.
+   * Visible / auditable ; commercialement « kill switch » user.
+   */
+  aiAccessBlocked?: boolean
+  /** Horodatage du basculement sevrage (preuve audit) */
+  aiAccessBlockedAt?: string | null
+  /** Qui a basculé (email admin, optionnel) */
+  aiAccessBlockedBy?: string | null
+}
+
+/** Messages banner quand ai_access=blocked (écrasent le profil) */
+export const AI_ACCESS_BLOCKED_MESSAGES: Partial<PolicyUserMessages> = {
+  blockTitle: "Accès IA suspendu par votre administrateur",
+  blockBody:
+    "Votre accès aux outils d’intelligence artificielle a été restreint dans le cadre de la politique de sécurité (sevrage OpsGate). Contactez votre administrateur IT pour une exception ou un rétablissement.",
+  toastBlocked:
+    "Accès IA suspendu — aucune donnée n’a été envoyée. Contactez votre administrateur.",
+  adminNotice:
+    "Restriction individuelle d’accès IA appliquée par votre organisation (OpsGate)."
 }
 
 export interface PasswordResetChallenge {

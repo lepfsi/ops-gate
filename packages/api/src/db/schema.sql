@@ -154,7 +154,11 @@ CREATE TABLE IF NOT EXISTS agents (
   device_type TEXT NOT NULL DEFAULT 'extension',
   /** leave | outage | remote — hors alertes offline prolongé */
   maintenance_mode TEXT,
-  maintenance_note TEXT
+  maintenance_note TEXT,
+  /** Sevrage IA agent — force default_action=block à la sync */
+  ai_access_blocked BOOLEAN NOT NULL DEFAULT FALSE,
+  ai_access_blocked_at TIMESTAMPTZ,
+  ai_access_blocked_by TEXT
 );
 
 CREATE INDEX IF NOT EXISTS agents_org_idx ON agents(org_id);

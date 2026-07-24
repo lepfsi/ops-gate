@@ -21,6 +21,7 @@ export type ConsoleTab =
   | "packs"
   | "agents"
   | "events"
+  | "gateway"
   | "risk"
   | "shadow"
   | "audit"
@@ -28,6 +29,14 @@ export type ConsoleTab =
   | "settings"
   | "support"
   | "help"
+
+/** Sous-onglets AI Security Gateway (roadmap) */
+export type GatewaySection =
+  | "governance"
+  | "usage"
+  | "data"
+  | "compliance"
+  | "intelligence"
 
 export type DashSection =
   | "overview"
@@ -50,6 +59,7 @@ export type ConsoleRoute = {
   tab: ConsoleTab
   dashSection?: DashSection
   settingsSection?: SettingsSection
+  gatewaySection?: GatewaySection
 }
 
 const TABS = new Set<ConsoleTab>([
@@ -60,6 +70,7 @@ const TABS = new Set<ConsoleTab>([
   "packs",
   "agents",
   "events",
+  "gateway",
   "risk",
   "shadow",
   "audit",
@@ -67,6 +78,14 @@ const TABS = new Set<ConsoleTab>([
   "settings",
   "support",
   "help"
+])
+
+const GATEWAY = new Set<GatewaySection>([
+  "governance",
+  "usage",
+  "data",
+  "compliance",
+  "intelligence"
 ])
 
 const DASH = new Set<DashSection>([
@@ -103,6 +122,10 @@ const TAB_ALIASES: Record<string, ConsoleTab> = {
   rules: "packs",
   agents: "agents",
   events: "events",
+  gateway: "gateway",
+  "ai-security": "gateway",
+  "ai-gateway": "gateway",
+  security: "gateway",
   risk: "risk",
   scores: "risk",
   shadow: "shadow",
@@ -207,6 +230,15 @@ export function parseConsoleHash(
     return { tab, settingsSection }
   }
 
+  if (tab === "gateway") {
+    const secKey = parts[1]
+    const gatewaySection =
+      secKey && GATEWAY.has(secKey as GatewaySection)
+        ? (secKey as GatewaySection)
+        : "governance"
+    return { tab, gatewaySection }
+  }
+
   return { tab }
 }
 
@@ -223,6 +255,11 @@ export function buildConsoleHash(route: ConsoleRoute): string {
     if (sec === "general") return "#/settings"
     return `#/settings/${sec}`
   }
+  if (route.tab === "gateway") {
+    const sec = route.gatewaySection || "governance"
+    if (sec === "governance") return "#/gateway"
+    return `#/gateway/${sec}`
+  }
   return `#/${route.tab}`
 }
 
@@ -235,6 +272,11 @@ export function routesEqual(a: ConsoleRoute, b: ConsoleRoute): boolean {
   if (a.tab === "settings") {
     return (
       (a.settingsSection || "general") === (b.settingsSection || "general")
+    )
+  }
+  if (a.tab === "gateway") {
+    return (
+      (a.gatewaySection || "governance") === (b.gatewaySection || "governance")
     )
   }
   return true
