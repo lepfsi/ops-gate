@@ -179,16 +179,22 @@ export function GatewayView({
     low: 0
   })
   const [events, setEvents] = useState<EventRow[]>([])
+  /** Cache risk users pour éviter rechargements Usage/Intel/Compliance */
+  const [riskUsersCache, setRiskUsersCache] = useState<RiskUserRow[]>([])
+  const [riskUsersPeriod, setRiskUsersPeriod] = useState<Period | null>(null)
 
   const load = useCallback(async () => {
     setBusy(true)
     setError(null)
     try {
-      const [sum, riskSum, shadowRaw, evRaw] = await Promise.all([
+      const [sum, riskSum, shadowRaw, evRaw, riskUsersRaw] = await Promise.all([
         api.summary().catch(() => null),
         fetchRiskSummary(period),
         api.shadowAi({ period, status: "all" }).catch(() => null),
-        api.events().catch(() => null)
+        api.events().catch(() => null),
+        api
+          .riskUsers({ period, min_score: 0, limit: 200 })
+          .catch(() => null)
       ])
 
       setSummary(sum)
@@ -203,6 +209,10 @@ export function GatewayView({
 
       const list = (evRaw?.events || []) as EventRow[]
       setEvents(list)
+      if (riskUsersRaw?.users) {
+        setRiskUsersCache((riskUsersRaw.users || []) as RiskUserRow[])
+        setRiskUsersPeriod(period)
+      }
       const stats = {
         total: list.length,
         blocked: 0,
@@ -403,6 +413,9 @@ export function GatewayView({
           counts={shadowCounts}
           summary={summary}
           events={events}
+          riskUsersSeed={
+            riskUsersPeriod === period ? riskUsersCache : undefined
+          }
           busy={busy}
           setError={setError}
           setInfo={setInfo}
@@ -443,6 +456,7 @@ export function GatewayView({
           t={t}
           period={period}
           eventStats={eventStats}
+          events={events}
           sensitiveAttempts={sensitiveAttempts}
           protectedActions={protectedActions}
           summary={summary}
@@ -459,12 +473,20 @@ export function GatewayView({
           avgRisk={avgRisk}
           riskDelta={riskDelta}
           eventStats={eventStats}
+          events={events}
+          tools={tools}
           shadowCounts={shadowCounts}
           sensitiveAttempts={sensitiveAttempts}
           protectedActions={protectedActions}
+          riskUsersSeed={
+            riskUsersPeriod === period ? riskUsersCache : undefined
+          }
+          setError={setError}
           onOpenAudit={onOpenAudit}
           onOpenReports={onOpenReports}
           onOpenEvents={onOpenEvents}
+          onOpenUsage={() => setSection("usage")}
+          onOpenData={() => setSection("data")}
         />
       )}
 
@@ -479,6 +501,12 @@ export function GatewayView({
           unauthorizedTools={unauthorizedTools}
           unknownTools={unknownTools}
           eventStats={eventStats}
+          events={events}
+          riskUsersSeed={
+            riskUsersPeriod === period ? riskUsersCache : undefined
+          }
+          setError={setError}
+          setInfo={setInfo}
           onOpenRisk={onOpenRisk}
           onOpenShadow={onOpenShadow}
           onOpenUsage={() => setSection("usage")}
@@ -1016,9 +1044,6 @@ function GovernancePanel({
       <div className="gw-card gw-gov-questions">
         <div className="gw-card-head">
           <h3>{t("gw.governance.questions")}</h3>
-          <span className="muted" style={{ fontSize: 12 }}>
-            {t("gw.gov.questionsHintLive")}
-          </span>
         </div>
         <div className="gw-gov-qgrid">
           {questions.map((item, i) => (
@@ -1076,19 +1101,6 @@ function GovernancePanel({
             </li>
           ))}
         </ol>
-      </div>
-
-      <div className="gw-gov-promise">
-        <div>
-          <strong>{t("gw.promise")}</strong>
-          <p className="muted">{t("gw.promiseDetail")}</p>
-        </div>
-        <button
-          type="button"
-          className="btn secondary btn-sm"
-          onClick={onOpenCompliance}>
-          {t("gw.gov.cta.proof")}
-        </button>
       </div>
 
       {drill && (
@@ -1559,7 +1571,6 @@ function GovDrillDrawer({
         </div>
 
         <footer className="gw-drill-foot">
-          <span className="muted">{t("gw.gov.drill.foot")}</span>
           <div className="gw-drill-foot-actions">
             <button
               type="button"
@@ -1602,6 +1613,7 @@ function UsagePanel({
   counts,
   summary,
   events,
+  riskUsersSeed,
   busy,
   setError,
   setInfo,
@@ -1618,6 +1630,7 @@ function UsagePanel({
   counts: ShadowCounts | null
   summary: Summary | null
   events: EventRow[]
+  riskUsersSeed?: RiskUserRow[]
   busy: boolean
   setError: (e: string | null) => void
   setInfo: (i: string | null) => void
@@ -1639,8 +1652,12 @@ function UsagePanel({
   const [selected, setSelected] = useState<Set<string>>(() => new Set())
   const [patching, setPatching] = useState<string | null>(null)
   const [drill, setDrill] = useState<UsageDrill | null>(null)
-  const [riskUsers, setRiskUsers] = useState<RiskUserRow[]>([])
-  const [riskUsersLoaded, setRiskUsersLoaded] = useState(false)
+  const [riskUsers, setRiskUsers] = useState<RiskUserRow[]>(
+    () => riskUsersSeed || []
+  )
+  const [riskUsersLoaded, setRiskUsersLoaded] = useState(
+    () => !!riskUsersSeed?.length
+  )
   const [drillBusy, setDrillBusy] = useState(false)
   const [agentDetail, setAgentDetail] = useState<{
     agent_id: string
@@ -1668,20 +1685,31 @@ function UsagePanel({
     }
   }, [])
 
-  // Précharger risk users dès l’entrée Usage (agents ↔ apps)
+  // Seed cache parent + profils / ai_access
   useEffect(() => {
     let cancelled = false
+    if (riskUsersSeed?.length) {
+      setRiskUsers(riskUsersSeed)
+      setRiskUsersLoaded(true)
+    }
     setDrillBusy(true)
     void (async () => {
       try {
+        const needUsers = !riskUsersSeed?.length
         const [ru, pr] = await Promise.all([
-          api.riskUsers({ period, min_score: 0, limit: 200 }),
+          needUsers
+            ? api.riskUsers({ period, min_score: 0, limit: 200 })
+            : Promise.resolve(null),
           api.profiles().catch(() => null),
           refreshAiBlockedMap()
         ])
         if (cancelled) return
-        setRiskUsers((ru.users || []) as RiskUserRow[])
-        setRiskUsersLoaded(true)
+        if (ru?.users) {
+          setRiskUsers((ru.users || []) as RiskUserRow[])
+          setRiskUsersLoaded(true)
+        } else if (!riskUsersSeed?.length) {
+          setRiskUsersLoaded(true)
+        }
         const list = (pr?.profiles || []) as Array<{
           id: string
           name: string
@@ -1698,7 +1726,6 @@ function UsagePanel({
       } catch (e) {
         if (!cancelled) {
           setError(String(e))
-          setRiskUsers([])
           setRiskUsersLoaded(true)
         }
       } finally {
@@ -1708,7 +1735,7 @@ function UsagePanel({
     return () => {
       cancelled = true
     }
-  }, [period, setError, refreshAiBlockedMap])
+  }, [period, setError, refreshAiBlockedMap, riskUsersSeed])
 
   const total = counts?.total ?? tools.length
   const authorized = counts?.authorized ?? 0
@@ -2252,9 +2279,6 @@ function UsagePanel({
                         </span>
                       </div>
                       <code className="gw-usage-app-id">{tool.tool}</code>
-                      <span className="gw-usage-inspect">
-                        {t("gw.usage.inspectAgents")} →
-                      </span>
                     </div>
                   </button>
                   <div className="gw-usage-col-vol">
@@ -2326,7 +2350,6 @@ function UsagePanel({
           </div>
         )}
 
-        <p className="gw-usage-foot muted">{t("gw.usage.policyNoteLive")}</p>
       </div>
 
       {drill && (
@@ -2711,21 +2734,6 @@ function UsageDrillDrawer({
                         ? t("gw.usage.wean.titleHigh")
                         : t("gw.usage.wean.titleMed")}
                   </strong>
-                  <p className="muted">{t("gw.usage.wean.explainLive")}</p>
-                  <ul className="gw-usage-wean-split">
-                    <li>
-                      <strong>{t("gw.usage.wean.killSwitch")}</strong>
-                      <span className="muted">
-                        {t("gw.usage.wean.killSwitchDetail")}
-                      </span>
-                    </li>
-                    <li>
-                      <strong>{t("gw.usage.wean.usageOwns")}</strong>
-                      <span className="muted">
-                        {t("gw.usage.wean.usageOwnsDetail")}
-                      </span>
-                    </li>
-                  </ul>
                   <div className="gw-usage-wean-actions">
                     {agentBlocked ? (
                       <button
@@ -2911,7 +2919,6 @@ function UsageDrillDrawer({
         </div>
 
         <footer className="gw-drill-foot">
-          <span className="muted">{t("gw.usage.drill.foot")}</span>
           <div className="gw-drill-foot-actions">
             {onOpenEvents && (
               <button
@@ -2937,13 +2944,105 @@ function UsageDrillDrawer({
   )
 }
 
+/** Famille d’actif DLP à partir des rule ids / types d’event (≠ inventaire apps) */
+function classifyAssetFamily(types: string[]): "pii" | "secrets" | "business" | "other" {
+  const blob = types.join(" ").toLowerCase()
+  if (
+    /password|passwd|secret|credential|api-key|api_key|token|jwt|ssh|aws|azure|private-key|stripe|openai|anthropic|generic-api/i.test(
+      blob
+    )
+  ) {
+    return "secrets"
+  }
+  if (
+    /email|phone|iban|ssn|pii|personal|card|credit|rh|nom|téléphone|phone-number|email-address/i.test(
+      blob
+    )
+  ) {
+    return "pii"
+  }
+  if (
+    /file|office|xlsx|docx|pdf|document|contract|code|source|excel|csv|upload/i.test(
+      blob
+    )
+  ) {
+    return "business"
+  }
+  return "other"
+}
+
+type DataDrill =
+  | { kind: "sensitive" }
+  | { kind: "high" }
+  | { kind: "medium" }
+  | { kind: "low" }
+  | { kind: "block" }
+  | { kind: "rewrite" }
+  | { kind: "mask" }
+  | { kind: "bypass" }
+  | { kind: "cancel" }
+  | { kind: "protected" }
+  | { kind: "files" }
+  | { kind: "pii" }
+  | { kind: "secrets" }
+  | { kind: "business" }
+  | { kind: "type"; typeId: string }
+
+function filterDataEvents(events: EventRow[], drill: DataDrill): EventRow[] {
+  return events.filter((e) => {
+    const sev = String(e.highest_severity || "").toLowerCase()
+    const d = decisionKind(e.decision || "")
+    const types = e.types || []
+    const family = classifyAssetFamily(types)
+    const hasFile = Array.isArray(e.file_names) && e.file_names.length > 0
+    switch (drill.kind) {
+      case "sensitive":
+        return sev === "high" || sev === "medium" || sev === "low"
+      case "high":
+        return sev === "high"
+      case "medium":
+        return sev === "medium"
+      case "low":
+        return sev === "low"
+      case "block":
+        return d === "block"
+      case "rewrite":
+        return d === "rewrite"
+      case "mask":
+        return d === "mask"
+      case "bypass":
+        return d === "bypass"
+      case "cancel":
+        return d === "cancel"
+      case "protected":
+        return d === "block" || d === "rewrite" || d === "mask" || d === "cancel"
+      case "files":
+        return hasFile
+      case "pii":
+        return family === "pii"
+      case "secrets":
+        return family === "secrets"
+      case "business":
+        return family === "business" || hasFile
+      case "type":
+        return types.some(
+          (x) =>
+            String(x).toLowerCase() === drill.typeId.toLowerCase() ||
+            String(x).toLowerCase().includes(drill.typeId.toLowerCase())
+        )
+      default:
+        return false
+    }
+  })
+}
+
 function DataPanel({
   t,
   period,
   eventStats,
+  events,
   sensitiveAttempts,
   protectedActions,
-  summary,
   onOpenEvents
 }: {
   t: Props["t"]
@@ -2959,18 +3058,13 @@ function DataPanel({
     medium: number
     low: number
   }
+  events: EventRow[]
   sensitiveAttempts: number
   protectedActions: number
-  summary: Summary | null
+  summary?: Summary | null
   onOpenEvents?: () => void
 }) {
-  const decisions = summary?.by_decision || {}
-  const decisionEntries = useMemo(() => {
-    return Object.entries(decisions)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 10)
-  }, [decisions])
-  const maxDecision = Math.max(1, ...decisionEntries.map(([, v]) => v))
+  const [drill, setDrill] = useState<DataDrill | null>(null)
 
   const protectRate =
     sensitiveAttempts > 0
@@ -2982,81 +3076,123 @@ function DataPanel({
   const hardStop = eventStats.blocked + eventStats.cancel
   const bypass = eventStats.sendAnyway
 
+  const dlpStats = useMemo(() => {
+    let files = 0
+    let pii = 0
+    let secrets = 0
+    let business = 0
+    const typeCounts = new Map<string, number>()
+    for (const e of events) {
+      if (Array.isArray(e.file_names) && e.file_names.length > 0) files++
+      const types = e.types || []
+      const fam = classifyAssetFamily(types)
+      if (fam === "pii") pii++
+      else if (fam === "secrets") secrets++
+      else if (fam === "business" || (e.file_names && e.file_names.length))
+        business++
+      for (const ty of types) {
+        const k = String(ty || "").trim()
+        if (!k) continue
+        typeCounts.set(k, (typeCounts.get(k) || 0) + 1)
+      }
+    }
+    const topTypes = [...typeCounts.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 12)
+    return { files, pii, secrets, business, topTypes }
+  }, [events])
+
   const postureTone =
     eventStats.high > 0 || bypass > Math.max(3, protectedActions)
       ? "danger"
       : sensitiveAttempts > 0
         ? "warn"
-        : protectedActions > 0 || eventStats.total > 0
+        : protectedActions > 0
           ? "ok"
           : "neutral"
 
   const assets = [
     {
-      id: "pii",
+      id: "pii" as const,
       icon: "PII",
       title: t("gw.data.pii"),
       ex: t("gw.data.piiEx"),
-      hint: t("gw.data.asset.piiHint")
+      count: dlpStats.pii,
+      drill: { kind: "pii" as const }
     },
     {
-      id: "secrets",
+      id: "secrets" as const,
       icon: "KEY",
       title: t("gw.data.secrets"),
       ex: t("gw.data.secretsEx"),
-      hint: t("gw.data.asset.secretsHint")
+      count: dlpStats.secrets,
+      drill: { kind: "secrets" as const }
     },
     {
-      id: "business",
+      id: "business" as const,
       icon: "DOC",
       title: t("gw.data.business"),
       ex: t("gw.data.businessEx"),
-      hint: t("gw.data.asset.businessHint")
+      count: dlpStats.business + dlpStats.files,
+      drill: { kind: "business" as const }
     }
-  ] as const
+  ]
 
-  const actionCards = [
+  const actionCards: Array<{
+    id: string
+    label: string
+    detail: string
+    value: number
+    tone: "danger" | "ok" | "warn" | "neutral"
+    drill: DataDrill
+  }> = [
     {
       id: "block",
       label: t("gw.data.act.block"),
       detail: t("gw.data.act.blockDetail"),
       value: eventStats.blocked,
-      tone: "danger" as const
+      tone: "danger",
+      drill: { kind: "block" }
     },
     {
       id: "rewrite",
       label: t("gw.data.act.rewrite"),
       detail: t("gw.data.act.rewriteDetail"),
       value: eventStats.rewrite,
-      tone: "ok" as const
+      tone: "ok",
+      drill: { kind: "rewrite" }
     },
     {
       id: "mask",
       label: t("gw.data.act.mask"),
       detail: t("gw.data.act.maskDetail"),
       value: eventStats.mask,
-      tone: "ok" as const
+      tone: "ok",
+      drill: { kind: "mask" }
     },
     {
       id: "confirm",
       label: t("gw.data.act.confirm"),
       detail: t("gw.data.act.confirmDetail"),
       value: eventStats.sendAnyway,
-      tone: "warn" as const
+      tone: "warn",
+      drill: { kind: "bypass" }
     },
     {
       id: "cancel",
       label: t("gw.data.act.cancel"),
       detail: t("gw.data.act.cancelDetail"),
       value: eventStats.cancel,
-      tone: "neutral" as const
+      tone: "neutral",
+      drill: { kind: "cancel" }
     },
     {
-      id: "log",
-      label: t("gw.data.act.log"),
-      detail: t("gw.data.act.logDetail"),
-      value: protectedActions,
-      tone: "neutral" as const
+      id: "files",
+      label: t("gw.data.act.files"),
+      detail: t("gw.data.act.filesDetail"),
+      value: dlpStats.files,
+      tone: "neutral",
+      drill: { kind: "files" }
     }
   ]
 
@@ -3066,10 +3202,12 @@ function DataPanel({
     eventStats.medium,
     eventStats.low
   )
+  const maxType = Math.max(1, ...dlpStats.topTypes.map(([, n]) => n))
+
+  const drilled = drill ? filterDataEvents(events, drill).slice(0, 50) : []
 
   return (
     <div className="gw-panel gw-data">
-      {/* Posture hero */}
       <section className={`gw-data-hero gw-data-hero--${postureTone}`}>
         <div className="gw-data-hero-copy">
           <span className="gw-kicker">{t("gw.data.kicker")}</span>
@@ -3087,18 +3225,33 @@ function DataPanel({
                   : t("gw.data.lead.neutral")}
           </p>
           <div className="gw-data-hero-actions">
-            {onOpenEvents && (
-              <button
-                type="button"
-                className="btn btn-sm"
-                onClick={onOpenEvents}>
-                {t("gw.data.openEvents")}
-              </button>
-            )}
-            <span className="gw-data-period muted">{t(`gw.period.${period}`)}</span>
+            <button
+              type="button"
+              className="btn btn-sm"
+              onClick={() => setDrill({ kind: "high" })}>
+              {t("gw.data.drill.ctaHigh")}
+            </button>
+            <button
+              type="button"
+              className="btn secondary btn-sm"
+              onClick={() => setDrill({ kind: "bypass" })}>
+              {t("gw.data.drill.ctaBypass")}
+            </button>
+            <button
+              type="button"
+              className="btn secondary btn-sm"
+              onClick={() => setDrill({ kind: "files" })}>
+              {t("gw.data.drill.ctaFiles")}
+            </button>
+            <span className="gw-data-period muted">
+              {t(`gw.period.${period}`)}
+            </span>
           </div>
         </div>
-        <div className="gw-data-rate">
+        <button
+          type="button"
+          className="gw-data-rate"
+          onClick={() => setDrill({ kind: "protected" })}>
           <div className="gw-usage-coverage-ring">
             <svg viewBox="0 0 36 36" aria-hidden>
               <path
@@ -3122,10 +3275,10 @@ function DataPanel({
               attempts: sensitiveAttempts
             })}
           </p>
-        </div>
+        </button>
       </section>
 
-      {/* Scenario strip — commercial narrative */}
+      {/* Scénario DLP uniquement (pas Usage) */}
       <div className="gw-data-scenario">
         <div className="gw-data-scenario-col">
           <span className="gw-data-scenario-l">{t("gw.data.scenario.user")}</span>
@@ -3140,61 +3293,81 @@ function DataPanel({
         </div>
       </div>
 
-      {/* KPI strip */}
+      {/* KPIs DLP — cliquables */}
       <div className="gw-data-stats">
-        <div className="gw-data-stat">
+        <button
+          type="button"
+          className="gw-data-stat"
+          onClick={() => setDrill({ kind: "sensitive" })}>
           <span className="gw-data-stat-l">{t("gw.data.attempts")}</span>
           <span className="gw-data-stat-v">{sensitiveAttempts}</span>
           <span className="gw-data-stat-h">{t("gw.data.stat.attemptsHint")}</span>
-        </div>
-        <div className="gw-data-stat gw-data-stat--danger">
+        </button>
+        <button
+          type="button"
+          className="gw-data-stat gw-data-stat--danger"
+          onClick={() => setDrill({ kind: "high" })}>
           <span className="gw-data-stat-l">{t("gw.data.high")}</span>
           <span className="gw-data-stat-v">{eventStats.high}</span>
           <span className="gw-data-stat-h">{t("gw.data.stat.highHint")}</span>
-        </div>
-        <div className="gw-data-stat gw-data-stat--ok">
+        </button>
+        <button
+          type="button"
+          className="gw-data-stat gw-data-stat--ok"
+          onClick={() => setDrill({ kind: "block" })}>
           <span className="gw-data-stat-l">{t("gw.data.stat.hardStop")}</span>
           <span className="gw-data-stat-v">{hardStop}</span>
           <span className="gw-data-stat-h">{t("gw.data.stat.hardStopHint")}</span>
-        </div>
-        <div className="gw-data-stat gw-data-stat--ok">
+        </button>
+        <button
+          type="button"
+          className="gw-data-stat gw-data-stat--ok"
+          onClick={() => setDrill({ kind: "rewrite" })}>
           <span className="gw-data-stat-l">{t("gw.data.stat.anonymized")}</span>
           <span className="gw-data-stat-v">{anonymized}</span>
           <span className="gw-data-stat-h">{t("gw.data.stat.anonymizedHint")}</span>
-        </div>
-        <div className="gw-data-stat gw-data-stat--warn">
+        </button>
+        <button
+          type="button"
+          className="gw-data-stat gw-data-stat--warn"
+          onClick={() => setDrill({ kind: "bypass" })}>
           <span className="gw-data-stat-l">{t("gw.data.stat.bypass")}</span>
           <span className="gw-data-stat-v">{bypass}</span>
           <span className="gw-data-stat-h">{t("gw.data.stat.bypassHint")}</span>
-        </div>
-        <div className="gw-data-stat">
-          <span className="gw-data-stat-l">{t("gw.kpi.events")}</span>
-          <span className="gw-data-stat-v">{eventStats.total}</span>
-          <span className="gw-data-stat-h">{t("gw.data.stat.eventsHint")}</span>
-        </div>
+        </button>
+        <button
+          type="button"
+          className="gw-data-stat"
+          onClick={() => setDrill({ kind: "files" })}>
+          <span className="gw-data-stat-l">{t("gw.data.stat.files")}</span>
+          <span className="gw-data-stat-v">{dlpStats.files}</span>
+          <span className="gw-data-stat-h">{t("gw.data.stat.filesHint")}</span>
+        </button>
       </div>
 
-      {/* Assets + severity */}
       <div className="gw-data-mid">
         <div className="gw-card">
           <div className="gw-card-head">
             <h3>{t("gw.data.assets")}</h3>
-            <span className="muted" style={{ fontSize: 12 }}>
-              {t("gw.data.assetsHint")}
-            </span>
           </div>
           <div className="gw-data-assets">
             {assets.map((a) => (
-              <div key={a.id} className={`gw-data-asset gw-data-asset--${a.id}`}>
+              <button
+                key={a.id}
+                type="button"
+                className={`gw-data-asset gw-data-asset--${a.id} gw-data-asset--btn`}
+                onClick={() => setDrill(a.drill)}>
                 <span className="gw-data-asset-icon" aria-hidden>
                   {a.icon}
                 </span>
                 <div>
-                  <strong>{a.title}</strong>
+                  <strong>
+                    {a.title}{" "}
+                    <em className="gw-data-asset-count">{a.count}</em>
+                  </strong>
                   <p className="muted">{a.ex}</p>
-                  <span className="gw-data-asset-hint">{a.hint}</span>
                 </div>
-              </div>
+              </button>
             ))}
           </div>
         </div>
@@ -3206,14 +3379,31 @@ function DataPanel({
           <div className="gw-data-sev-list">
             {(
               [
-                ["high", eventStats.high, "high"],
-                ["medium", eventStats.medium, "med"],
-                ["low", eventStats.low, "low"]
+                ["high", eventStats.high, "high", { kind: "high" as const }],
+                [
+                  "medium",
+                  eventStats.medium,
+                  "med",
+                  { kind: "medium" as const }
+                ],
+                ["low", eventStats.low, "low", { kind: "low" as const }]
               ] as const
-            ).map(([key, n, tone]) => (
-              <div key={key} className="gw-data-sev-row">
+            ).map(([key, n, tone, d]) => (
+              <button
+                key={key}
+                type="button"
+                className="gw-data-sev-row gw-data-sev-row--btn"
+                onClick={() => setDrill(d)}>
                 <div className="gw-data-sev-label">
-                  <span className={`gw-dot gw-dot--${tone === "high" ? "danger" : tone === "med" ? "warn" : "ok"}`} />
+                  <span
+                    className={`gw-dot gw-dot--${
+                      tone === "high"
+                        ? "danger"
+                        : tone === "med"
+                          ? "warn"
+                          : "ok"
+                    }`}
+                  />
                   <strong>
                     {key === "high"
                       ? t("gw.data.high")
@@ -3226,75 +3416,203 @@ function DataPanel({
                   <i
                     className={`gw-gov-sev-fill gw-gov-sev-fill--${tone}`}
                     style={{
-                      width: `${Math.max(n > 0 ? 6 : 0, Math.round((n / sevMax) * 100))}%`
+                      width: `${Math.max(
+                        n > 0 ? 6 : 0,
+                        Math.round((n / sevMax) * 100)
+                      )}%`
                     }}
                   />
                 </div>
                 <strong className="gw-data-sev-n">{n}</strong>
-              </div>
+              </button>
             ))}
           </div>
-          <p className="muted gw-data-sev-foot">{t("gw.data.severityHint")}</p>
         </div>
       </div>
 
-      {/* Action catalog */}
       <div className="gw-card">
         <div className="gw-card-head">
           <h3>{t("gw.data.actions")}</h3>
-          <span className="muted" style={{ fontSize: 12 }}>
-            {t("gw.data.actionsHint")}
-          </span>
         </div>
         <div className="gw-data-actions">
           {actionCards.map((a) => (
-            <div
+            <button
               key={a.id}
-              className={`gw-data-action gw-data-action--${a.tone}`}>
+              type="button"
+              className={`gw-data-action gw-data-action--${a.tone} gw-data-action--btn`}
+              onClick={() => setDrill(a.drill)}>
               <span className="gw-data-action-v">{a.value}</span>
               <strong>{a.label}</strong>
               <span className="muted">{a.detail}</span>
-            </div>
+            </button>
           ))}
         </div>
       </div>
 
-      {/* Decision breakdown from API summary */}
+      {/* Types de détection — cœur DLP, pas apps */}
       <div className="gw-card">
         <div className="gw-card-head">
-          <h3>{t("gw.data.fromSummary")}</h3>
-          {onOpenEvents && (
-            <button
-              type="button"
-              className="btn secondary btn-sm"
-              onClick={onOpenEvents}>
-              {t("gw.data.openEvents")}
-            </button>
-          )}
+          <h3>{t("gw.data.typesTitle")}</h3>
         </div>
-        {decisionEntries.length === 0 ? (
-          <p className="muted gw-data-empty">{t("gw.data.noDecisions")}</p>
+        {dlpStats.topTypes.length === 0 ? (
+          <p className="muted gw-data-empty">{t("gw.data.noTypes")}</p>
         ) : (
           <ul className="gw-data-decisions">
-            {decisionEntries.map(([k, v]) => (
+            {dlpStats.topTypes.map(([k, v]) => (
               <li key={k}>
-                <code>{k}</code>
-                <div className="gw-usage-vol-bar">
-                  <span
-                    style={{
-                      width: `${Math.max(4, Math.round((v / maxDecision) * 100))}%`
-                    }}
-                  />
-                </div>
-                <strong>{v}</strong>
+                <button
+                  type="button"
+                  className="gw-data-type-row"
+                  onClick={() => setDrill({ kind: "type", typeId: k })}>
+                  <code>{k}</code>
+                  <div className="gw-usage-vol-bar">
+                    <span
+                      style={{
+                        width: `${Math.max(4, Math.round((v / maxType) * 100))}%`
+                      }}
+                    />
+                  </div>
+                  <strong>{v}</strong>
+                </button>
               </li>
             ))}
           </ul>
         )}
-        <p className="muted gw-data-foot">{t("gw.data.foot")}</p>
       </div>
+
+      {drill && (
+        <div
+          className="gw-drill"
+          role="dialog"
+          aria-modal="true"
+          aria-label={t("gw.data.drill.kicker")}>
+          <button
+            type="button"
+            className="gw-drill-backdrop"
+            aria-label={t("common.close")}
+            onClick={() => setDrill(null)}
+          />
+          <div className="gw-drill-panel">
+            <header className="gw-drill-head">
+              <div>
+                <span className="gw-kicker">{t("gw.data.drill.kicker")}</span>
+                <h3 className="gw-drill-title">
+                  {drill.kind === "type"
+                    ? t("gw.data.drill.titleType", { type: drill.typeId })
+                    : t(`gw.data.drill.title.${drill.kind}`)}
+                </h3>
+                <p className="muted gw-drill-sub">
+                  {t("gw.data.drill.sub")} · {t(`gw.period.${period}`)} ·{" "}
+                  {drilled.length} {t("gw.data.drill.rows")}
+                </p>
+              </div>
+              <button
+                type="button"
+                className="btn secondary btn-sm"
+                onClick={() => setDrill(null)}>
+                {t("common.close")}
+              </button>
+            </header>
+            <div className="gw-drill-body">
+              {drilled.length === 0 ? (
+                <p className="muted">{t("gw.gov.drill.noEvents")}</p>
+              ) : (
+                <div className="gw-drill-table-wrap">
+                  <table className="gw-drill-table">
+                    <thead>
+                      <tr>
+                        <th>{t("gw.gov.drill.col.when")}</th>
+                        <th>{t("gw.gov.drill.col.device")}</th>
+                        <th>{t("gw.gov.drill.col.decision")}</th>
+                        <th>{t("gw.gov.drill.col.severity")}</th>
+                        <th>{t("gw.gov.drill.col.types")}</th>
+                        <th>{t("gw.data.drill.col.files")}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {drilled.map((e) => (
+                        <tr key={e.id}>
+                          <td>{relativeTime(e.ts)}</td>
+                          <td>
+                            <strong>
+                              {e.device_label || e.hostname || "—"}
+                            </strong>
+                          </td>
+                          <td>
+                            <code>{e.decision || "—"}</code>
+                          </td>
+                          <td
+                            className={
+                              String(e.highest_severity).toLowerCase() ===
+                              "high"
+                                ? "gw-risk-high"
+                                : String(e.highest_severity).toLowerCase() ===
+                                    "medium"
+                                  ? "gw-risk-med"
+                                  : ""
+                            }>
+                            {e.highest_severity || "—"}
+                          </td>
+                          <td className="muted" style={{ fontSize: 11 }}>
+                            {(e.types || []).slice(0, 4).join(", ") || "—"}
+                          </td>
+                          <td className="muted" style={{ fontSize: 11 }}>
+                            {(e.file_names || []).slice(0, 2).join(", ") || "—"}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+            <footer className="gw-drill-foot">
+              <div className="gw-drill-foot-actions">
+                {onOpenEvents && (
+                  <button
+                    type="button"
+                    className="btn secondary btn-sm"
+                    onClick={onOpenEvents}>
+                    {t("gw.data.openEvents")}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="btn btn-sm"
+                  onClick={() => setDrill(null)}>
+                  {t("common.close")}
+                </button>
+              </div>
+            </footer>
+          </div>
+        </div>
+      )}
     </div>
   )
+}
+
+type CompDrill =
+  | "coverage"
+  | "journal"
+  | "sensitive"
+  | "blocked"
+  | "protected"
+  | "violations"
+  | "bypass"
+  | "risk"
+  | "audit"
+  | "integrity"
+  | "exports"
+
+type AuditRow = {
+  id: string
+  adminEmail?: string
+  adminLabel?: string
+  action: string
+  detail?: string
+  createdAt: string
+  seq?: number
+  entry_hash?: string
 }
 
 function CompliancePanel({
@@ -3305,12 +3623,18 @@ function CompliancePanel({
   avgRisk,
   riskDelta,
   eventStats,
+  events,
+  tools,
   shadowCounts,
   sensitiveAttempts,
   protectedActions,
+  riskUsersSeed,
+  setError,
   onOpenAudit,
   onOpenReports,
-  onOpenEvents
+  onOpenEvents,
+  onOpenUsage,
+  onOpenData
 }: {
   t: Props["t"]
   period: Period
@@ -3329,13 +3653,38 @@ function CompliancePanel({
     medium: number
     low: number
   }
+  events: EventRow[]
+  tools: ShadowTool[]
   shadowCounts: ShadowCounts | null
   sensitiveAttempts: number
   protectedActions: number
+  riskUsersSeed?: RiskUserRow[]
+  setError: (e: string | null) => void
   onOpenAudit?: () => void
   onOpenReports?: () => void
   onOpenEvents?: () => void
+  onOpenUsage: () => void
+  onOpenData: () => void
 }) {
+  const [drill, setDrill] = useState<CompDrill | null>(null)
+  const [auditRows, setAuditRows] = useState<AuditRow[]>([])
+  const [auditMeta, setAuditMeta] = useState<{
+    worm?: boolean
+    legal_retention_days?: number
+  }>({})
+  const [integrity, setIntegrity] = useState<{
+    ok: boolean
+    checked: number
+    with_hash: number
+    without_hash: number
+    broken_reason?: string
+    tip?: string
+  } | null>(null)
+  const [riskUsers, setRiskUsers] = useState<RiskUserRow[]>(
+    () => riskUsersSeed || []
+  )
+  const [busy, setBusy] = useState(false)
+
   const monthLabel = new Date().toLocaleString(undefined, {
     month: "long",
     year: "numeric"
@@ -3360,7 +3709,6 @@ function CompliancePanel({
         ? 100
         : 0
 
-  // Simple posture score for board narrative (0–100, higher = better control)
   const controlScore = Math.max(
     0,
     Math.min(
@@ -3379,12 +3727,84 @@ function CompliancePanel({
   const controlTone =
     controlScore >= 75 ? "ok" : controlScore >= 50 ? "warn" : "danger"
 
-  const checklist = [
+  const unauthTools = useMemo(
+    () => tools.filter((x) => x.status === "unauthorized"),
+    [tools]
+  )
+
+  const openDrill = useCallback(
+    async (id: CompDrill) => {
+      setDrill(id)
+      if (id === "audit" || id === "integrity" || id === "exports") {
+        setBusy(true)
+        try {
+          if (id === "audit") {
+            const r = await api.audit()
+            setAuditRows((r.events || []) as AuditRow[])
+            setAuditMeta({
+              worm: r.worm,
+              legal_retention_days: r.legal_retention_days
+            })
+          } else if (id === "integrity") {
+            const r = await api.auditIntegrity()
+            setIntegrity({
+              ok: r.ok,
+              checked: r.checked,
+              with_hash: r.with_hash,
+              without_hash: r.without_hash,
+              broken_reason: r.broken_reason,
+              tip: r.tip
+            })
+          }
+        } catch (e) {
+          setError(String(e))
+          if (id === "audit") setAuditRows([])
+          if (id === "integrity") setIntegrity(null)
+        } finally {
+          setBusy(false)
+        }
+      }
+      if (id === "coverage" || id === "risk") {
+        if (riskUsersSeed?.length) {
+          setRiskUsers(
+            id === "risk"
+              ? riskUsersSeed.filter((u) => u.score >= 40)
+              : riskUsersSeed
+          )
+          return
+        }
+        setBusy(true)
+        try {
+          const r = await api.riskUsers({
+            period,
+            min_score: id === "risk" ? 40 : 0,
+            limit: 100
+          })
+          setRiskUsers((r.users || []) as RiskUserRow[])
+        } catch (e) {
+          setError(String(e))
+          setRiskUsers([])
+        } finally {
+          setBusy(false)
+        }
+      }
+    },
+    [period, setError, riskUsersSeed]
+  )
+
+  const checklist: Array<{
+    id: CompDrill | "check"
+    ok: boolean
+    label: string
+    detail: string
+    drill: CompDrill
+  }> = [
     {
       id: "events",
       ok: eventStats.total > 0,
       label: t("gw.comp.check.events"),
-      detail: t("gw.comp.check.eventsDetail", { n: eventStats.total })
+      detail: t("gw.comp.check.eventsDetail", { n: eventStats.total }),
+      drill: "journal"
     },
     {
       id: "protect",
@@ -3393,19 +3813,22 @@ function CompliancePanel({
       detail: t("gw.comp.check.protectDetail", {
         n: protectedActions,
         pct: protectRate
-      })
+      }),
+      drill: "protected"
     },
     {
       id: "violations",
       ok: violations === 0,
       label: t("gw.comp.check.violations"),
-      detail: t("gw.comp.check.violationsDetail", { n: violations })
+      detail: t("gw.comp.check.violationsDetail", { n: violations }),
+      drill: "violations"
     },
     {
       id: "bypass",
       ok: eventStats.sendAnyway === 0,
       label: t("gw.comp.check.bypass"),
-      detail: t("gw.comp.check.bypassDetail", { n: eventStats.sendAnyway })
+      detail: t("gw.comp.check.bypassDetail", { n: eventStats.sendAnyway }),
+      drill: "bypass"
     },
     {
       id: "risk",
@@ -3414,54 +3837,64 @@ function CompliancePanel({
       detail: t("gw.comp.check.riskDetail", {
         label: riskLabel(t, avgRisk),
         n: score
-      })
+      }),
+      drill: "risk"
     },
     {
       id: "exports",
       ok: true,
       label: t("gw.comp.check.exports"),
-      detail: t("gw.comp.check.exportsDetail")
+      detail: t("gw.comp.check.exportsDetail"),
+      drill: "exports"
     }
   ]
   const checksOk = checklist.filter((c) => c.ok).length
 
   const reportLines: Array<{
+    key: CompDrill
     label: string
     value: string
     tone?: string
-    dots?: boolean
   }> = [
     {
+      key: "coverage",
       label: t("gw.compliance.usersMonitored"),
       value: String(usersMonitored || "—")
     },
     {
+      key: "journal",
       label: t("gw.compliance.interactions"),
       value: String(eventStats.total)
     },
     {
+      key: "sensitive",
       label: t("gw.compliance.sensitive"),
       value: String(sensitiveAttempts)
     },
     {
+      key: "blocked",
       label: t("gw.compliance.blocked"),
       value: String(eventStats.blocked)
     },
     {
+      key: "protected",
       label: t("gw.compliance.rewrite"),
       value: String(anonymized)
     },
     {
+      key: "violations",
       label: t("gw.compliance.violations"),
       value: String(violations),
       tone: violations > 0 ? "gw-risk-high" : "gw-ok"
     },
     {
+      key: "protected",
       label: t("gw.compliance.protected"),
       value: String(protectedActions),
       tone: "gw-ok"
     },
     {
+      key: "risk",
       label: t("gw.compliance.riskEvo"),
       value:
         riskDelta != null
@@ -3478,34 +3911,75 @@ function CompliancePanel({
     }
   ]
 
-  const evidence = [
+  const evidenceCards = [
     {
-      id: "report",
+      id: "report" as const,
       title: t("gw.comp.ev.report"),
       detail: t("gw.comp.ev.reportDetail"),
       cta: t("gw.compliance.openReports"),
-      onClick: onOpenReports,
-      primary: true
+      primary: true,
+      onClick: () => void openDrill("exports")
     },
     {
-      id: "audit",
+      id: "audit" as const,
       title: t("gw.comp.ev.audit"),
       detail: t("gw.comp.ev.auditDetail"),
-      cta: t("gw.compliance.openAudit"),
-      onClick: onOpenAudit
+      cta: t("gw.comp.drill.viewAudit"),
+      primary: false,
+      onClick: () => void openDrill("audit")
     },
     {
-      id: "events",
+      id: "integrity" as const,
+      title: t("gw.comp.ev.integrity"),
+      detail: t("gw.comp.ev.integrityDetail"),
+      cta: t("gw.comp.drill.viewIntegrity"),
+      primary: false,
+      onClick: () => void openDrill("integrity")
+    },
+    {
+      id: "journal" as const,
       title: t("gw.comp.ev.events"),
       detail: t("gw.comp.ev.eventsDetail"),
-      cta: t("gw.compliance.openEvents"),
-      onClick: onOpenEvents
+      cta: t("gw.comp.drill.viewJournal"),
+      primary: false,
+      onClick: () => void openDrill("journal")
     }
   ]
 
+  const evidenceEvents = useMemo(() => {
+    if (!drill) return []
+    if (drill === "journal") return events.slice(0, 40)
+    if (drill === "sensitive") {
+      return events
+        .filter((e) => {
+          const s = String(e.highest_severity || "").toLowerCase()
+          return s === "high" || s === "medium" || s === "low"
+        })
+        .slice(0, 40)
+    }
+    if (drill === "blocked") {
+      return events
+        .filter((e) => decisionKind(e.decision) === "block")
+        .slice(0, 40)
+    }
+    if (drill === "protected") {
+      return events
+        .filter((e) => {
+          const d = decisionKind(e.decision)
+          return d === "block" || d === "rewrite" || d === "mask" || d === "cancel"
+        })
+        .slice(0, 40)
+    }
+    if (drill === "bypass") {
+      return events
+        .filter((e) => decisionKind(e.decision) === "bypass")
+        .slice(0, 40)
+    }
+    return []
+  }, [drill, events])
+
   return (
     <div className="gw-panel gw-comp">
-      {/* Hero — proof narrative */}
       <section className={`gw-comp-hero gw-comp-hero--${controlTone}`}>
         <div className="gw-comp-hero-copy">
           <span className="gw-kicker">{t("gw.comp.kicker")}</span>
@@ -3526,17 +4000,24 @@ function CompliancePanel({
                 {t("gw.comp.cta.export")}
               </button>
             )}
-            {onOpenAudit && (
-              <button
-                type="button"
-                className="btn secondary btn-sm"
-                onClick={onOpenAudit}>
-                {t("gw.compliance.openAudit")}
-              </button>
-            )}
+            <button
+              type="button"
+              className="btn secondary btn-sm"
+              onClick={() => void openDrill("audit")}>
+              {t("gw.comp.drill.viewAudit")}
+            </button>
+            <button
+              type="button"
+              className="btn secondary btn-sm"
+              onClick={() => void openDrill("integrity")}>
+              {t("gw.comp.drill.viewIntegrity")}
+            </button>
           </div>
         </div>
-        <div className="gw-comp-control">
+        <button
+          type="button"
+          className="gw-comp-control"
+          onClick={() => void openDrill("risk")}>
           <div className="gw-usage-coverage-ring">
             <svg viewBox="0 0 36 36" aria-hidden>
               <path
@@ -3557,42 +4038,53 @@ function CompliancePanel({
           <p className="gw-comp-control-hint">
             {t("gw.comp.controlHint", { ok: checksOk, total: checklist.length })}
           </p>
-        </div>
+        </button>
       </section>
 
-      {/* Snapshot KPIs */}
       <div className="gw-comp-stats">
-        <div className="gw-comp-stat">
-          <span className="gw-comp-stat-l">{t("gw.compliance.usersMonitored")}</span>
-          <span className="gw-comp-stat-v">{usersMonitored || "—"}</span>
-        </div>
-        <div className="gw-comp-stat">
-          <span className="gw-comp-stat-l">{t("gw.compliance.interactions")}</span>
-          <span className="gw-comp-stat-v">{eventStats.total}</span>
-        </div>
-        <div className="gw-comp-stat">
-          <span className="gw-comp-stat-l">{t("gw.compliance.sensitive")}</span>
-          <span className="gw-comp-stat-v">{sensitiveAttempts}</span>
-        </div>
-        <div className={`gw-comp-stat ${violations > 0 ? "gw-comp-stat--danger" : "gw-comp-stat--ok"}`}>
-          <span className="gw-comp-stat-l">{t("gw.compliance.violations")}</span>
-          <span className="gw-comp-stat-v">{violations}</span>
-        </div>
-        <div className={`gw-comp-stat gw-comp-stat--${riskTone}`}>
-          <span className="gw-comp-stat-l">{t("gw.compliance.riskEvo")}</span>
-          <span className={`gw-comp-stat-v ${scoreClass(avgRisk)}`}>
-            {riskDelta != null
-              ? `${riskDelta > 0 ? "↑" : riskDelta < 0 ? "↓" : "→"}${Math.abs(riskDelta)}%`
-              : riskLabel(t, avgRisk)}
-          </span>
-        </div>
-        <div className="gw-comp-stat gw-comp-stat--ok">
-          <span className="gw-comp-stat-l">{t("gw.compliance.protected")}</span>
-          <span className="gw-comp-stat-v">{protectedActions}</span>
-        </div>
+        {(
+          [
+            ["coverage", t("gw.compliance.usersMonitored"), usersMonitored || "—", ""],
+            ["journal", t("gw.compliance.interactions"), eventStats.total, ""],
+            ["sensitive", t("gw.compliance.sensitive"), sensitiveAttempts, ""],
+            [
+              "violations",
+              t("gw.compliance.violations"),
+              violations,
+              violations > 0 ? "gw-comp-stat--danger" : "gw-comp-stat--ok"
+            ],
+            [
+              "risk",
+              t("gw.compliance.riskEvo"),
+              riskDelta != null
+                ? `${riskDelta > 0 ? "↑" : riskDelta < 0 ? "↓" : "→"}${Math.abs(riskDelta)}%`
+                : riskLabel(t, avgRisk),
+              `gw-comp-stat--${riskTone}`
+            ],
+            [
+              "protected",
+              t("gw.compliance.protected"),
+              protectedActions,
+              "gw-comp-stat--ok"
+            ]
+          ] as const
+        ).map(([key, label, value, cls]) => (
+          <button
+            key={key}
+            type="button"
+            className={`gw-comp-stat ${cls}`}
+            onClick={() => void openDrill(key)}>
+            <span className="gw-comp-stat-l">{label}</span>
+            <span
+              className={`gw-comp-stat-v ${
+                key === "risk" ? scoreClass(avgRisk) : ""
+              }`}>
+              {value}
+            </span>
+          </button>
+        ))}
       </div>
 
-      {/* Formal AI Security Report */}
       <article className="gw-comp-report">
         <header className="gw-comp-report-head">
           <div>
@@ -3608,7 +4100,8 @@ function CompliancePanel({
             </p>
           </div>
           <div className="gw-comp-report-stamp">
-            <span className={`gw-badge gw-comp-stamp gw-comp-stamp--${controlTone}`}>
+            <span
+              className={`gw-badge gw-comp-stamp gw-comp-stamp--${controlTone}`}>
               {t(`gw.comp.stamp.${controlTone}`)}
             </span>
             <span className="muted">{t("gw.comp.confidential")}</span>
@@ -3616,14 +4109,18 @@ function CompliancePanel({
         </header>
 
         <div className="gw-comp-report-body">
-          {reportLines.map((line) => (
-            <div key={line.label} className="gw-comp-report-line">
+          {reportLines.map((line, i) => (
+            <button
+              key={`${line.key}-${i}`}
+              type="button"
+              className="gw-comp-report-line gw-comp-report-line--btn"
+              onClick={() => void openDrill(line.key)}>
               <span className="gw-comp-report-label">{line.label}</span>
               <span className="gw-comp-report-dots" aria-hidden />
               <strong className={`gw-comp-report-value ${line.tone || ""}`}>
                 {line.value}
               </strong>
-            </div>
+            </button>
           ))}
         </div>
 
@@ -3649,20 +4146,17 @@ function CompliancePanel({
                 {t("gw.comp.cta.pdf")}
               </button>
             )}
-            {onOpenEvents && (
-              <button
-                type="button"
-                className="btn secondary btn-sm"
-                onClick={onOpenEvents}>
-                {t("gw.compliance.openEvents")}
-              </button>
-            )}
+            <button
+              type="button"
+              className="btn secondary btn-sm"
+              onClick={() => void openDrill("journal")}>
+              {t("gw.comp.drill.viewJournal")}
+            </button>
           </div>
         </div>
         <p className="gw-comp-report-foot muted">{t("gw.compliance.proof")}</p>
       </article>
 
-      {/* Checklist + evidence sources */}
       <div className="gw-comp-mid">
         <div className="gw-card">
           <div className="gw-card-head">
@@ -3674,13 +4168,18 @@ function CompliancePanel({
           <ul className="gw-comp-check">
             {checklist.map((c) => (
               <li key={c.id} className={c.ok ? "is-ok" : "is-ko"}>
-                <span className="gw-comp-check-mark" aria-hidden>
-                  {c.ok ? "✓" : "!"}
-                </span>
-                <div>
-                  <strong>{c.label}</strong>
-                  <p className="muted">{c.detail}</p>
-                </div>
+                <button
+                  type="button"
+                  className="gw-comp-check-btn"
+                  onClick={() => void openDrill(c.drill)}>
+                  <span className="gw-comp-check-mark" aria-hidden>
+                    {c.ok ? "✓" : "!"}
+                  </span>
+                  <div>
+                    <strong>{c.label}</strong>
+                    <p className="muted">{c.detail}</p>
+                  </div>
+                </button>
               </li>
             ))}
           </ul>
@@ -3691,25 +4190,22 @@ function CompliancePanel({
             <h3>{t("gw.comp.evidenceTitle")}</h3>
           </div>
           <div className="gw-comp-evidence">
-            {evidence.map((e) => (
+            {evidenceCards.map((e) => (
               <div key={e.id} className="gw-comp-ev-card">
                 <strong>{e.title}</strong>
                 <p className="muted">{e.detail}</p>
-                {e.onClick && (
-                  <button
-                    type="button"
-                    className={`btn btn-sm ${e.primary ? "" : "secondary"}`}
-                    onClick={e.onClick}>
-                    {e.cta}
-                  </button>
-                )}
+                <button
+                  type="button"
+                  className={`btn btn-sm ${e.primary ? "" : "secondary"}`}
+                  onClick={e.onClick}>
+                  {e.cta}
+                </button>
               </div>
             ))}
           </div>
         </div>
       </div>
 
-      {/* Board message */}
       <div className="gw-comp-board">
         <div>
           <span className="gw-kicker">{t("gw.comp.boardKicker")}</span>
@@ -3722,9 +4218,333 @@ function CompliancePanel({
           </button>
         )}
       </div>
+
+      {drill && (
+        <div
+          className="gw-drill"
+          role="dialog"
+          aria-modal="true"
+          aria-label={t("gw.comp.drill.kicker")}>
+          <button
+            type="button"
+            className="gw-drill-backdrop"
+            aria-label={t("common.close")}
+            onClick={() => setDrill(null)}
+          />
+          <div className="gw-drill-panel">
+            <header className="gw-drill-head">
+              <div>
+                <span className="gw-kicker">{t("gw.comp.drill.kicker")}</span>
+                <h3 className="gw-drill-title">
+                  {t(`gw.comp.drill.title.${drill}`)}
+                </h3>
+                <p className="muted gw-drill-sub">
+                  {t(`gw.comp.drill.sub.${drill}`)} · {t(`gw.period.${period}`)}
+                  {busy ? ` · ${t("common.loading")}` : ""}
+                </p>
+              </div>
+              <button
+                type="button"
+                className="btn secondary btn-sm"
+                onClick={() => setDrill(null)}>
+                {t("common.close")}
+              </button>
+            </header>
+            <div className="gw-drill-body">
+              {(drill === "coverage" || drill === "risk") && (
+                <>
+                  {riskUsers.length === 0 ? (
+                    <p className="muted">{t("gw.intel.noUsers")}</p>
+                  ) : (
+                    <div className="gw-drill-table-wrap">
+                      <table className="gw-drill-table">
+                        <thead>
+                          <tr>
+                            <th>{t("gw.gov.drill.col.user")}</th>
+                            <th>{t("gw.gov.drill.col.score")}</th>
+                            <th>{t("gw.gov.drill.col.events")}</th>
+                            <th>{t("gw.gov.drill.col.last")}</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {riskUsers.slice(0, 40).map((u) => (
+                            <tr key={u.agent_id}>
+                              <td>
+                                <strong>{u.label || u.agent_id}</strong>
+                              </td>
+                              <td>
+                                <span
+                                  className={`gw-score ${scoreClass(u.score)}`}>
+                                  {Math.round(u.score)}
+                                </span>
+                              </td>
+                              <td>{u.events_count}</td>
+                              <td>{relativeTime(u.last_event_at)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </>
+              )}
+
+              {(drill === "journal" ||
+                drill === "sensitive" ||
+                drill === "blocked" ||
+                drill === "protected" ||
+                drill === "bypass") && (
+                <>
+                  {evidenceEvents.length === 0 ? (
+                    <p className="muted">{t("gw.gov.drill.noEvents")}</p>
+                  ) : (
+                    <div className="gw-drill-table-wrap">
+                      <table className="gw-drill-table">
+                        <thead>
+                          <tr>
+                            <th>{t("gw.gov.drill.col.when")}</th>
+                            <th>{t("gw.gov.drill.col.device")}</th>
+                            <th>{t("gw.gov.drill.col.decision")}</th>
+                            <th>{t("gw.gov.drill.col.severity")}</th>
+                            <th>{t("gw.gov.drill.col.types")}</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {evidenceEvents.map((e) => (
+                            <tr key={e.id}>
+                              <td>{relativeTime(e.ts)}</td>
+                              <td>
+                                <strong>
+                                  {e.device_label || e.hostname || "—"}
+                                </strong>
+                              </td>
+                              <td>
+                                <code>{e.decision || "—"}</code>
+                              </td>
+                              <td>{e.highest_severity || "—"}</td>
+                              <td className="muted" style={{ fontSize: 11 }}>
+                                {(e.types || []).slice(0, 3).join(", ") || "—"}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </>
+              )}
+
+              {drill === "violations" && (
+                <>
+                  {unauthTools.length === 0 ? (
+                    <p className="muted">{t("gw.comp.drill.noViolations")}</p>
+                  ) : (
+                    <div className="gw-drill-table-wrap">
+                      <table className="gw-drill-table">
+                        <thead>
+                          <tr>
+                            <th>{t("gw.usage.col.app")}</th>
+                            <th>{t("gw.usage.col.events")}</th>
+                            <th>{t("gw.usage.col.agents")}</th>
+                            <th>{t("gw.usage.col.last")}</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {unauthTools.map((tool) => (
+                            <tr key={tool.tool}>
+                              <td>
+                                <strong>
+                                  {tool.display_name || tool.tool}
+                                </strong>
+                                <div className="muted" style={{ fontSize: 10 }}>
+                                  {tool.tool}
+                                </div>
+                              </td>
+                              <td>{tool.events_count}</td>
+                              <td>{tool.agents_count}</td>
+                              <td>{relativeTime(tool.last_seen_at)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </>
+              )}
+
+              {drill === "audit" && (
+                <>
+                  <div className="gw-drill-summary">
+                    <div>
+                      <span className="muted">WORM</span>
+                      <strong>
+                        {auditMeta.worm ? t("common.yes") : t("common.no")}
+                      </strong>
+                    </div>
+                    <div>
+                      <span className="muted">
+                        {t("gw.comp.drill.retention")}
+                      </span>
+                      <strong>
+                        {auditMeta.legal_retention_days != null
+                          ? `${auditMeta.legal_retention_days} j`
+                          : "—"}
+                      </strong>
+                    </div>
+                  </div>
+                  {auditRows.length === 0 ? (
+                    <p className="muted">{t("gw.comp.drill.noAudit")}</p>
+                  ) : (
+                    <div className="gw-drill-table-wrap">
+                      <table className="gw-drill-table">
+                        <thead>
+                          <tr>
+                            <th>{t("gw.gov.drill.col.when")}</th>
+                            <th>{t("gw.comp.drill.col.admin")}</th>
+                            <th>{t("gw.comp.drill.col.action")}</th>
+                            <th>{t("gw.comp.drill.col.detail")}</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {auditRows.slice(0, 50).map((row) => (
+                            <tr key={row.id}>
+                              <td>{relativeTime(row.createdAt)}</td>
+                              <td>
+                                <strong>
+                                  {row.adminLabel || row.adminEmail || "—"}
+                                </strong>
+                              </td>
+                              <td>
+                                <code>{row.action}</code>
+                              </td>
+                              <td className="muted" style={{ fontSize: 11 }}>
+                                {(row.detail || "—").slice(0, 80)}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </>
+              )}
+
+              {drill === "integrity" && (
+                <div className="gw-comp-integrity">
+                  {integrity == null ? (
+                    <p className="muted">{t("common.loading")}</p>
+                  ) : (
+                    <>
+                      <div
+                        className={`gw-comp-integrity-badge ${
+                          integrity.ok ? "is-ok" : "is-ko"
+                        }`}>
+                        {integrity.ok
+                          ? t("gw.comp.drill.integrityOk")
+                          : t("gw.comp.drill.integrityKo")}
+                      </div>
+                      <ul className="gw-bullets">
+                        <li>
+                          {t("gw.comp.drill.integrityChecked")} ·{" "}
+                          <strong>{integrity.checked}</strong>
+                        </li>
+                        <li>
+                          {t("gw.comp.drill.integrityHashed")} ·{" "}
+                          <strong>{integrity.with_hash}</strong>
+                        </li>
+                        <li>
+                          {t("gw.comp.drill.integrityPlain")} ·{" "}
+                          <strong>{integrity.without_hash}</strong>
+                        </li>
+                        {integrity.broken_reason ? (
+                          <li className="gw-risk-high">
+                            {integrity.broken_reason}
+                          </li>
+                        ) : null}
+                        {integrity.tip ? (
+                          <li className="muted">{integrity.tip}</li>
+                        ) : null}
+                      </ul>
+                    </>
+                  )}
+                </div>
+              )}
+
+              {drill === "exports" && (
+                <div className="gw-comp-exports">
+                  <p>{t("gw.comp.drill.exportsBody")}</p>
+                  <div className="gw-usage-wean-actions">
+                    {onOpenReports && (
+                      <button
+                        type="button"
+                        className="btn btn-sm"
+                        onClick={onOpenReports}>
+                        {t("gw.comp.cta.pdf")}
+                      </button>
+                    )}
+                    {onOpenEvents && (
+                      <button
+                        type="button"
+                        className="btn secondary btn-sm"
+                        onClick={onOpenEvents}>
+                        {t("gw.compliance.openEvents")}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+            <footer className="gw-drill-foot">
+              <div className="gw-drill-foot-actions">
+                {drill === "violations" && (
+                  <button
+                    type="button"
+                    className="btn secondary btn-sm"
+                    onClick={onOpenUsage}>
+                    {t("gw.gov.cta.usage")}
+                  </button>
+                )}
+                {(drill === "sensitive" ||
+                  drill === "blocked" ||
+                  drill === "protected" ||
+                  drill === "bypass") && (
+                  <button
+                    type="button"
+                    className="btn secondary btn-sm"
+                    onClick={onOpenData}>
+                    {t("gw.gov.cta.data")}
+                  </button>
+                )}
+                {drill === "audit" && onOpenAudit && (
+                  <button
+                    type="button"
+                    className="btn secondary btn-sm"
+                    onClick={onOpenAudit}>
+                    {t("gw.compliance.openAudit")}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="btn btn-sm"
+                  onClick={() => setDrill(null)}>
+                  {t("common.close")}
+                </button>
+              </div>
+            </footer>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
+
+type IntelDrill =
+  | { kind: "trend" }
+  | { kind: "users"; minScore: number; band: "high" | "med" | "low" | "all" }
+  | { kind: "agent"; agentId: string }
+  | { kind: "emerging" }
+  | { kind: "signal"; signal: "high" | "bypass" | "unauth" | "unknown" }
+  | { kind: "radar" }
 
 function IntelligencePanel({
   t,
@@ -3736,6 +4556,10 @@ function IntelligencePanel({
   unauthorizedTools,
   unknownTools,
   eventStats,
+  events,
+  riskUsersSeed,
+  setError,
+  setInfo,
   onOpenRisk,
   onOpenShadow,
   onOpenUsage,
@@ -3757,12 +4581,29 @@ function IntelligencePanel({
     low: number
     sendAnyway: number
   }
+  events: EventRow[]
+  riskUsersSeed?: RiskUserRow[]
+  setError: (e: string | null) => void
+  setInfo: (i: string | null) => void
   onOpenRisk?: () => void
   onOpenShadow?: () => void
   onOpenUsage: () => void
   onOpenData: () => void
   onOpenCompliance: () => void
 }) {
+  const [drill, setDrill] = useState<IntelDrill | null>(null)
+  const [riskUsers, setRiskUsers] = useState<RiskUserRow[]>(
+    () => riskUsersSeed || []
+  )
+  const [busy, setBusy] = useState(false)
+  const [aiBlockedMap, setAiBlockedMap] = useState<Record<string, boolean>>({})
+  const [agentDetail, setAgentDetail] = useState<{
+    agent_id: string
+    user: RiskUserRow | null
+    factors: Record<string, number>
+    recent: Array<Record<string, unknown>>
+  } | null>(null)
+
   const score = Math.round(avgRisk)
   const riskTone =
     score >= 70 ? "danger" : score >= 40 ? "warn" : score > 0 ? "ok" : "neutral"
@@ -3772,59 +4613,159 @@ function IntelligencePanel({
   const lowUsers = risk?.low_risk_users ?? 0
   const usersTotal = risk?.users_count ?? highUsers + medUsers + lowUsers
   const userDistMax = Math.max(1, highUsers, medUsers, lowUsers)
+  const signalTotal =
+    eventStats.high + eventStats.sendAnyway + unauthorizedTools.length
 
   const emerging = useMemo(() => {
     return [...tools]
       .filter((x) => x.status === "unknown" || x.status === "unauthorized")
       .sort((a, b) => (b.events_count || 0) - (a.events_count || 0))
-      .slice(0, 8)
+      .slice(0, 12)
   }, [tools])
 
-  const topUsers = risk?.top_risk_users?.slice(0, 8) || []
+  // Seed cache + ai_access map (évite re-fetch riskUsers si parent a déjà chargé)
+  useEffect(() => {
+    let cancelled = false
+    if (riskUsersSeed?.length) setRiskUsers(riskUsersSeed)
+    setBusy(true)
+    void (async () => {
+      try {
+        const needUsers = !riskUsersSeed?.length
+        const [ru, ag] = await Promise.all([
+          needUsers
+            ? api.riskUsers({ period, min_score: 0, limit: 200 })
+            : Promise.resolve(null),
+          api.agents().catch(() => null)
+        ])
+        if (cancelled) return
+        if (ru?.users) setRiskUsers((ru.users || []) as RiskUserRow[])
+        if (ag?.agents) {
+          const map: Record<string, boolean> = {}
+          for (const a of ag.agents) {
+            map[a.id] =
+              a.ai_access_blocked === true || a.ai_access === "blocked"
+          }
+          setAiBlockedMap(map)
+        }
+      } catch (e) {
+        if (!cancelled) setError(String(e))
+      } finally {
+        if (!cancelled) setBusy(false)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [period, setError, riskUsersSeed])
+
+  const sortedUsers = useMemo(
+    () => [...riskUsers].sort((a, b) => b.score - a.score),
+    [riskUsers]
+  )
+  const topUsers = useMemo(() => {
+    if (sortedUsers.length) return sortedUsers.slice(0, 8)
+    return (risk?.top_risk_users || []).map(
+      (u) =>
+        ({
+          agent_id: u.agent_id,
+          label: u.label,
+          score: u.score,
+          score_previous: null,
+          trend: u.trend,
+          factors: {},
+          tools: [],
+          events_count: 0,
+          last_event_at: null
+        }) as RiskUserRow
+    )
+  }, [sortedUsers, risk])
   const maxUserScore = Math.max(1, ...topUsers.map((u) => u.score || 0), score)
 
-  const signals = [
-    {
-      id: "high",
-      label: t("gw.intel.signal.high"),
-      value: eventStats.high,
-      tone: eventStats.high > 0 ? ("danger" as const) : ("ok" as const),
-      hint: t("gw.intel.signal.highHint"),
-      onClick: onOpenData
-    },
-    {
-      id: "bypass",
-      label: t("gw.intel.signal.sendAnyway"),
-      value: eventStats.sendAnyway,
-      tone: eventStats.sendAnyway > 0 ? ("warn" as const) : ("ok" as const),
-      hint: t("gw.intel.signal.bypassHint"),
-      onClick: onOpenData
-    },
-    {
-      id: "unauth",
-      label: t("gw.intel.signal.unauth"),
-      value: unauthorizedTools.length,
-      tone:
-        unauthorizedTools.length > 0 ? ("danger" as const) : ("ok" as const),
-      hint: t("gw.intel.signal.unauthHint"),
-      onClick: onOpenUsage
-    },
-    {
-      id: "unknown",
-      label: t("gw.intel.signal.unknown"),
-      value: unknownTools.length,
-      tone: unknownTools.length > 0 ? ("warn" as const) : ("ok" as const),
-      hint: t("gw.intel.signal.unknownHint"),
-      onClick: onOpenUsage
+  const openUsers = (band: "high" | "med" | "low" | "all") => {
+    const min =
+      band === "high" ? 70 : band === "med" ? 40 : band === "low" ? 0 : 0
+    setAgentDetail(null)
+    setDrill({ kind: "users", minScore: min, band })
+  }
+
+  const openAgent = async (agentId: string) => {
+    setDrill({ kind: "agent", agentId })
+    setBusy(true)
+    try {
+      const d = (await api.riskUserDetail(agentId, period)) as Record<
+        string,
+        unknown
+      >
+      const user =
+        (d.user as RiskUserRow | undefined) ||
+        riskUsers.find((u) => u.agent_id === agentId) ||
+        null
+      setAgentDetail({
+        agent_id: agentId,
+        user,
+        factors: (user?.factors as Record<string, number>) || {},
+        recent: Array.isArray(d.recent_events)
+          ? (d.recent_events as Array<Record<string, unknown>>)
+          : []
+      })
+    } catch (e) {
+      setError(String(e))
+      setAgentDetail({
+        agent_id: agentId,
+        user: riskUsers.find((u) => u.agent_id === agentId) || null,
+        factors: {},
+        recent: []
+      })
+    } finally {
+      setBusy(false)
     }
-  ]
+  }
+
+  const setAiAccess = async (agentId: string, blocked: boolean) => {
+    setBusy(true)
+    try {
+      await api.setAgentAiAccess(agentId, blocked)
+      setAiBlockedMap((m) => ({ ...m, [agentId]: blocked }))
+      setInfo(
+        blocked ? t("gw.usage.wean.blockOk") : t("gw.usage.wean.unblockOk")
+      )
+    } catch (e) {
+      setError(String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const filteredUsers = useMemo(() => {
+    if (!drill || drill.kind !== "users") return []
+    if (drill.band === "high") return sortedUsers.filter((u) => u.score >= 70)
+    if (drill.band === "med")
+      return sortedUsers.filter((u) => u.score >= 40 && u.score < 70)
+    if (drill.band === "low") return sortedUsers.filter((u) => u.score < 40)
+    return sortedUsers
+  }, [drill, sortedUsers])
+
+  const signalEvents = useMemo(() => {
+    if (!drill || drill.kind !== "signal") return []
+    if (drill.signal === "high") {
+      return events
+        .filter((e) => String(e.highest_severity).toLowerCase() === "high")
+        .slice(0, 40)
+    }
+    if (drill.signal === "bypass") {
+      return events
+        .filter((e) => decisionKind(e.decision) === "bypass")
+        .slice(0, 40)
+    }
+    return []
+  }, [drill, events])
 
   const insights = useMemo(() => {
     const items: Array<{
       title: string
       detail: string
       cta: string
-      onClick: () => void
+      drill: IntelDrill
       tone: "danger" | "warn" | "ok" | "neutral"
     }> = []
     if (unauthorizedTools.length > 0) {
@@ -3833,8 +4774,8 @@ function IntelligencePanel({
         detail: t("gw.intel.rec.unauthDetail", {
           n: unauthorizedTools.length
         }),
-        cta: t("gw.gov.cta.usage"),
-        onClick: onOpenUsage,
+        cta: t("gw.intel.drill.inspect"),
+        drill: { kind: "signal", signal: "unauth" },
         tone: "danger"
       })
     }
@@ -3842,8 +4783,8 @@ function IntelligencePanel({
       items.push({
         title: t("gw.intel.rec.highUsers"),
         detail: t("gw.intel.rec.highUsersDetail", { n: highUsers }),
-        cta: t("gw.intel.openRisk"),
-        onClick: () => onOpenRisk?.(),
+        cta: t("gw.intel.drill.inspect"),
+        drill: { kind: "users", minScore: 70, band: "high" },
         tone: "danger"
       })
     }
@@ -3851,8 +4792,8 @@ function IntelligencePanel({
       items.push({
         title: t("gw.intel.rec.highDet"),
         detail: t("gw.intel.rec.highDetDetail", { n: eventStats.high }),
-        cta: t("gw.gov.cta.data"),
-        onClick: onOpenData,
+        cta: t("gw.intel.drill.inspect"),
+        drill: { kind: "signal", signal: "high" },
         tone: "warn"
       })
     }
@@ -3860,8 +4801,8 @@ function IntelligencePanel({
       items.push({
         title: t("gw.intel.rec.bypass"),
         detail: t("gw.intel.rec.bypassDetail", { n: eventStats.sendAnyway }),
-        cta: t("gw.gov.cta.data"),
-        onClick: onOpenData,
+        cta: t("gw.intel.drill.inspect"),
+        drill: { kind: "signal", signal: "bypass" },
         tone: "warn"
       })
     }
@@ -3869,8 +4810,8 @@ function IntelligencePanel({
       items.push({
         title: t("gw.intel.rec.unknown"),
         detail: t("gw.intel.rec.unknownDetail", { n: unknownTools.length }),
-        cta: t("gw.gov.cta.usage"),
-        onClick: onOpenUsage,
+        cta: t("gw.intel.drill.inspect"),
+        drill: { kind: "signal", signal: "unknown" },
         tone: "warn"
       })
     }
@@ -3878,23 +4819,19 @@ function IntelligencePanel({
       items.push({
         title: t("gw.intel.rec.ok"),
         detail: t("gw.intel.rec.okDetail"),
-        cta: t("gw.gov.cta.compliance"),
-        onClick: onOpenCompliance,
+        cta: t("gw.intel.drill.inspect"),
+        drill: { kind: "trend" },
         tone: "ok"
       })
     }
-    return items.slice(0, 4)
+    return items.slice(0, 5)
   }, [
     unauthorizedTools.length,
     highUsers,
     eventStats.high,
     eventStats.sendAnyway,
     unknownTools.length,
-    t,
-    onOpenUsage,
-    onOpenData,
-    onOpenRisk,
-    onOpenCompliance
+    t
   ])
 
   const trendLabel =
@@ -3906,9 +4843,12 @@ function IntelligencePanel({
           : t("gw.intel.trend.flat")
       : t("gw.intel.trend.na")
 
+  const agentScore = agentDetail?.user?.score ?? 0
+  const agentBlocked =
+    drill?.kind === "agent" ? !!aiBlockedMap[drill.agentId] : false
+
   return (
     <div className="gw-panel gw-intel">
-      {/* Hero */}
       <section className={`gw-intel-hero gw-intel-hero--${riskTone}`}>
         <div className="gw-intel-hero-copy">
           <span className="gw-kicker">{t("gw.intel.kicker")}</span>
@@ -3923,19 +4863,24 @@ function IntelligencePanel({
                   : t("gw.intel.lead.neutral")}
           </p>
           <div className="gw-intel-hero-actions">
-            {onOpenRisk && (
-              <button type="button" className="btn btn-sm" onClick={onOpenRisk}>
-                {t("gw.intel.openRisk")}
-              </button>
-            )}
-            {onOpenShadow && (
-              <button
-                type="button"
-                className="btn secondary btn-sm"
-                onClick={onOpenShadow}>
-                {t("gw.intel.openShadow")}
-              </button>
-            )}
+            <button
+              type="button"
+              className="btn btn-sm"
+              onClick={() => openUsers("high")}>
+              {t("gw.intel.drill.ctaHighUsers")}
+            </button>
+            <button
+              type="button"
+              className="btn secondary btn-sm"
+              onClick={() => setDrill({ kind: "radar" })}>
+              {t("gw.intel.drill.ctaRadar")}
+            </button>
+            <button
+              type="button"
+              className="btn secondary btn-sm"
+              onClick={() => setDrill({ kind: "emerging" })}>
+              {t("gw.intel.drill.ctaEmerging")}
+            </button>
             <span className="muted" style={{ fontSize: 12 }}>
               {t(`gw.period.${period}`)}
             </span>
@@ -3944,8 +4889,7 @@ function IntelligencePanel({
         <button
           type="button"
           className="gw-intel-gauge"
-          onClick={onOpenRisk}
-          disabled={!onOpenRisk}>
+          onClick={() => setDrill({ kind: "trend" })}>
           <div className="gw-usage-coverage-ring">
             <svg viewBox="0 0 36 36" aria-hidden>
               <path
@@ -3964,7 +4908,8 @@ function IntelligencePanel({
             </div>
           </div>
           <div className="gw-intel-gauge-meta">
-            <span className={`gw-badge gw-gov-risk-badge gw-gov-risk-badge--${riskTone}`}>
+            <span
+              className={`gw-badge gw-gov-risk-badge gw-gov-risk-badge--${riskTone}`}>
               {riskLabel(t, avgRisk)}
             </span>
             <span className="muted">{trendLabel}</span>
@@ -3972,73 +4917,105 @@ function IntelligencePanel({
         </button>
       </section>
 
-      {/* KPI strip */}
       <div className="gw-intel-stats">
-        <div className={`gw-intel-stat gw-intel-stat--${riskTone}`}>
+        <button
+          type="button"
+          className={`gw-intel-stat gw-intel-stat--${riskTone}`}
+          onClick={() => setDrill({ kind: "trend" })}>
           <span className="gw-intel-stat-l">{t("gw.intel.orgScore")}</span>
           <span className={`gw-intel-stat-v ${scoreClass(avgRisk)}`}>
             {score}
           </span>
           <span className="gw-intel-stat-h">{trendLabel}</span>
-        </div>
-        <div className="gw-intel-stat gw-intel-stat--danger">
+        </button>
+        <button
+          type="button"
+          className="gw-intel-stat gw-intel-stat--danger"
+          onClick={() => openUsers("high")}>
           <span className="gw-intel-stat-l">{t("gw.intel.highUsers")}</span>
           <span className="gw-intel-stat-v">{highUsers}</span>
           <span className="gw-intel-stat-h">
             {t("gw.intel.stat.usersTotal", { n: usersTotal })}
           </span>
-        </div>
-        <div className="gw-intel-stat gw-intel-stat--warn">
+        </button>
+        <button
+          type="button"
+          className="gw-intel-stat gw-intel-stat--warn"
+          onClick={() => setDrill({ kind: "emerging" })}>
           <span className="gw-intel-stat-l">{t("gw.intel.emerging")}</span>
           <span className="gw-intel-stat-v">{emergingCount}</span>
           <span className="gw-intel-stat-h">
             {t("gw.intel.stat.appsTotal", { n: tools.length })}
           </span>
-        </div>
-        <div className="gw-intel-stat">
+        </button>
+        <button
+          type="button"
+          className="gw-intel-stat"
+          onClick={() => setDrill({ kind: "radar" })}>
           <span className="gw-intel-stat-l">{t("gw.intel.stat.signals")}</span>
-          <span className="gw-intel-stat-v">
-            {eventStats.high + eventStats.sendAnyway + unauthorizedTools.length}
-          </span>
+          <span className="gw-intel-stat-v">{signalTotal}</span>
           <span className="gw-intel-stat-h">{t("gw.intel.stat.signalsHint")}</span>
-        </div>
+        </button>
       </div>
 
-      {/* Signal radar */}
       <div className="gw-card">
         <div className="gw-card-head">
           <h3>{t("gw.intel.radarTitle")}</h3>
-          <span className="muted" style={{ fontSize: 12 }}>
-            {t("gw.intel.radarHint")}
-          </span>
         </div>
         <div className="gw-intel-radar">
-          {signals.map((s) => (
+          {(
+            [
+              ["high", eventStats.high, "danger", "highHint"],
+              ["bypass", eventStats.sendAnyway, "warn", "bypassHint"],
+              [
+                "unauth",
+                unauthorizedTools.length,
+                unauthorizedTools.length ? "danger" : "ok",
+                "unauthHint"
+              ],
+              [
+                "unknown",
+                unknownTools.length,
+                unknownTools.length ? "warn" : "ok",
+                "unknownHint"
+              ]
+            ] as const
+          ).map(([id, value, tone, hintKey]) => (
             <button
-              key={s.id}
+              key={id}
               type="button"
-              className={`gw-intel-signal gw-intel-signal--${s.tone}`}
-              onClick={s.onClick}>
-              <span className="gw-intel-signal-v">{s.value}</span>
-              <strong>{s.label}</strong>
-              <span className="muted">{s.hint}</span>
+              className={`gw-intel-signal gw-intel-signal--${tone}`}
+              onClick={() =>
+                setDrill({
+                  kind: "signal",
+                  signal: id
+                })
+              }>
+              <span className="gw-intel-signal-v">{value}</span>
+              <strong>
+                {id === "high"
+                  ? t("gw.intel.signal.high")
+                  : id === "bypass"
+                    ? t("gw.intel.signal.sendAnyway")
+                    : id === "unauth"
+                      ? t("gw.intel.signal.unauth")
+                      : t("gw.intel.signal.unknown")}
+              </strong>
+              <span className="muted">{t(`gw.intel.signal.${hintKey}`)}</span>
             </button>
           ))}
         </div>
       </div>
 
-      {/* User risk distribution */}
       <div className="gw-card">
         <div className="gw-card-head">
           <h3>{t("gw.intel.distTitle")}</h3>
-          {onOpenRisk && (
-            <button
-              type="button"
-              className="btn secondary btn-sm"
-              onClick={onOpenRisk}>
-              {t("gw.intel.openRisk")}
-            </button>
-          )}
+          <button
+            type="button"
+            className="btn secondary btn-sm"
+            onClick={() => openUsers("all")}>
+            {t("gw.intel.drill.allUsers")}
+          </button>
         </div>
         <div className="gw-intel-dist">
           {(
@@ -4048,7 +5025,11 @@ function IntelligencePanel({
               ["low", lowUsers, "low"]
             ] as const
           ).map(([key, n, tone]) => (
-            <div key={key} className="gw-intel-dist-row">
+            <button
+              key={key}
+              type="button"
+              className="gw-intel-dist-row gw-intel-dist-row--btn"
+              onClick={() => openUsers(key)}>
               <span>
                 {key === "high"
                   ? t("gw.risk.high")
@@ -4060,29 +5041,29 @@ function IntelligencePanel({
                 <i
                   className={`gw-gov-sev-fill gw-gov-sev-fill--${tone}`}
                   style={{
-                    width: `${Math.max(n > 0 ? 6 : 0, Math.round((n / userDistMax) * 100))}%`
+                    width: `${Math.max(
+                      n > 0 ? 6 : 0,
+                      Math.round((n / userDistMax) * 100)
+                    )}%`
                   }}
                 />
               </div>
               <strong>{n}</strong>
-            </div>
+            </button>
           ))}
         </div>
       </div>
 
-      {/* Top users + emerging apps */}
       <div className="gw-intel-mid">
         <div className="gw-card">
           <div className="gw-card-head">
             <h3>{t("gw.intel.topUsers")}</h3>
-            {onOpenRisk && (
-              <button
-                type="button"
-                className="btn secondary btn-sm"
-                onClick={onOpenRisk}>
-                {t("gw.intel.openRisk")}
-              </button>
-            )}
+            <button
+              type="button"
+              className="btn secondary btn-sm"
+              onClick={() => openUsers("high")}>
+              {t("gw.intel.drill.inspect")}
+            </button>
           </div>
           {topUsers.length === 0 ? (
             <p className="muted gw-intel-empty">{t("gw.intel.noUsers")}</p>
@@ -4090,30 +5071,37 @@ function IntelligencePanel({
             <ul className="gw-intel-users">
               {topUsers.map((u, i) => (
                 <li key={u.agent_id}>
-                  <span className="gw-rank-i">{i + 1}</span>
-                  <div className="gw-intel-user-body">
-                    <div className="gw-intel-user-top">
-                      <strong>{u.label || u.agent_id}</strong>
-                      <span className={`gw-score ${scoreClass(u.score)}`}>
-                        {Math.round(u.score)}
+                  <button
+                    type="button"
+                    className="gw-intel-user-btn"
+                    onClick={() => void openAgent(u.agent_id)}>
+                    <span className="gw-rank-i">{i + 1}</span>
+                    <div className="gw-intel-user-body">
+                      <div className="gw-intel-user-top">
+                        <strong>{u.label || u.agent_id}</strong>
+                        <span className={`gw-score ${scoreClass(u.score)}`}>
+                          {Math.round(u.score)}
+                        </span>
+                      </div>
+                      <div className="gw-usage-vol-bar">
+                        <span
+                          style={{
+                            width: `${Math.max(
+                              6,
+                              Math.round((u.score / maxUserScore) * 100)
+                            )}%`
+                          }}
+                        />
+                      </div>
+                      <span className="muted" style={{ fontSize: 11 }}>
+                        {trendGlyph(u.trend)}{" "}
+                        {t(`gw.intel.userTrend.${u.trend}`)}
+                        {aiBlockedMap[u.agent_id]
+                          ? ` · ${t("gw.usage.wean.badge")}`
+                          : ""}
                       </span>
                     </div>
-                    <div className="gw-usage-vol-bar">
-                      <span
-                        style={{
-                          width: `${Math.max(
-                            6,
-                            Math.round((u.score / maxUserScore) * 100)
-                          )}%`
-                        }}
-                      />
-                    </div>
-                    <span className="muted" style={{ fontSize: 11 }}>
-                      {trendGlyph(u.trend)}{" "}
-                      {t(`gw.intel.userTrend.${u.trend}`)} ·{" "}
-                      {u.agent_id.slice(0, 10)}…
-                    </span>
-                  </div>
+                  </button>
                 </li>
               ))}
             </ul>
@@ -4123,49 +5111,44 @@ function IntelligencePanel({
         <div className="gw-card">
           <div className="gw-card-head">
             <h3>{t("gw.intel.emergingApps")}</h3>
-            <div className="gw-intel-head-actions">
-              <button
-                type="button"
-                className="btn secondary btn-sm"
-                onClick={onOpenUsage}>
-                {t("gw.gov.cta.usage")}
-              </button>
-              {onOpenShadow && (
-                <button
-                  type="button"
-                  className="btn secondary btn-sm"
-                  onClick={onOpenShadow}>
-                  {t("gw.intel.openShadow")}
-                </button>
-              )}
-            </div>
+            <button
+              type="button"
+              className="btn secondary btn-sm"
+              onClick={() => setDrill({ kind: "emerging" })}>
+              {t("gw.intel.drill.inspect")}
+            </button>
           </div>
           {emerging.length === 0 ? (
             <p className="muted gw-intel-empty">{t("gw.intel.noEmerging")}</p>
           ) : (
             <ul className="gw-intel-apps">
-              {emerging.map((tool) => {
+              {emerging.slice(0, 6).map((tool) => {
                 const name = tool.display_name || tool.tool
                 return (
                   <li key={tool.tool}>
-                    <span
-                      className={`gw-usage-avatar gw-usage-avatar--${tool.status}`}
-                      aria-hidden>
-                      {appInitials(name)}
-                    </span>
-                    <div className="gw-intel-app-body">
-                      <div className="gw-gov-app-top">
-                        <strong>{name}</strong>
-                        <span className={`gw-badge gw-badge--${tool.status}`}>
-                          {t(`gw.status.${tool.status}`)}
+                    <button
+                      type="button"
+                      className="gw-intel-app-btn"
+                      onClick={() => setDrill({ kind: "emerging" })}>
+                      <span
+                        className={`gw-usage-avatar gw-usage-avatar--${tool.status}`}
+                        aria-hidden>
+                        {appInitials(name)}
+                      </span>
+                      <div className="gw-intel-app-body">
+                        <div className="gw-gov-app-top">
+                          <strong>{name}</strong>
+                          <span className={`gw-badge gw-badge--${tool.status}`}>
+                            {t(`gw.status.${tool.status}`)}
+                          </span>
+                        </div>
+                        <span className="muted" style={{ fontSize: 11 }}>
+                          {tool.events_count} {t("gw.usage.eventsShort")} ·{" "}
+                          {tool.agents_count} {t("gw.usage.agentsShort")} ·{" "}
+                          {relativeTime(tool.last_seen_at)}
                         </span>
                       </div>
-                      <span className="muted" style={{ fontSize: 11 }}>
-                        {tool.events_count} {t("gw.usage.eventsShort")} ·{" "}
-                        {tool.agents_count} {t("gw.usage.agentsShort")} ·{" "}
-                        {relativeTime(tool.last_seen_at)}
-                      </span>
-                    </div>
+                    </button>
                   </li>
                 )
               })}
@@ -4174,13 +5157,11 @@ function IntelligencePanel({
         </div>
       </div>
 
-      {/* Recommendations / OpsInsight */}
       <div className="gw-intel-ops">
         <div className="gw-intel-ops-head">
           <div>
             <span className="gw-kicker">OpsInsight</span>
             <h3>{t("gw.intel.opsInsight")}</h3>
-            <p className="muted">{t("gw.intel.opsInsightDetail")}</p>
           </div>
         </div>
         <div className="gw-intel-recs">
@@ -4195,14 +5176,492 @@ function IntelligencePanel({
               <button
                 type="button"
                 className="btn secondary btn-sm"
-                onClick={rec.onClick}>
+                onClick={() => {
+                  setAgentDetail(null)
+                  setDrill(rec.drill)
+                }}>
                 {rec.cta}
               </button>
             </div>
           ))}
         </div>
-        <p className="muted gw-intel-foot">{t("gw.intel.foot")}</p>
       </div>
+
+      {drill && (
+        <div
+          className="gw-drill"
+          role="dialog"
+          aria-modal="true"
+          aria-label={t("gw.intel.drill.kicker")}>
+          <button
+            type="button"
+            className="gw-drill-backdrop"
+            aria-label={t("common.close")}
+            onClick={() => {
+              setDrill(null)
+              setAgentDetail(null)
+            }}
+          />
+          <div className="gw-drill-panel">
+            <header className="gw-drill-head">
+              <div>
+                <span className="gw-kicker">{t("gw.intel.drill.kicker")}</span>
+                <h3 className="gw-drill-title">
+                  {drill.kind === "users"
+                    ? t(`gw.intel.drill.title.users_${drill.band}`)
+                    : drill.kind === "signal"
+                      ? t(`gw.intel.drill.title.signal_${drill.signal}`)
+                      : drill.kind === "agent"
+                        ? t("gw.intel.drill.title.agent", {
+                            user:
+                              agentDetail?.user?.label ||
+                              drill.agentId.slice(0, 12)
+                          })
+                        : t(`gw.intel.drill.title.${drill.kind}`)}
+                </h3>
+                <p className="muted gw-drill-sub">
+                  {t("gw.intel.drill.sub")} · {t(`gw.period.${period}`)}
+                  {busy ? ` · ${t("common.loading")}` : ""}
+                </p>
+              </div>
+              <button
+                type="button"
+                className="btn secondary btn-sm"
+                onClick={() => {
+                  setDrill(null)
+                  setAgentDetail(null)
+                }}>
+                {t("common.close")}
+              </button>
+            </header>
+            <div className="gw-drill-body">
+              {drill.kind === "trend" && (
+                <div className="gw-drill-summary">
+                  <div>
+                    <span className="muted">{t("gw.intel.orgScore")}</span>
+                    <strong className={scoreClass(avgRisk)}>
+                      {score}/100 · {riskLabel(t, avgRisk)}
+                    </strong>
+                  </div>
+                  <div>
+                    <span className="muted">{t("gw.compliance.riskEvo")}</span>
+                    <strong>{trendLabel}</strong>
+                  </div>
+                  <div>
+                    <span className="muted">{t("gw.intel.highUsers")}</span>
+                    <strong>{highUsers}</strong>
+                  </div>
+                  <div>
+                    <span className="muted">{t("gw.intel.stat.signals")}</span>
+                    <strong>{signalTotal}</strong>
+                  </div>
+                </div>
+              )}
+
+              {(drill.kind === "users" || drill.kind === "radar") && (
+                <>
+                  {drill.kind === "radar" && (
+                    <div className="gw-drill-summary" style={{ marginBottom: 12 }}>
+                      <div>
+                        <span className="muted">{t("gw.intel.signal.high")}</span>
+                        <strong>{eventStats.high}</strong>
+                      </div>
+                      <div>
+                        <span className="muted">
+                          {t("gw.intel.signal.sendAnyway")}
+                        </span>
+                        <strong>{eventStats.sendAnyway}</strong>
+                      </div>
+                      <div>
+                        <span className="muted">
+                          {t("gw.intel.signal.unauth")}
+                        </span>
+                        <strong>{unauthorizedTools.length}</strong>
+                      </div>
+                      <div>
+                        <span className="muted">
+                          {t("gw.intel.signal.unknown")}
+                        </span>
+                        <strong>{unknownTools.length}</strong>
+                      </div>
+                    </div>
+                  )}
+                  {(drill.kind === "users" ? filteredUsers : sortedUsers.slice(0, 30))
+                    .length === 0 ? (
+                    <p className="muted">{t("gw.intel.noUsers")}</p>
+                  ) : (
+                    <div className="gw-drill-table-wrap">
+                      <table className="gw-drill-table">
+                        <thead>
+                          <tr>
+                            <th>{t("gw.gov.drill.col.user")}</th>
+                            <th>{t("gw.gov.drill.col.score")}</th>
+                            <th>{t("gw.gov.drill.col.trend")}</th>
+                            <th>{t("gw.gov.drill.col.tools")}</th>
+                            <th>{t("gw.gov.drill.col.events")}</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {(drill.kind === "users"
+                            ? filteredUsers
+                            : sortedUsers
+                          )
+                            .slice(0, 40)
+                            .map((u) => (
+                              <tr
+                                key={u.agent_id}
+                                className="is-click"
+                                onClick={() => void openAgent(u.agent_id)}>
+                                <td>
+                                  <strong>{u.label || u.agent_id}</strong>
+                                  {aiBlockedMap[u.agent_id] ? (
+                                    <span
+                                      className="gw-badge gw-badge--unauthorized"
+                                      style={{ marginLeft: 6 }}>
+                                      {t("gw.usage.wean.badge")}
+                                    </span>
+                                  ) : null}
+                                </td>
+                                <td>
+                                  <span
+                                    className={`gw-score ${scoreClass(u.score)}`}>
+                                    {Math.round(u.score)}
+                                  </span>
+                                </td>
+                                <td>
+                                  {trendGlyph(u.trend)}{" "}
+                                  {t(`gw.intel.userTrend.${u.trend}`)}
+                                </td>
+                                <td className="muted" style={{ fontSize: 11 }}>
+                                  {(u.tools || []).slice(0, 3).join(", ") || "—"}
+                                </td>
+                                <td>{u.events_count}</td>
+                              </tr>
+                            ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </>
+              )}
+
+              {drill.kind === "emerging" && (
+                <>
+                  {emerging.length === 0 ? (
+                    <p className="muted">{t("gw.intel.noEmerging")}</p>
+                  ) : (
+                    <div className="gw-drill-table-wrap">
+                      <table className="gw-drill-table">
+                        <thead>
+                          <tr>
+                            <th>{t("gw.usage.col.app")}</th>
+                            <th>{t("gw.usage.col.status")}</th>
+                            <th>{t("gw.usage.col.events")}</th>
+                            <th>{t("gw.usage.col.agents")}</th>
+                            <th>{t("gw.usage.col.last")}</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {emerging.map((tool) => (
+                            <tr key={tool.tool}>
+                              <td>
+                                <strong>
+                                  {tool.display_name || tool.tool}
+                                </strong>
+                              </td>
+                              <td>
+                                <span
+                                  className={`gw-badge gw-badge--${tool.status}`}>
+                                  {t(`gw.status.${tool.status}`)}
+                                </span>
+                              </td>
+                              <td>{tool.events_count}</td>
+                              <td>{tool.agents_count}</td>
+                              <td>{relativeTime(tool.last_seen_at)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </>
+              )}
+
+              {drill.kind === "signal" &&
+                (drill.signal === "high" || drill.signal === "bypass") && (
+                  <>
+                    {signalEvents.length === 0 ? (
+                      <p className="muted">{t("gw.gov.drill.noEvents")}</p>
+                    ) : (
+                      <div className="gw-drill-table-wrap">
+                        <table className="gw-drill-table">
+                          <thead>
+                            <tr>
+                              <th>{t("gw.gov.drill.col.when")}</th>
+                              <th>{t("gw.gov.drill.col.device")}</th>
+                              <th>{t("gw.gov.drill.col.decision")}</th>
+                              <th>{t("gw.gov.drill.col.severity")}</th>
+                              <th>{t("gw.gov.drill.col.types")}</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {signalEvents.map((e) => (
+                              <tr key={e.id}>
+                                <td>{relativeTime(e.ts)}</td>
+                                <td>
+                                  <strong>
+                                    {e.device_label || e.hostname || "—"}
+                                  </strong>
+                                </td>
+                                <td>
+                                  <code>{e.decision || "—"}</code>
+                                </td>
+                                <td>{e.highest_severity || "—"}</td>
+                                <td className="muted" style={{ fontSize: 11 }}>
+                                  {(e.types || []).slice(0, 3).join(", ") || "—"}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </>
+                )}
+
+              {drill.kind === "signal" &&
+                (drill.signal === "unauth" || drill.signal === "unknown") && (
+                  <>
+                    <div className="gw-drill-table-wrap">
+                      <table className="gw-drill-table">
+                        <thead>
+                          <tr>
+                            <th>{t("gw.usage.col.app")}</th>
+                            <th>{t("gw.usage.col.status")}</th>
+                            <th>{t("gw.usage.col.events")}</th>
+                            <th>{t("gw.usage.col.agents")}</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {(drill.signal === "unauth"
+                            ? unauthorizedTools
+                            : unknownTools
+                          ).map((tool) => (
+                            <tr key={tool.tool}>
+                              <td>
+                                <strong>
+                                  {tool.display_name || tool.tool}
+                                </strong>
+                              </td>
+                              <td>
+                                <span
+                                  className={`gw-badge gw-badge--${tool.status}`}>
+                                  {t(`gw.status.${tool.status}`)}
+                                </span>
+                              </td>
+                              <td>{tool.events_count}</td>
+                              <td>{tool.agents_count}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </>
+                )}
+
+              {drill.kind === "agent" && agentDetail && (
+                <>
+                  <div className="gw-drill-summary">
+                    <div>
+                      <span className="muted">{t("gw.gov.drill.col.score")}</span>
+                      <strong className={scoreClass(agentScore)}>
+                        {Math.round(agentScore)}/100
+                      </strong>
+                    </div>
+                    <div>
+                      <span className="muted">{t("gw.gov.drill.col.trend")}</span>
+                      <strong>
+                        {trendGlyph(agentDetail.user?.trend || "flat")}{" "}
+                        {t(
+                          `gw.intel.userTrend.${agentDetail.user?.trend || "flat"}`
+                        )}
+                      </strong>
+                    </div>
+                    <div>
+                      <span className="muted">{t("gw.gov.drill.col.events")}</span>
+                      <strong>
+                        {agentDetail.user?.events_count ?? "—"}
+                      </strong>
+                    </div>
+                    <div>
+                      <span className="muted">{t("gw.gov.drill.col.tools")}</span>
+                      <strong style={{ fontSize: 12 }}>
+                        {(agentDetail.user?.tools || [])
+                          .slice(0, 4)
+                          .join(", ") || "—"}
+                      </strong>
+                    </div>
+                  </div>
+
+                  {(agentScore >= 40 || agentBlocked) && (
+                    <div
+                      className={`gw-usage-wean gw-usage-wean--${
+                        agentBlocked || agentScore >= 70 ? "danger" : "warn"
+                      }`}>
+                      <span className="gw-kicker">
+                        {t("gw.usage.wean.kicker")}
+                      </span>
+                      <strong>
+                        {agentBlocked
+                          ? t("gw.usage.wean.titleBlocked")
+                          : t("gw.usage.wean.titleHigh")}
+                      </strong>
+                      <div className="gw-usage-wean-actions">
+                        {agentBlocked ? (
+                          <button
+                            type="button"
+                            className="btn btn-sm"
+                            disabled={busy}
+                            onClick={() =>
+                              void setAiAccess(drill.agentId, false)
+                            }>
+                            {t("gw.usage.wean.unblock")}
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            className="btn danger btn-sm"
+                            disabled={busy}
+                            onClick={() => {
+                              if (
+                                !window.confirm(t("gw.usage.wean.confirmBlock"))
+                              )
+                                return
+                              void setAiAccess(drill.agentId, true)
+                            }}>
+                            {t("gw.usage.wean.block")}
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          className="btn secondary btn-sm"
+                          onClick={onOpenUsage}>
+                          {t("gw.gov.cta.usage")}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {Object.keys(agentDetail.factors).length > 0 && (
+                    <>
+                      <h4 className="gw-usage-drill-h">
+                        {t("gw.usage.drill.factors")}
+                      </h4>
+                      <ul className="gw-drill-factors">
+                        {Object.entries(agentDetail.factors)
+                          .filter(([, v]) => Number(v) > 0)
+                          .sort((a, b) => Number(b[1]) - Number(a[1]))
+                          .map(([k, v]) => (
+                            <li key={k}>
+                              <code>{k}</code>
+                              <strong>{v}</strong>
+                            </li>
+                          ))}
+                      </ul>
+                    </>
+                  )}
+
+                  {(agentDetail.recent || []).length > 0 && (
+                    <>
+                      <h4 className="gw-usage-drill-h">
+                        {t("gw.usage.drill.actions")}
+                      </h4>
+                      <div className="gw-drill-table-wrap">
+                        <table className="gw-drill-table">
+                          <thead>
+                            <tr>
+                              <th>{t("gw.gov.drill.col.when")}</th>
+                              <th>{t("gw.gov.drill.col.decision")}</th>
+                              <th>{t("gw.gov.drill.col.severity")}</th>
+                              <th>{t("gw.gov.drill.col.source")}</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {agentDetail.recent.slice(0, 20).map((e, i) => (
+                              <tr key={i}>
+                                <td>
+                                  {relativeTime(String(e.ts || ""))}
+                                </td>
+                                <td>
+                                  <code>{String(e.decision || "—")}</code>
+                                </td>
+                                <td>
+                                  {String(e.highest_severity || "—")}
+                                </td>
+                                <td className="muted" style={{ fontSize: 11 }}>
+                                  {String(e.hostname || "—")}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </>
+                  )}
+                </>
+              )}
+            </div>
+            <footer className="gw-drill-foot">
+              <div className="gw-drill-foot-actions">
+                {drill.kind === "emerging" ||
+                (drill.kind === "signal" &&
+                  (drill.signal === "unauth" || drill.signal === "unknown")) ? (
+                  <button
+                    type="button"
+                    className="btn secondary btn-sm"
+                    onClick={onOpenUsage}>
+                    {t("gw.gov.cta.usage")}
+                  </button>
+                ) : null}
+                {drill.kind === "signal" &&
+                (drill.signal === "high" || drill.signal === "bypass") ? (
+                  <button
+                    type="button"
+                    className="btn secondary btn-sm"
+                    onClick={onOpenData}>
+                    {t("gw.gov.cta.data")}
+                  </button>
+                ) : null}
+                {drill.kind === "trend" ? (
+                  <button
+                    type="button"
+                    className="btn secondary btn-sm"
+                    onClick={onOpenCompliance}>
+                    {t("gw.gov.cta.compliance")}
+                  </button>
+                ) : null}
+                {onOpenRisk && (
+                  <button
+                    type="button"
+                    className="btn secondary btn-sm"
+                    onClick={onOpenRisk}>
+                    {t("gw.intel.openRisk")}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="btn btn-sm"
+                  onClick={() => {
+                    setDrill(null)
+                    setAgentDetail(null)
+                  }}>
+                  {t("common.close")}
+                </button>
+              </div>
+            </footer>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

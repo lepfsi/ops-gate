@@ -2515,13 +2515,61 @@ html[data-theme="dark"] .dash-context-panel {
   height: 100%;
   max-height: 100%;
   min-height: 0;
-  /* Pas de scrollbar latérale : contenu compact + foot en bas */
   overflow: hidden;
   box-shadow: var(--shadow);
   display: flex;
   flex-direction: column;
   align-self: stretch;
   flex-shrink: 0;
+}
+
+/* Zone scrollable des onglets (AI Security + sous-menus allongent la nav) */
+.shell-nav-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 2px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148, 163, 184, 0.45) transparent;
+}
+
+.shell-nav-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+
+.shell-nav-scroll::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.4);
+  border-radius: 99px;
+}
+
+.shell-nav-item-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+}
+
+.shell-nav-caret {
+  flex: 0 0 auto;
+  font-size: 0.65rem;
+  line-height: 1;
+  opacity: 0.7;
+  transform: rotate(-90deg);
+  transition: transform 0.15s ease;
+}
+
+.shell-nav-caret.is-open {
+  transform: rotate(0deg);
+  opacity: 1;
+}
+
+.shell-nav-subgroup {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 2px;
 }
 
 .shell-nav-brand {
@@ -2600,8 +2648,19 @@ html[data-theme="dark"] .dash-context-panel {
   color: #e2e8f0;
 }
 
+.shell-nav-item.open {
+  background: rgba(255, 255, 255, 0.05);
+}
+
 .shell-nav-sub.active {
   border-left-color: #2bd9c5;
+}
+
+.shell-nav-foot {
+  flex-shrink: 0;
+  margin-top: 4px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .shell-main {
@@ -4210,7 +4269,7 @@ html[data-theme="dark"] .mv-rule {
 .gw-page {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
   max-width: 1180px;
   margin: 0 auto;
   padding: 2px 2px 28px;
@@ -4222,9 +4281,9 @@ html[data-theme="dark"] .mv-rule {
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 10px 16px;
-  padding: 8px 12px;
-  border-radius: 10px;
+  gap: 8px 12px;
+  padding: 6px 10px;
+  border-radius: 8px;
   border: 1px solid var(--line);
   background: var(--surface);
 }
@@ -4233,14 +4292,14 @@ html[data-theme="dark"] .mv-rule {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
-  gap: 8px 12px;
+  gap: 6px 10px;
   min-width: 0;
 }
 
 .gw-topbar-kicker {
-  font-size: 10px;
+  font-size: 9.5px;
   font-weight: 700;
-  letter-spacing: 0.07em;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--accent-ink);
   white-space: nowrap;
@@ -4248,8 +4307,8 @@ html[data-theme="dark"] .mv-rule {
 
 .gw-topbar-title {
   margin: 0;
-  font-size: 0.95rem;
-  font-weight: 750;
+  font-size: 0.88rem;
+  font-weight: 700;
   letter-spacing: -0.02em;
   color: var(--ink);
   line-height: 1.2;
@@ -4259,14 +4318,28 @@ html[data-theme="dark"] .mv-rule {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
 }
 
 .gw-topbar-period {
-  max-width: 118px;
-  font-size: 12.5px;
-  padding-top: 5px;
-  padding-bottom: 5px;
+  max-width: 108px;
+  font-size: 12px;
+  padding-top: 4px;
+  padding-bottom: 4px;
+}
+
+.gw-subnav {
+  padding: 3px;
+  gap: 3px;
+}
+
+.gw-subnav-item {
+  padding: 5px 9px;
+  font-size: 11.5px;
+}
+
+.gw-drill-foot {
+  justify-content: flex-end;
 }
 
 /* Shared kicker used inside section heroes */
@@ -5684,6 +5757,53 @@ html[data-theme="dark"] .gw-gov-risk-badge--ok {
   border: 1px solid var(--line);
   background: var(--surface);
   min-height: 92px;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  transition: border-color 0.12s ease, box-shadow 0.12s ease;
+}
+
+button.gw-intel-stat:hover {
+  border-color: rgba(43, 217, 197, 0.5);
+  box-shadow: 0 0 0 3px var(--accent-ring);
+}
+
+button.gw-intel-dist-row--btn {
+  width: 100%;
+  border: none;
+  background: transparent;
+  padding: 4px 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+  border-radius: 6px;
+}
+
+button.gw-intel-dist-row--btn:hover {
+  background: var(--surface-2);
+}
+
+button.gw-intel-user-btn,
+button.gw-intel-app-btn {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  width: 100%;
+  border: none;
+  background: transparent;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+button.gw-intel-user-btn:hover strong,
+button.gw-intel-app-btn:hover strong {
+  color: var(--accent-ink);
 }
 
 .gw-intel-stat--danger .gw-intel-stat-v {
@@ -6088,6 +6208,103 @@ html[data-theme="dark"] .gw-intel-stat--ok .gw-intel-stat-v {
   border: 1px solid var(--line);
   background: var(--surface);
   min-height: 84px;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  transition: border-color 0.12s ease, box-shadow 0.12s ease;
+}
+
+button.gw-comp-stat:hover {
+  border-color: rgba(43, 217, 197, 0.5);
+  box-shadow: 0 0 0 3px var(--accent-ring);
+}
+
+.gw-comp-stat-h {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.gw-comp-scope {
+  margin: 8px 0 0;
+  max-width: 54ch;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+button.gw-comp-control {
+  border: none;
+  background: transparent;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+button.gw-comp-report-line--btn {
+  width: 100%;
+  border: none;
+  background: transparent;
+  padding: 9px 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+button.gw-comp-report-line--btn:hover .gw-comp-report-label {
+  color: var(--accent-ink);
+}
+
+.gw-comp-check-btn {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  width: 100%;
+  border: none;
+  background: transparent;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.gw-comp-check-go {
+  display: inline-block;
+  margin-top: 4px;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--accent-ink);
+}
+
+.gw-comp-integrity-badge {
+  display: inline-flex;
+  padding: 8px 12px;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 750;
+  margin-bottom: 12px;
+}
+
+.gw-comp-integrity-badge.is-ok {
+  background: rgba(16, 185, 129, 0.12);
+  color: #047857;
+  border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+.gw-comp-integrity-badge.is-ko {
+  background: rgba(239, 68, 68, 0.1);
+  color: #b91c1c;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+.gw-comp-exports p {
+  margin: 0 0 12px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--ink-2);
 }
 
 .gw-comp-stat--danger .gw-comp-stat-v {
@@ -6622,6 +6839,103 @@ html[data-theme="dark"] .gw-comp-check li.is-ko .gw-comp-check-mark {
   border: 1px solid var(--line);
   background: var(--surface);
   min-height: 92px;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  transition: border-color 0.12s ease, box-shadow 0.12s ease;
+}
+
+button.gw-data-stat:hover {
+  border-color: rgba(43, 217, 197, 0.5);
+  box-shadow: 0 0 0 3px var(--accent-ring);
+}
+
+.gw-data-scope {
+  margin: 8px 0 0;
+  max-width: 54ch;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+button.gw-data-rate {
+  border: none;
+  background: transparent;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+button.gw-data-asset--btn {
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+button.gw-data-asset--btn:hover {
+  border-color: rgba(43, 217, 197, 0.45);
+  box-shadow: 0 0 0 3px var(--accent-ring);
+}
+
+.gw-data-asset-count {
+  font-style: normal;
+  font-weight: 800;
+  color: var(--accent-ink);
+  margin-left: 4px;
+}
+
+button.gw-data-sev-row--btn {
+  width: 100%;
+  border: none;
+  background: transparent;
+  padding: 4px 0;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  border-radius: 6px;
+}
+
+button.gw-data-sev-row--btn:hover {
+  background: var(--surface-2);
+}
+
+button.gw-data-action--btn {
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.12s ease, box-shadow 0.12s ease;
+}
+
+button.gw-data-action--btn:hover {
+  border-color: rgba(43, 217, 197, 0.5);
+  box-shadow: 0 0 0 3px var(--accent-ring);
+}
+
+.gw-data-type-row {
+  display: grid;
+  grid-template-columns: minmax(100px, 0.7fr) minmax(0, 1.4fr) 48px;
+  gap: 12px;
+  align-items: center;
+  width: 100%;
+  border: none;
+  background: transparent;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.gw-data-type-row:hover code {
+  color: var(--accent-ink);
+}
+
+.gw-data-decisions li {
+  padding: 4px 0;
 }
 
 .gw-data-stat--danger .gw-data-stat-v {

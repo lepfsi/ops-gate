@@ -146,6 +146,10 @@ export default function App() {
   const [gatewaySection, setGatewaySection] = useState<GatewaySection>(
     () => initialRoute.gatewaySection || "governance"
   )
+  /** Menu latéral AI Security : déroulé / replié au clic */
+  const [gatewayNavOpen, setGatewayNavOpen] = useState(
+    () => initialRoute.tab === "gateway"
+  )
   /** Évite boucle hashchange ↔ setState */
   const applyingHash = useRef(false)
   /** Dashboard plein écran : topbar + nav masquées ; Échap pour sortir */
@@ -560,6 +564,7 @@ export default function App() {
       }
       if (route.tab === "gateway") {
         setGatewaySection(route.gatewaySection || "governance")
+        setGatewayNavOpen(true)
       }
       if (route.tab === "settings" && route.settingsSection) {
         try {
@@ -610,12 +615,28 @@ export default function App() {
 
   const goGatewaySection = useCallback(
     (id: GatewaySection) => {
+      setGatewayNavOpen(true)
       const route: ConsoleRoute = { tab: "gateway", gatewaySection: id }
       applyRoute(route, { scroll: false })
       writeConsoleHash(route, "push")
     },
     [applyRoute]
   )
+
+  /** Clic parent AI Security : ouvre les sous-onglets, reclic les referme */
+  const onGatewayNavClick = useCallback(() => {
+    if (tab === "gateway" && gatewayNavOpen) {
+      setGatewayNavOpen(false)
+      return
+    }
+    setGatewayNavOpen(true)
+    goTab("gateway")
+  }, [tab, gatewayNavOpen, goTab])
+
+  // Quitter AI Security via un autre onglet → replier le sous-menu
+  useEffect(() => {
+    if (tab !== "gateway") setGatewayNavOpen(false)
+  }, [tab])
 
   const goDashSection = useCallback(
     (id: DashSection) => {
@@ -1459,6 +1480,7 @@ export default function App() {
             <span>Console</span>
           </div>
         </div>
+        <div className="shell-nav-scroll">
         <button
           type="button"
           className={`shell-nav-item ${tab === "summary" ? "active" : ""}`}
@@ -1513,16 +1535,30 @@ export default function App() {
         </button>
         <button
           type="button"
-          className={`shell-nav-item ${tab === "gateway" ? "active" : ""}`}
-          onClick={() => goTab("gateway")}>
-          {t("nav.gateway")}
+          className={`shell-nav-item ${tab === "gateway" ? "active" : ""} ${
+            gatewayNavOpen && tab === "gateway" ? "open" : ""
+          }`}
+          aria-expanded={gatewayNavOpen && tab === "gateway"}
+          onClick={onGatewayNavClick}>
+          <span className="shell-nav-item-row">
+            <span>{t("nav.gateway")}</span>
+            <span
+              className={`shell-nav-caret ${
+                gatewayNavOpen && tab === "gateway" ? "is-open" : ""
+              }`}
+              aria-hidden>
+              ▾
+            </span>
+          </span>
         </button>
-        {tab === "gateway" && (
-          <>
+        {gatewayNavOpen && (
+          <div className="shell-nav-subgroup" role="group" aria-label={t("nav.gateway")}>
             <button
               type="button"
               className={`shell-nav-sub ${
-                gatewaySection === "governance" ? "active" : ""
+                tab === "gateway" && gatewaySection === "governance"
+                  ? "active"
+                  : ""
               }`}
               onClick={() => goGatewaySection("governance")}>
               {t("gw.section.governance")}
@@ -1530,7 +1566,7 @@ export default function App() {
             <button
               type="button"
               className={`shell-nav-sub ${
-                gatewaySection === "usage" ? "active" : ""
+                tab === "gateway" && gatewaySection === "usage" ? "active" : ""
               }`}
               onClick={() => goGatewaySection("usage")}>
               {t("gw.section.usage")}
@@ -1538,7 +1574,7 @@ export default function App() {
             <button
               type="button"
               className={`shell-nav-sub ${
-                gatewaySection === "data" ? "active" : ""
+                tab === "gateway" && gatewaySection === "data" ? "active" : ""
               }`}
               onClick={() => goGatewaySection("data")}>
               {t("gw.section.data")}
@@ -1546,7 +1582,9 @@ export default function App() {
             <button
               type="button"
               className={`shell-nav-sub ${
-                gatewaySection === "compliance" ? "active" : ""
+                tab === "gateway" && gatewaySection === "compliance"
+                  ? "active"
+                  : ""
               }`}
               onClick={() => goGatewaySection("compliance")}>
               {t("gw.section.compliance")}
@@ -1554,12 +1592,14 @@ export default function App() {
             <button
               type="button"
               className={`shell-nav-sub ${
-                gatewaySection === "intelligence" ? "active" : ""
+                tab === "gateway" && gatewaySection === "intelligence"
+                  ? "active"
+                  : ""
               }`}
               onClick={() => goGatewaySection("intelligence")}>
               {t("gw.section.intelligence")}
             </button>
-          </>
+          </div>
         )}
         <button
           type="button"
@@ -1585,6 +1625,7 @@ export default function App() {
           onClick={() => goTab("settings")}>
           {t("nav.settings")}
         </button>
+        </div>
         <div className="shell-nav-foot">
           <button
             type="button"
