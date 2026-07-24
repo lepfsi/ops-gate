@@ -190,13 +190,71 @@ export function startProxyServer(cfg: ProxyConfig): http.Server {
           listen: `${cfg.host}:${cfg.port}`,
           api_base: cfg.apiBase,
           org_code: cfg.orgCode,
+          file_scan: true,
           note:
             "Le proxy ne fait PAS de banner warn (c’est l’extension). " +
+            "POST /opsgate-proxy/scan-file pour scans lourds (PDF étendu). " +
             "Proxy: observe=log MMC, enforce=block|mask, h2 stream-aware. " +
             "OPSGATE_PROXY_SOFT_MASK=1|onwire|local · OPSGATE_PROXY_HTTP2=0 pour forcer h1. " +
             "Chrome: --proxy-server=127.0.0.1:8888"
         })
       )
+      return
+    }
+    // Scan fichiers lourds (extension → proxy)
+    if (urlPath === "/opsgate-proxy/scan-file" && req.method === "POST") {
+      const chunks: Buffer[] = []
+      req.on("data", (c) => {
+        chunks.push(c as Buffer)
+        // cap ~30 Mo
+        if (Buffer.concat(chunks).length > 32_000_000) {
+          res.writeHead(413, { "content-type": "application/json" })
+          res.end(JSON.stringify({ status: "failed", error: "payload_too_large" }))
+          req.destroy()
+        }
+      })
+      req.on("end", () => {
+        void (async () => {
+          try {
+            const raw = Buffer.concat(chunks).toString("utf8")
+            const body = JSON.parse(raw) as {
+              filename?: string
+              mime?: string
+              content_base64?: string
+            }
+            const { scanFilePayload } = await import("./file-scan.js")
+            const result = await scanFilePayload({
+              filename: body.filename || "upload.bin",
+              mime: body.mime,
+              content_base64: body.content_base64 || ""
+            })
+            res.writeHead(200, {
+              "content-type": "application/json",
+              "access-control-allow-origin": "*"
+            })
+            res.end(JSON.stringify(result))
+          } catch (e) {
+            res.writeHead(500, { "content-type": "application/json" })
+            res.end(
+              JSON.stringify({
+                status: "failed",
+                text: "",
+                truncated: false,
+                error: e instanceof Error ? e.message : String(e)
+              })
+            )
+          }
+        })()
+      })
+      return
+    }
+    if (urlPath === "/opsgate-proxy/scan-file" && req.method === "OPTIONS") {
+      res.writeHead(204, {
+        "access-control-allow-origin": "*",
+        "access-control-allow-methods": "POST, OPTIONS",
+        "access-control-allow-headers": "content-type"
+      })
+      res.end()
       return
     }
     // PAC servi en HTTP (Chrome Windows ignore souvent file:///)

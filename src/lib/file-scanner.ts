@@ -6,6 +6,11 @@ import {
   type DetectionRule
 } from "@opsgate/engine"
 
+// Import STATIQUE obligatoire (content script Plasmo) :
+// `await import("./office-extract")` produit des chunks hashés (ex. gTf5N)
+// introuvables au runtime → « Cannot find module 'gTf5N' ».
+import { extractOfficeText } from "./office-extract"
+
 /**
  * Taille max lue par fichier (25 Mo).
  * Au-delà : scan du début uniquement + flag truncated.
@@ -420,34 +425,125 @@ export async function scanFile(
       ext === "xlsm"
     ) {
       try {
-        const { extractOfficeText } = await import("./office-extract")
         const extracted = await extractOfficeText(file, MAX_FILE_BYTES)
-        if (extracted?.text?.trim()) {
-          const detections = detectSensitiveData(extracted.text, rules)
+        if (extracted?.errorCode === "pdf_too_many_pages") {
+          // P1 : PDF > 30 pages → tenter proxy local
+          const proxy = await tryProxyFileScan(file)
+          if (proxy) return { ...base, ...proxy }
           return {
             ...base,
-            status: extracted.truncated ? "too_large_partial" : "scanned",
-            text: extracted.text,
-            detections,
-            truncated: extracted.truncated,
-            userHint: extracted.truncated
-              ? `Document ${ext.toUpperCase()} partiellement scanné (taille / pages).`
-              : undefined
+            status: "office_warn",
+            userHint: `PDF trop long pour le navigateur (${extracted.pageCount || "?"} pages, max 30 ici). Installez le proxy OpsGate pour un scan complet, ou divisez le fichier.`
           }
         }
-        // extract fail / empty → warn confirm
+        if (extracted?.errorCode === "timeout") {
+          const proxy = await tryProxyFileScan(file)
+          if (proxy) return { ...base, ...proxy }
+          return {
+            ...base,
+            status: "office_warn",
+            userHint:
+              "Analyse du document trop longue dans le navigateur. Réessayez un fichier plus léger, ou utilisez le proxy OpsGate pour les documents lourds."
+          }
+        }
+        if (extracted?.errorCode === "docx_extract_failed") {
+          const proxy = await tryProxyFileScan(file)
+          if (proxy) return { ...base, ...proxy }
+          const nameHits = detectSensitiveData(
+            `${file.name} ${file.name.replace(/[_\-.]+/g, " ")}`,
+            rules
+          )
+          return {
+            ...base,
+            status: "office_warn",
+            detections: nameHits,
+            userHint:
+              "DOCX non lisible (structure ZIP/XML inhabituelle). Réenregistrez le fichier en « Word (.docx) » depuis Word/LibreOffice, ou activez le proxy OpsGate."
+          }
+        }
+        if (extracted?.errorCode === "pdf_no_text") {
+          return {
+            ...base,
+            status: "office_warn",
+            userHint:
+              "PDF sans texte extractible (scanné/image). Convertissez en DOCX texte, ou utilisez le proxy OpsGate avec OCR si policy."
+          }
+        }
+        if (extracted?.text?.trim()) {
+          const detections = detectSensitiveData(extracted.text, rules)
+          console.log(
+            "[OpsGate] office scan OK",
+            file.name,
+            `chars=${extracted.text.length}`,
+            `detections=${detections.length}`,
+            extracted.errorCode || ""
+          )
+          return {
+            ...base,
+            status: extracted.truncated || extracted.errorCode === "docx_partial_raw"
+              ? "too_large_partial"
+              : "scanned",
+            text: extracted.text,
+            detections,
+            truncated:
+              extracted.truncated || extracted.errorCode === "docx_partial_raw",
+            userHint:
+              extracted.errorCode === "docx_partial_raw"
+                ? "DOCX lu en mode partiel (texte extrait des XML). Le contenu principal a été scanné."
+                : extracted.truncated
+                  ? `Document ${ext.toUpperCase()} partiellement scanné (limite taille / pages extension).`
+                  : undefined
+          }
+        }
+        // PDF/DOCX sans texte : ne jamais laisser passer en silence
+        console.warn(
+          "[OpsGate] office scan empty",
+          file.name,
+          extracted?.errorCode || "no_text"
+        )
         return {
           ...base,
           status: "office_warn",
           userHint: extracted
-            ? `Document ${ext.toUpperCase()} sans texte extractible (scanne / image). Confirmez l’envoi - log enregistré.`
-            : `Extraction ${ext.toUpperCase()} impossible. Confirmez l’envoi - log enregistré.`
+            ? ext === "pdf"
+              ? "PDF sans texte extractible (probablement scanné/image). Convertissez en DOCX texte ou activez l’OCR proxy."
+              : `Document ${ext.toUpperCase()} sans texte extractible. Vérifiez qu’il contient du texte sélectionnable.`
+            : `Extraction ${ext.toUpperCase()} impossible. Formats supportés : PDF texte ≤30 p., DOCX, PPTX, XLSX.`
         }
-      } catch {
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e)
+        console.warn("[OpsGate] office scan error", file.name, msg)
+        // Plasmo chunk manquant (ne devrait plus arriver avec import statique)
+        if (/Cannot find module|gTf5N|Loading chunk/i.test(msg)) {
+          return {
+            ...base,
+            status: "office_warn",
+            userHint:
+              "Module d’analyse Office indisponible (rebuild extension requis : pnpm build:chrome). En attendant, le proxy OpsGate peut scanner le fichier."
+          }
+        }
+        if (ext === "docx") {
+          const proxy = await tryProxyFileScan(file)
+          if (proxy) return { ...base, ...proxy }
+          return {
+            ...base,
+            status: "office_warn",
+            userHint: `Échec lecture DOCX (${msg.slice(0, 80)}). Réenregistrez le fichier en .docx standard, ou lancez le proxy OpsGate.`
+          }
+        }
+        if (ext === "xlsx" || ext === "xlsm" || ext === "pptx") {
+          const proxy = await tryProxyFileScan(file)
+          if (proxy) return { ...base, ...proxy }
+          return {
+            ...base,
+            status: "office_warn",
+            userHint: `Échec lecture ${ext.toUpperCase()} (${msg.slice(0, 60)}). Réessayez après rebuild extension, ou activez le proxy.`
+          }
+        }
         return {
           ...base,
           status: "office_warn",
-          userHint: `Extraction ${ext.toUpperCase()} en échec. Confirmez l’envoi - log enregistré.`
+          userHint: `Extraction ${ext.toUpperCase()} en échec (${msg.slice(0, 60)}). Formats supportés : PDF texte, DOCX, PPTX, XLSX.`
         }
       }
     }
@@ -456,7 +552,7 @@ export async function scanFile(
       ...base,
       status: "office_warn",
       userHint:
-        "Format Office legacy (doc/xls/ppt) non supporté - utilisez DOCX / XLSX / PPTX. Confirmez l’envoi - log avec type et nom enregistré."
+        "Format Office legacy (.doc / .xls / .ppt) non supporté. Enregistrez en DOCX, XLSX ou PPTX puis renvoyez."
     }
   }
 
@@ -517,6 +613,88 @@ export async function scanFile(
   }
 }
 
+/**
+ * Scan lourd via proxy local (contrat Recommandations.md).
+ * POST http://127.0.0.1:8888/opsgate-proxy/scan-file
+ * Body: { filename, mime, content_base64 }
+ * Response: { status, text, truncated, error?, detections? }
+ */
+async function tryProxyFileScan(
+  file: File
+): Promise<Partial<FileScanResult> | null> {
+  const bases = [
+    "http://127.0.0.1:8888",
+    "http://127.0.0.1:8899",
+    (typeof localStorage !== "undefined" &&
+      localStorage.getItem("opsgate_proxy_scan_url")) ||
+      ""
+  ].filter(Boolean) as string[]
+
+  let b64: string
+  try {
+    const buf = await file.arrayBuffer()
+    const bytes = new Uint8Array(buf)
+    let binary = ""
+    const chunk = 0x8000
+    for (let i = 0; i < bytes.length; i += chunk) {
+      binary += String.fromCharCode(...bytes.subarray(i, i + chunk))
+    }
+    b64 = btoa(binary)
+  } catch {
+    return null
+  }
+
+  for (const base of bases) {
+    try {
+      const ctrl = new AbortController()
+      const t = setTimeout(() => ctrl.abort(), 12_000)
+      const res = await fetch(`${base.replace(/\/$/, "")}/opsgate-proxy/scan-file`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          filename: file.name,
+          mime: file.type || "application/octet-stream",
+          content_base64: b64
+        }),
+        signal: ctrl.signal
+      })
+      clearTimeout(t)
+      if (!res.ok) continue
+      const j = (await res.json()) as {
+        status?: string
+        text?: string
+        truncated?: boolean
+        error?: string
+        detections?: Detection[]
+      }
+      if (j.status === "failed" || j.status === "timeout") {
+        return {
+          status: "office_warn",
+          userHint:
+            j.error ||
+            `Proxy scan ${j.status}. Vérifiez que le proxy OpsGate est démarré (pnpm proxy:dev).`
+        }
+      }
+      const text = (j.text || "").trim()
+      if (!text) continue
+      // Re-détection locale pour types Detection complets
+      const detections = detectSensitiveData(text)
+      return {
+        status: j.truncated || j.status === "partial" ? "too_large_partial" : "scanned",
+        text,
+        detections,
+        truncated: !!j.truncated || j.status === "partial",
+        userHint: j.truncated
+          ? "Scan proxy partiel (document volumineux)."
+          : "Scan effectué via le proxy OpsGate local."
+      }
+    } catch {
+      /* proxy absent */
+    }
+  }
+  return null
+}
+
 export async function scanFiles(
   files: FileList | File[],
   rules?: DetectionRule[] | null,
@@ -531,17 +709,77 @@ export async function scanFiles(
 }
 
 /**
- * Reconstruit un DataTransfer avec le contenu texte masqué pour les fichiers concernés.
+ * Nom de sortie sûr après mask/rewrite.
+ * IMPORTANT : ne jamais renvoyer du texte plat avec une extension .docx/.pdf —
+ * les SPA (ChatGPT…) tentent de parser le format d’origine → « parsing failed ».
+ */
+export function safeRewrittenFileName(
+  originalName: string,
+  kind: "secure" | "masked"
+): string {
+  const base = originalName.replace(/\.[^.]+$/, "") || originalName
+  return `${base}.opsgate-${kind}.txt`
+}
+
+/**
+ * Reconstruit un DataTransfer avec le contenu texte masqué / rewrite.
+ * @param previewRewrittenText texte édité dans le bandeau (prioritaire si 1 fichier sensible)
  */
 export function buildMaskedFileList(
   original: FileList | File[],
   scans: FileScanResult[],
   rules?: DetectionRule[] | null,
-  mode: "mask" | "secure_rewrite" = "mask"
+  mode: "mask" | "secure_rewrite" = "mask",
+  opts?: { previewRewrittenText?: string }
 ): DataTransfer {
   const dt = new DataTransfer()
   const files = Array.from(original)
   const byName = new Map(scans.map((s) => [s.fileName + ":" + s.fileSize, s]))
+  const kind = mode === "secure_rewrite" ? "secure" : "masked"
+  const sensitiveScans = scans.filter(
+    (s) =>
+      s.detections.length > 0 &&
+      (s.status === "scanned" || s.status === "too_large_partial") &&
+      s.text
+  )
+
+  // Preview bandeau (utilisateur a vu/édité le rewrite) — un seul fichier sensible
+  const preview = (opts?.previewRewrittenText || "").trim()
+  if (mode === "secure_rewrite" && preview && sensitiveScans.length === 1) {
+    const only = sensitiveScans[0]
+    let body = preview
+    // Retirer en-tête agrégé « --- filename --- »
+    const hdr = new RegExp(
+      `^---\\s*${escapeRegExp(only.fileName)}\\s*---\\s*\\n?`,
+      "i"
+    )
+    body = body.replace(hdr, "").trim()
+    // Si multi-sections encore présentes, prendre le corps après le premier header
+    if (body.includes("--- ") && body.includes(only.fileName)) {
+      const idx = body.indexOf(only.fileName)
+      if (idx >= 0) {
+        const after = body.slice(idx + only.fileName.length)
+        body = after.replace(/^[\s\-—]*\n?/, "").trim() || body
+      }
+    }
+    if (only.truncated) {
+      body +=
+        "\n\n/* [OpsGate] Fichier tronqué au scan - vérifiez le reste manuellement */\n"
+    }
+    const outName = safeRewrittenFileName(only.fileName, "secure")
+    dt.items.add(
+      new File([body], outName, {
+        type: "text/plain;charset=utf-8",
+        lastModified: Date.now()
+      })
+    )
+    // Autres fichiers non sensibles : originaux
+    for (const file of files) {
+      if (file.name === only.fileName && file.size === only.fileSize) continue
+      dt.items.add(file)
+    }
+    return dt
+  }
 
   for (const file of files) {
     const scan = byName.get(file.name + ":" + file.size)
@@ -562,9 +800,11 @@ export function buildMaskedFileList(
         ? masked +
           "\n\n/* [OpsGate] Fichier tronqué au scan - vérifiez le reste manuellement */\n"
         : masked
+      // Toujours .txt — le site ne peut pas parser un faux .docx/.pdf
+      const outName = safeRewrittenFileName(file.name, kind)
       dt.items.add(
-        new File([body], file.name, {
-          type: file.type || "text/plain",
+        new File([body], outName, {
+          type: "text/plain;charset=utf-8",
           lastModified: Date.now()
         })
       )
@@ -573,6 +813,10 @@ export function buildMaskedFileList(
     }
   }
   return dt
+}
+
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
 }
 
 export function mergeDetections(scans: FileScanResult[]): Detection[] {

@@ -33,6 +33,78 @@ export interface RewriteResult {
   }
 }
 
+/**
+ * HTML diff léger pour l’UI banner (Secure Rewrite).
+ * Supprimé/modifié → .og-diff-del · Ajouté → .og-diff-add
+ */
+export function highlightRewriteDiff(
+  original: string,
+  rewritten: string,
+  changes: RewriteChange[]
+): { originalHtml: string; rewrittenHtml: string } {
+  const esc = (s: string) =>
+    s
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+
+  // Plus longs d’abord pour éviter les sous-chaînes
+  const sorted = [...changes].sort(
+    (a, b) => b.original.length - a.original.length
+  )
+
+  let o = original
+  let r = rewritten
+  const oMarks: Array<{ start: number; end: number; kind: "del" }> = []
+  const rMarks: Array<{ start: number; end: number; kind: "add" }> = []
+
+  for (const c of sorted) {
+    if (c.original) {
+      const i = o.indexOf(c.original)
+      if (i >= 0) {
+        const overlap = oMarks.some(
+          (m) => !(i + c.original.length <= m.start || i >= m.end)
+        )
+        if (!overlap) oMarks.push({ start: i, end: i + c.original.length, kind: "del" })
+      }
+    }
+    if (c.replacement) {
+      const j = r.indexOf(c.replacement)
+      if (j >= 0) {
+        const overlap = rMarks.some(
+          (m) => !(j + c.replacement.length <= m.start || j >= m.end)
+        )
+        if (!overlap)
+          rMarks.push({ start: j, end: j + c.replacement.length, kind: "add" })
+      }
+    }
+  }
+
+  const paint = (
+    text: string,
+    marks: Array<{ start: number; end: number; kind: "del" | "add" }>
+  ) => {
+    marks.sort((a, b) => a.start - b.start)
+    let out = ""
+    let cursor = 0
+    for (const m of marks) {
+      if (m.start < cursor) continue
+      out += esc(text.slice(cursor, m.start))
+      const cls = m.kind === "del" ? "og-diff-del" : "og-diff-add"
+      out += `<span class="${cls}">${esc(text.slice(m.start, m.end))}</span>`
+      cursor = m.end
+    }
+    out += esc(text.slice(cursor))
+    return out
+  }
+
+  return {
+    originalHtml: paint(o, oMarks),
+    rewrittenHtml: paint(r, rMarks)
+  }
+}
+
 export interface SecureRewriteOptions {
   consistentMapping?: boolean
   aggressiveness?: 1 | 2 | 3

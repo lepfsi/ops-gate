@@ -153,9 +153,11 @@ python scripts/build-guide-pdf.py
 python scripts/build-security-report-pdf.py sample.json --out docs/reports/out.pdf
 ```
 
-- Charte : navy `#0A1128`, teal `#2BD9C5`  
+- **Source couverture (prochains PDF)** : `assets/brand/Template.png`  
+- Charte : teal profond couverture + accent `#2BD9C5`, navy `#0A1128` (footer / pages) — `scripts/pdf_brand.py`  
 - Logo : **BrandMark** porte/bouclier = même composant que login MMC (`BrandMark.tsx` / `pdf_brand.py`)  
-- Police : Arial système (accents FR)
+- Police : Arial système (accents FR)  
+- **Ne pas regénérer en masse** les `docs/*.pdf` déjà livrés : le template s’applique aux prochains builds uniquement
 
 ---
 

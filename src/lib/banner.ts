@@ -2,10 +2,12 @@ import {
   buildSimulation,
   calculatePromptRiskScore,
   DEFAULT_SIMULATION_THRESHOLD,
+  highlightRewriteDiff,
   riskScoreBar,
   secureRewrite,
   type Detection,
   type PromptRiskScore,
+  type RewriteChange,
   type SimulationResult
 } from "@opsgate/engine"
 
@@ -798,6 +800,7 @@ const SHADOW_CSS = `
   }
   .rewrite-col-label.secure { color: #0f766e; background: #ecfdf5; }
   .rewrite-col pre,
+  .rewrite-col .rewrite-diff,
   .rewrite-col textarea {
     flex: 1;
     margin: 0;
@@ -823,6 +826,20 @@ const SHADOW_CSS = `
     outline: 2px solid #2bd9c5;
     outline-offset: -2px;
   }
+  .og-diff-del {
+    background: #fee2e2;
+    color: #991b1b;
+    text-decoration: line-through;
+    border-radius: 2px;
+    padding: 0 1px;
+  }
+  .og-diff-add {
+    background: #d1fae5;
+    color: #065f46;
+    border-radius: 2px;
+    padding: 0 1px;
+    font-weight: 600;
+  }
   .rewrite-changes {
     flex-shrink: 0;
     padding: 8px 14px;
@@ -838,6 +855,58 @@ const SHADOW_CSS = `
   .rewrite-changes ul {
     margin: 4px 0 0;
     padding-left: 18px;
+  }
+  .rewrite-adjust {
+    display: none;
+    flex-shrink: 0;
+    padding: 8px 14px;
+    max-height: min(28vh, 200px);
+    overflow-y: auto;
+    background: #f8fafc;
+    border-bottom: 1px solid #e2e8f0;
+    font-size: 11px;
+  }
+  .rewrite-adjust.open { display: block; }
+  .rewrite-adjust-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
+    padding: 6px 0;
+    border-bottom: 1px solid #e2e8f0;
+  }
+  .rewrite-adjust-row:last-child { border-bottom: none; }
+  .rewrite-adjust input {
+    flex: 1;
+    min-width: 120px;
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+    font-size: 11px;
+    padding: 4px 6px;
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+  }
+  .sim-why {
+    display: none;
+    margin-top: 8px;
+    padding: 8px 10px;
+    border-radius: 8px;
+    background: #f0fdfa;
+    border: 1px solid #99f6e4;
+    font-size: 12px;
+    color: #134e4a;
+    line-height: 1.4;
+  }
+  .sim-why.open { display: block; }
+  .btn-why {
+    background: transparent !important;
+    border: none !important;
+    color: #0f766e !important;
+    font-size: 11px !important;
+    font-weight: 650 !important;
+    cursor: pointer;
+    padding: 2px 0 !important;
+    text-decoration: underline;
+    text-underline-offset: 2px;
   }
   .rewrite-actions {
     flex-shrink: 0;
@@ -1213,6 +1282,8 @@ export function showAlertBanner(
       </div>
       <div class="sim-list" id="og-sim-list"></div>
       <div class="sim-rec" id="og-sim-rec"></div>
+      <button type="button" class="btn-why" data-action="toggle_why" id="og-sim-why-btn">${escapeHtml(tAgent(lang, "banner.whyScore"))}</button>
+      <div class="sim-why" id="og-sim-why"></div>
       <div class="sim-actions">
         <button type="button" class="btn-cta" data-action="open_rewrite">${escapeHtml(tAgent(lang, "banner.rewrite"))}</button>
         ${
@@ -1236,18 +1307,21 @@ export function showAlertBanner(
       <div class="rewrite-body">
         <div class="rewrite-columns">
           <div class="rewrite-col">
-            <div class="rewrite-col-label">Original</div>
-            <pre id="og-rewrite-original"></pre>
+            <div class="rewrite-col-label">${escapeHtml(tAgent(lang, "banner.original"))}</div>
+            <div class="rewrite-diff" id="og-rewrite-original"></div>
           </div>
           <div class="rewrite-col">
-            <div class="rewrite-col-label secure">Sécurisé</div>
-            <textarea id="og-rewrite-secure" spellcheck="false"></textarea>
+            <div class="rewrite-col-label secure">${escapeHtml(tAgent(lang, "banner.secure"))}</div>
+            <div class="rewrite-diff" id="og-rewrite-secure-view"></div>
+            <textarea id="og-rewrite-secure" spellcheck="false" hidden></textarea>
           </div>
         </div>
         <div class="rewrite-changes" id="og-rewrite-changes"></div>
+        <div class="rewrite-adjust" id="og-rewrite-adjust"></div>
       </div>
       <div class="rewrite-actions">
         <button type="button" class="btn-quiet" data-action="close_rewrite">${escapeHtml(tAgent(lang, "banner.close"))}</button>
+        <button type="button" class="btn-soft" data-action="toggle_adjust">${escapeHtml(tAgent(lang, "banner.adjust"))}</button>
         <button type="button" class="btn-soft" data-action="focus_edit">${escapeHtml(tAgent(lang, "banner.edit"))}</button>
         <span class="spacer" aria-hidden="true"></span>
         <button type="button" class="btn-cta" data-action="apply_rewrite">${escapeHtml(tAgent(lang, "banner.applySend"))}</button>
@@ -1308,12 +1382,22 @@ export function showAlertBanner(
   const rewriteSecure = root.querySelector(
     "#og-rewrite-secure"
   ) as HTMLTextAreaElement | null
+  const rewriteSecureView = root.querySelector(
+    "#og-rewrite-secure-view"
+  ) as HTMLElement | null
   const rewriteScores = root.querySelector(
     "#og-rewrite-scores"
   ) as HTMLElement | null
   const rewriteChanges = root.querySelector(
     "#og-rewrite-changes"
   ) as HTMLElement | null
+  const rewriteAdjust = root.querySelector(
+    "#og-rewrite-adjust"
+  ) as HTMLElement | null
+  let lastRewriteChanges: RewriteChange[] = []
+  let lastRewriteSource = ""
+  let adjustOpen = false
+  let editMode = false
 
   const setContactStatus = (text: string, kind: "ok" | "err" | null) => {
     if (!contactStatus) return
@@ -1427,6 +1511,25 @@ export function showAlertBanner(
     if (recEl) {
       recEl.textContent = sim.recommendation
     }
+    // Explication discrète du score (dépliable)
+    const whyEl = root.querySelector("#og-sim-why") as HTMLElement | null
+    if (whyEl) {
+      const factors = (sim.riskScore.factors || [])
+        .slice(0, 4)
+        .map((f) => `${f.count}× ${f.label}`)
+      const summary =
+        factors.length > 0
+          ? tAgent(lang, "banner.whyScoreBody", {
+              detail: factors.join(" · "),
+              score: sim.riskScore.score,
+              level: sim.riskScore.level
+            })
+          : tAgent(lang, "banner.whyScoreEmpty", {
+              score: sim.riskScore.score
+            })
+      whyEl.textContent = summary
+      whyEl.classList.remove("open")
+    }
     simOpen = true
     rewriteOpen = false
     contactOpen = false
@@ -1439,10 +1542,64 @@ export function showAlertBanner(
     root.classList.remove("sim-mode")
   }
 
+  const paintRewriteDiff = (source: string, rewritten: string, changes: RewriteChange[]) => {
+    const diff = highlightRewriteDiff(source, rewritten, changes)
+    if (rewriteOriginal) rewriteOriginal.innerHTML = diff.originalHtml
+    if (rewriteSecureView) {
+      rewriteSecureView.innerHTML = diff.rewrittenHtml
+      rewriteSecureView.hidden = false
+    }
+    if (rewriteSecure) {
+      rewriteSecure.value = rewritten
+      rewriteSecure.hidden = true
+    }
+    editMode = false
+  }
+
+  const renderAdjustPanel = (changes: RewriteChange[]) => {
+    if (!rewriteAdjust) return
+    if (!changes.length) {
+      rewriteAdjust.innerHTML = `<p class="sub">${escapeHtml(tAgent(lang, "banner.adjustEmpty"))}</p>`
+      return
+    }
+    rewriteAdjust.innerHTML = changes
+      .slice(0, 20)
+      .map((c, i) => {
+        const o =
+          c.original.length > 40 ? c.original.slice(0, 40) + "…" : c.original
+        return `<div class="rewrite-adjust-row" data-idx="${i}">
+          <span class="mono" title="${escapeHtml(c.original)}">${escapeHtml(c.category)}: ${escapeHtml(o)}</span>
+          <input type="text" data-adj-input="${i}" value="${escapeHtml(c.replacement)}" />
+          <button type="button" class="btn-quiet btn-sm" data-action="restore_one" data-idx="${i}">${escapeHtml(tAgent(lang, "banner.restore"))}</button>
+        </div>`
+      })
+      .join("")
+  }
+
+  const applyAdjustmentsToText = (): string => {
+    let text = lastRewriteMeta?.rewrittenText || rewriteSecure?.value || ""
+    if (!rewriteAdjust) return text
+    const inputs = rewriteAdjust.querySelectorAll<HTMLInputElement>(
+      "input[data-adj-input]"
+    )
+    inputs.forEach((inp) => {
+      const idx = Number(inp.getAttribute("data-adj-input"))
+      const ch = lastRewriteChanges[idx]
+      if (!ch) return
+      const next = inp.value
+      if (next === ch.replacement) return
+      // remplace la 1re occurrence du placeholder actuel
+      if (ch.replacement && text.includes(ch.replacement)) {
+        text = text.replace(ch.replacement, next)
+      }
+      ch.replacement = next
+    })
+    return text
+  }
+
   const openRewritePreview = () => {
     const sourceText = (options.sourceText || "").trim()
     if (!sourceText) {
-      // Fallback : appliquer sans preview (fichiers sans texte agrégé)
       decide("secure_rewrite")
       return
     }
@@ -1456,11 +1613,9 @@ export function showAlertBanner(
       remainingRiskScore: result.remainingRiskScore,
       replacementsCount: result.stats.totalReplacements
     }
-    if (rewriteOriginal) rewriteOriginal.textContent = sourceText
-    if (rewriteSecure) {
-      rewriteSecure.value = result.rewrittenText
-      rewriteSecure.readOnly = false
-    }
+    lastRewriteChanges = result.changes.map((c) => ({ ...c }))
+    lastRewriteSource = sourceText
+    paintRewriteDiff(sourceText, result.rewrittenText, lastRewriteChanges)
     if (rewriteScores) {
       rewriteScores.innerHTML = `
         <span class="score-chip ${riskChipClass(result.originalRiskScore)}">${escapeHtml(tAgent(lang, "banner.originalRisk", { n: result.originalRiskScore }))}</span>
@@ -1476,34 +1631,44 @@ export function showAlertBanner(
           c.replacement.length > 48
             ? c.replacement.slice(0, 48) + "…"
             : c.replacement
-        return `<li><strong>${escapeHtml(c.category)}</strong> : <code>${escapeHtml(o)}</code> → <code>${escapeHtml(n)}</code></li>`
+        return `<li><strong>${escapeHtml(c.category)}</strong> : <code class="og-diff-del">${escapeHtml(o)}</code> → <code class="og-diff-add">${escapeHtml(n)}</code></li>`
       })
       const more =
         result.changes.length > 12
-          ? `<li>… et ${result.changes.length - 12} de plus</li>`
+          ? `<li>… +${result.changes.length - 12}</li>`
           : ""
       rewriteChanges.innerHTML = lines.length
-        ? `<strong>Modifications</strong><ul>${lines.join("")}${more}</ul>`
-        : `<strong>Modifications</strong><p class="sub" style="margin:4px 0 0">Aucun remplacement listé (heuristiques éventuelles déjà appliquées).</p>`
+        ? `<strong>${escapeHtml(tAgent(lang, "banner.changes"))}</strong><ul>${lines.join("")}${more}</ul>`
+        : `<strong>${escapeHtml(tAgent(lang, "banner.changes"))}</strong><p class="sub" style="margin:4px 0 0">${escapeHtml(tAgent(lang, "banner.changesNone"))}</p>`
     }
+    renderAdjustPanel(lastRewriteChanges)
+    adjustOpen = false
+    rewriteAdjust?.classList.remove("open")
     rewriteOpen = true
     simOpen = false
     contactOpen = false
     root.classList.remove("contact-mode", "sim-mode")
     root.classList.add("rewrite-mode")
-    rewriteSecure?.focus()
   }
 
   const closeRewritePreview = () => {
     rewriteOpen = false
+    adjustOpen = false
+    editMode = false
+    rewriteAdjust?.classList.remove("open")
     root.classList.remove("rewrite-mode")
   }
 
   const applyRewriteFromPreview = () => {
-    const edited = (rewriteSecure?.value ?? lastRewriteMeta.rewrittenText ?? "")
-      .trim()
+    let edited = ""
+    if (editMode && rewriteSecure) {
+      edited = rewriteSecure.value.trim()
+    } else if (adjustOpen) {
+      edited = applyAdjustmentsToText().trim()
+    } else {
+      edited = (rewriteSecure?.value ?? lastRewriteMeta?.rewrittenText ?? "").trim()
+    }
     if (!edited) {
-      // Rien à envoyer - revenir
       closeRewritePreview()
       return
     }
@@ -1669,9 +1834,41 @@ export function showAlertBanner(
         closeRewritePreview()
         return
       }
+      if (act === "toggle_why") {
+        const whyEl = root.querySelector("#og-sim-why") as HTMLElement | null
+        whyEl?.classList.toggle("open")
+        return
+      }
+      if (act === "toggle_adjust") {
+        adjustOpen = !adjustOpen
+        rewriteAdjust?.classList.toggle("open", adjustOpen)
+        if (adjustOpen) renderAdjustPanel(lastRewriteChanges)
+        return
+      }
+      if (act === "restore_one") {
+        const idx = Number(target.getAttribute("data-idx"))
+        const ch = lastRewriteChanges[idx]
+        if (!ch || !lastRewriteMeta) return
+        // Restaurer l’original dans le texte sécurisé
+        let text = rewriteSecure?.value || lastRewriteMeta.rewrittenText || ""
+        if (ch.replacement && text.includes(ch.replacement)) {
+          text = text.replace(ch.replacement, ch.original)
+        }
+        ch.replacement = ch.original
+        lastRewriteMeta.rewrittenText = text
+        if (rewriteSecure) rewriteSecure.value = text
+        paintRewriteDiff(lastRewriteSource, text, lastRewriteChanges)
+        renderAdjustPanel(lastRewriteChanges)
+        return
+      }
       if (act === "focus_edit") {
-        rewriteSecure?.focus()
-        rewriteSecure?.select()
+        editMode = true
+        if (rewriteSecureView) rewriteSecureView.hidden = true
+        if (rewriteSecure) {
+          rewriteSecure.hidden = false
+          rewriteSecure.focus()
+          rewriteSecure.select()
+        }
         return
       }
       if (act === "apply_rewrite") {

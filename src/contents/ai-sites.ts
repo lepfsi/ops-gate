@@ -892,27 +892,41 @@ function handlePotentialSend(event: Event, sourceEl?: Element | null): void {
 
 // ---------- Uploads de fichiers ----------
 
+/** Collecte récursive des input[type=file] (light DOM + open shadow roots) */
+function collectFileInputs(root: Document | ShadowRoot | Element): HTMLInputElement[] {
+  const out: HTMLInputElement[] = []
+  const walk = (node: Document | ShadowRoot | Element) => {
+    const list =
+      "querySelectorAll" in node
+        ? node.querySelectorAll<HTMLInputElement>('input[type="file"]')
+        : []
+    list.forEach((el) => out.push(el))
+    const all =
+      "querySelectorAll" in node ? node.querySelectorAll<HTMLElement>("*") : []
+    all.forEach((el) => {
+      if (el.shadowRoot) walk(el.shadowRoot)
+    })
+  }
+  walk(root)
+  return out
+}
+
 /** Inputs file encore présents dans le DOM (les SPA recyclent souvent les nœuds) */
 function findLiveFileInputs(preferred?: HTMLInputElement | null): HTMLInputElement[] {
-  const all = Array.from(
-    document.querySelectorAll<HTMLInputElement>('input[type="file"]')
-  )
-  if (preferred && all.includes(preferred)) {
-    return [preferred, ...all.filter((i) => i !== preferred)]
+  const all = collectFileInputs(document)
+  // Dédupliquer
+  const uniq = Array.from(new Set(all)).filter((i) => i.isConnected)
+  if (preferred?.isConnected) {
+    return [preferred, ...uniq.filter((i) => i !== preferred)]
   }
-  if (preferred && preferred.isConnected) {
-    return [preferred, ...all.filter((i) => i !== preferred)]
-  }
-  return all
+  return uniq
 }
 
 function clearFileInput(input: HTMLInputElement) {
   try {
     bypassFileOnce = true
     input.value = ""
-    // Certains frameworks n'écoutent que InputEvent
-    input.dispatchEvent(new Event("input", { bubbles: true }))
-    input.dispatchEvent(new Event("change", { bubbles: true }))
+    // Ne PAS forcément dispatcher change ici — certains SPA vident le composer
   } catch {
     // ignore
   }
@@ -925,78 +939,200 @@ function clearAllFileInputs(preferred?: HTMLInputElement | null) {
 }
 
 /**
- * Injecte des fichiers dans UN input (React/SPA) :
- * clear global d'abord (évite doublon original + masqué), puis assign.
+ * Injecte des fichiers dans UN input (React/SPA).
+ * Ne pas clear+dispatch change avant assign (casse ChatGPT/Claude).
  */
 function injectFilesIntoInput(input: HTMLInputElement, files: File[]): boolean {
+  if (!files.length) return false
   try {
     const dt = new DataTransfer()
-    for (const f of files) dt.items.add(f)
-
-    bypassFileOnce = true
-    try {
-      input.value = ""
-    } catch {
-      // ignore
+    for (const f of files) {
+      // Re-wrap File (certains SPA rejettent des File « gelés » hors d’un picker)
+      try {
+        dt.items.add(
+          new File([f], f.name, {
+            type: f.type || "application/octet-stream",
+            lastModified: f.lastModified || Date.now()
+          })
+        )
+      } catch {
+        dt.items.add(f)
+      }
     }
 
     bypassFileOnce = true
+    let assigned = false
     try {
       input.files = dt.files
+      assigned = !!(input.files && input.files.length > 0)
     } catch {
+      assigned = false
+    }
+    if (!assigned) {
       try {
         Object.defineProperty(input, "files", {
           configurable: true,
-          value: dt.files
+          get: () => dt.files
         })
+        assigned = true
       } catch {
         return false
       }
     }
 
-    if (!input.files || input.files.length === 0) {
-      return false
+    // Débloquer l’acceptation SPA
+    try {
+      input.dispatchEvent(
+        new Event("focus", { bubbles: true, composed: true })
+      )
+    } catch {
+      /* ignore */
     }
-
     bypassFileOnce = true
     input.dispatchEvent(
-      new InputEvent("input", { bubbles: true, composed: true, inputType: "insertFromPaste" })
+      new InputEvent("input", {
+        bubbles: true,
+        composed: true,
+        inputType: "insertFromPaste"
+      })
     )
     bypassFileOnce = true
     input.dispatchEvent(new Event("change", { bubbles: true, composed: true }))
 
-    return input.files.length > 0
+    const n = input.files?.length ?? 0
+    return n > 0 || assigned
   } catch (err) {
     console.warn("[OpsGate] injectFilesIntoInput failed:", err)
     return false
   }
 }
 
+/** Fallback : simuler un drop de fichiers sur le composer */
+function tryDropFilesOnComposer(files: File[]): boolean {
+  try {
+    const dt = new DataTransfer()
+    for (const f of files) {
+      try {
+        dt.items.add(
+          new File([f], f.name, {
+            type: f.type || "application/octet-stream",
+            lastModified: f.lastModified || Date.now()
+          })
+        )
+      } catch {
+        dt.items.add(f)
+      }
+    }
+    const targets: EventTarget[] = []
+    const composers = findComposerElements()
+    for (const c of composers.slice(0, 3)) {
+      targets.push(c)
+      if (c.parentElement) targets.push(c.parentElement)
+      const form = c.closest("form")
+      if (form) targets.push(form)
+    }
+    const main =
+      document.querySelector("main") ||
+      document.querySelector('[class*="composer" i]') ||
+      document.body
+    if (main) targets.push(main)
+
+    for (const t of targets) {
+      try {
+        bypassFileOnce = true
+        t.dispatchEvent(
+          new DragEvent("dragenter", {
+            bubbles: true,
+            cancelable: true,
+            dataTransfer: dt
+          })
+        )
+        bypassFileOnce = true
+        t.dispatchEvent(
+          new DragEvent("dragover", {
+            bubbles: true,
+            cancelable: true,
+            dataTransfer: dt
+          })
+        )
+        bypassFileOnce = true
+        const dropped = t.dispatchEvent(
+          new DragEvent("drop", {
+            bubbles: true,
+            cancelable: true,
+            dataTransfer: dt
+          })
+        )
+        if (dropped || true) {
+          // drop a été livré — considérer comme tentative OK si un input a reçu
+          const after = findLiveFileInputs()
+          for (const inp of after) {
+            if (inp.files && inp.files.length > 0) return true
+          }
+        }
+      } catch {
+        /* next target */
+      }
+    }
+    return false
+  } catch (e) {
+    console.warn("[OpsGate] tryDropFilesOnComposer failed", e)
+    return false
+  }
+}
+
 /**
- * Remplace complètement les pièces jointes :
- * 1) vide tous les inputs (supprime l'original non contrôlé)
- * 2) injecte UNE seule fois la liste voulue
+ * Remplace / (re)joint les pièces après scan.
+ * Stratégie multi-tentatives pour SPA (ChatGPT, Claude, Gemini…).
  */
 function replaceAttachments(
   files: File[],
   preferred?: HTMLInputElement | null
 ): boolean {
-  // Toujours purger d'abord pour éviter original + version contrôlée
-  clearAllFileInputs(preferred)
+  if (!files.length) return false
 
+  // 1) Injecter d’abord sur l’input d’origine (sans purge globale)
+  if (preferred?.isConnected) {
+    if (injectFilesIntoInput(preferred, files)) {
+      console.log(
+        "[OpsGate] Pièce jointe sur input d’origine:",
+        files.map((f) => f.name).join(", ")
+      )
+      return true
+    }
+  }
+
+  // 2) Autres inputs live
   const inputs = findLiveFileInputs(preferred)
-  if (inputs.length === 0) {
-    console.warn("[OpsGate] Aucun input[type=file] pour injecter")
-    return false
+  for (const target of inputs) {
+    if (injectFilesIntoInput(target, files)) {
+      console.log(
+        "[OpsGate] Pièce jointe injectée:",
+        files.map((f) => f.name).join(", ")
+      )
+      return true
+    }
   }
 
-  // Un seul input - sinon risque de multi-joindre le même fichier
-  const target = inputs[0]
-  const ok = injectFilesIntoInput(target, files)
-  if (ok) {
-    console.log("[OpsGate] Pièce jointe remplacée:", files.map((f) => f.name).join(", "))
+  // 3) Drop sur composer
+  if (tryDropFilesOnComposer(files)) {
+    console.log(
+      "[OpsGate] Pièce jointe via drop composer:",
+      files.map((f) => f.name).join(", ")
+    )
+    return true
   }
-  return ok
+
+  // 4) Dernier essai : clear soft + re-inject
+  if (preferred?.isConnected) {
+    clearFileInput(preferred)
+    if (injectFilesIntoInput(preferred, files)) return true
+  }
+
+  console.warn(
+    "[OpsGate] Aucun input[type=file] acceptant l’injection — l’utilisateur peut re-sélectionner le fichier (déjà scanné côté OpsGate)."
+  )
+  return false
 }
 
 function filesFromDataTransfer(dt: DataTransfer): File[] {
@@ -1056,16 +1192,22 @@ async function processQuarantinedFiles(
 
     // Rien de sensible et pas de warning media/office → livrer
     if (!needsConfirm) {
+      // Micro-délai : laisse le SPA recréer l’input file après preventDefault
+      await new Promise((r) => setTimeout(r, 40))
       const ok = replaceAttachments(frozen, input)
       if (!ok) {
+        // Scan OK mais SPA refuse l’injection — ne pas bloquer l’utilisateur
         showToast(
-          "Impossible de joindre le fichier automatiquement après scan.",
-          { tone: "warning", title: "Jointure échouée", durationMs: 5000 }
+          "Fichier scanné (aucune donnée sensible). Si la pièce n’apparaît pas, re-sélectionnez-la une fois — le prochain envoi sera protégé.",
+          {
+            tone: "info",
+            title: "Scan OK — jointure SPA",
+            durationMs: 7000
+          }
         )
-      } else if (warnOnly.length > 0) {
-        showToast(
-          `${warnOnly.length} fichier(s) non analysable(s) en profondeur.`,
-          { tone: "warning", title: "Scan partiel", durationMs: 5000 }
+        console.warn(
+          "[OpsGate] Scan clean OK mais injection SPA échouée",
+          fileNames
         )
       }
       filePending = false
@@ -1139,40 +1281,45 @@ async function processQuarantinedFiles(
               (decision === "mask_send" || decision === "secure_rewrite") &&
               detections.length > 0
             ) {
-              // Secure Rewrite fichiers : pipeline mask/rewrite
-              void meta
+              // Secure Rewrite / mask : sortie toujours en .txt (pas de faux .docx/.pdf)
               const dt = buildMaskedFileList(
                 frozen,
                 scans as FileScanResult[],
                 rules,
-                decision === "secure_rewrite" ? "secure_rewrite" : "mask"
+                decision === "secure_rewrite" ? "secure_rewrite" : "mask",
+                {
+                  previewRewrittenText:
+                    decision === "secure_rewrite"
+                      ? meta?.rewrittenText
+                      : undefined
+                }
               )
-              const suffix =
-                decision === "secure_rewrite"
-                  ? ".opsgate-secure"
-                  : ".opsgate-masked"
-              const maskedFiles = filesFromDataTransfer(dt).map((f) => {
-                const dot = f.name.lastIndexOf(".")
-                const base = dot > 0 ? f.name.slice(0, dot) : f.name
-                const extn = dot > 0 ? f.name.slice(dot) : ""
-                return new File([f], `${base}${suffix}${extn}`, {
-                  type: f.type || "text/plain",
-                  lastModified: Date.now()
-                })
-              })
+              // buildMaskedFileList produit déjà des noms .opsgate-secure.txt
+              const maskedFiles = filesFromDataTransfer(dt)
+              await new Promise((r) => setTimeout(r, 50))
               const ok = replaceAttachments(maskedFiles, input)
               await logDecision(decision, detections, true, "file", fileNames)
               if (ok) {
                 toastFromDecision(decision, fileMsgs)
+                showToast(
+                  decision === "secure_rewrite"
+                    ? "Fichier sécurisé joint en .txt (contenu anonymisé). Envoyez le message."
+                    : "Fichier masqué joint en .txt. Envoyez le message.",
+                  {
+                    tone: "success",
+                    title: "Pièce jointe prête",
+                    durationMs: 5000
+                  }
+                )
               } else {
                 clearAllFileInputs(input)
                 downloadMaskedFallback(maskedFiles)
                 showToast(
-                  "Réinjection refusée par la page. Un fichier sécurisé a été téléchargé - joignez-le manuellement.",
+                  "La page a refusé la réinjection. Un fichier .txt sécurisé a été téléchargé — joignez-le manuellement puis envoyez.",
                   {
                     tone: "warning",
                     title: "Action manuelle requise",
-                    durationMs: 7000
+                    durationMs: 8000
                   }
                 )
               }

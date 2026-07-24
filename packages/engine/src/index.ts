@@ -17,6 +17,7 @@ export { maskSensitiveData } from "./masker"
 export {
   secureRewrite,
   estimateRiskScore,
+  highlightRewriteDiff,
   type RewriteStrategy,
   type RewriteChange,
   type RewriteResult,

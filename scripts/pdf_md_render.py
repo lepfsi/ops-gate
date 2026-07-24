@@ -17,6 +17,8 @@ from fpdf import FPDF
 from fpdf.enums import XPos, YPos
 
 from pdf_brand import (
+    COVER_BG,
+    COVER_BG_DEEP,
     GRAY,
     INK,
     MUTED,
@@ -554,33 +556,48 @@ def draw_cover(
     lang: str = "",
     extra_lines: list[str] | None = None,
 ) -> None:
-    """Couverture pleine page navy + BrandMark."""
+    """
+    Couverture style assets/brand/Template.png (prochains PDF uniquement).
+
+    Layout :
+      - barre accent TEAL haut / bas
+      - fond teal profond (COVER_BG → COVER_BG_DEEP)
+      - BrandMark centré + OpsGate / DailyOps.Tech
+      - titre doc + sous-titre
+      - bandeau footer navy avec mini-mark + titre (comme Template.png)
+    """
     from pdf_brand import draw_brand_mark
 
-    pdf.set_fill_color(*NAVY)
-    pdf.rect(0, 0, pdf.w, pdf.h, "F")
+    # Fond couverture (teal profond — Template.png, pas navy pur)
+    pdf.set_fill_color(*COVER_BG)
+    pdf.rect(0, 0, pdf.w, pdf.h * 0.62, "F")
+    pdf.set_fill_color(*COVER_BG_DEEP)
+    pdf.rect(0, pdf.h * 0.55, pdf.w, pdf.h * 0.45, "F")
+
+    # Barres accent Template (haut + bas) — pas de footer type page intérieure
+    bar_h = 6.5
     pdf.set_fill_color(*TEAL)
-    pdf.rect(0, 0, pdf.w, 7, "F")
-    pdf.rect(0, pdf.h - 9, pdf.w, 9, "F")
+    pdf.rect(0, 0, pdf.w, bar_h, "F")
+    pdf.rect(0, pdf.h - bar_h, pdf.w, bar_h, "F")
 
     mark = 52
     mx = (pdf.w - mark) / 2
-    my = 48
+    my = 42
     draw_brand_mark(pdf, mx, my, mark)
 
-    pdf.set_y(my + mark + 14)
+    pdf.set_y(my + mark + 12)
     pdf.set_font(font_name(), "B", 28)
     pdf.set_text_color(*WHITE)
     pdf.cell(0, 12, "OpsGate", align="C", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-    pdf.ln(2)
+    pdf.ln(1)
     pdf.set_font(font_name(), "", 12)
     pdf.set_text_color(*TEAL)
     pdf.cell(0, 7, "DailyOps.Tech", align="C", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-    pdf.ln(10)
+    pdf.ln(8)
     pdf.set_draw_color(*TEAL)
-    pdf.set_line_width(1.2)
+    pdf.set_line_width(1.15)
     mid = pdf.w / 2
-    pdf.line(mid - 30, pdf.get_y(), mid + 30, pdf.get_y())
+    pdf.line(mid - 28, pdf.get_y(), mid + 28, pdf.get_y())
     pdf.ln(12)
 
     pdf.set_font(font_name(), "B", 15)
@@ -596,7 +613,8 @@ def draw_cover(
     )
     pdf.ln(4)
     pdf.set_font(font_name(), "", 11)
-    pdf.set_text_color(*TEAL)
+    # Sous-titre plus lisible (blanc doux) — Template utilise un gris clair
+    pdf.set_text_color(200, 220, 225)
     pdf.set_x(pdf.l_margin + 12)
     pdf.multi_cell(
         pdf.w - 2 * pdf.l_margin - 24,
@@ -614,8 +632,12 @@ def draw_cover(
         for el in extra_lines:
             pdf.cell(0, 5.5, clean(el), align="C", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
 
-    pdf.ln(12)
+    pdf.ln(10)
     pdf.set_font(font_name(), "", 10)
     pdf.set_text_color(*MUTED)
     tag = f"DailyOps.Tech  ·  OpsGate  ·  {lang}" if lang else "DailyOps.Tech  ·  OpsGate"
     pdf.cell(0, 6, tag, align="C", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+
+    # Couverture : PAS de footer (pas de bandeau navy + logo bas).
+    # Uniquement la barre accent teal bas (élément design Template).
+    # Les pages intérieures ont header/footer via make_doc_pdf().

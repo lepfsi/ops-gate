@@ -27,11 +27,22 @@ const FR: Dict = {
   "banner.notAttach": "Ne pas joindre",
   "banner.attachOriginal": "Joindre l’original",
   "banner.viewingSecure": "Secure Rewrite",
-  "banner.riskLine": "Éléments critiques : Secure Rewrite recommandé.",
-  "banner.pillAlert": "Alerte sécurité · policy org",
-  "banner.pillFile": "Fichier en attente · policy org",
-  "banner.pillBlock": "Bloqué par la politique admin",
-  "banner.pillForce": "Masquage obligatoire · policy",
+  "banner.riskLine": "Nous pouvons anonymiser les éléments critiques pour vous.",
+  "banner.pillAlert": "Protection active · politique org",
+  "banner.pillFile": "Fichier analysé · politique org",
+  "banner.pillBlock": "Envoi non autorisé par la politique",
+  "banner.pillForce": "Anonymisation requise · politique",
+  "banner.whyScore": "Pourquoi ce score ?",
+  "banner.whyScoreBody":
+    "Ce message obtient {score}/100 (niveau {level}) car : {detail}.",
+  "banner.whyScoreEmpty": "Score {score}/100 selon les détections actives.",
+  "banner.original": "Original",
+  "banner.secure": "Sécurisé",
+  "banner.changes": "Modifications",
+  "banner.changesNone": "Aucun remplacement listé (heuristiques déjà appliquées).",
+  "banner.adjust": "Ajuster",
+  "banner.adjustEmpty": "Aucun remplacement à ajuster.",
+  "banner.restore": "Restaurer",
   "banner.orgName": " Organisation : {name}.",
   "banner.impact": "Impact estimé : {level}",
   "banner.riskScore": "Risque {n}/100",
@@ -45,10 +56,11 @@ const FR: Dict = {
   "banner.fileConcerned": "Fichier concerné : « {file} »",
   "banner.fileShort": "Fichier : « {file} »",
   "banner.rec.critical":
-    "Anonymiser avant envoi (Secure Rewrite fortement recommandé)",
-  "banner.rec.high": "Anonymiser avant envoi (Secure Rewrite recommandé)",
-  "banner.rec.medium": "Masquer ou Secure Rewrite avant envoi",
-  "banner.rec.low": "Risque faible — vérification manuelle suffisante",
+    "Nous pouvons anonymiser ce message pour vous (Secure Rewrite fortement recommandé)",
+  "banner.rec.high":
+    "Nous pouvons anonymiser ce message pour vous (Secure Rewrite recommandé)",
+  "banner.rec.medium": "Nous pouvons masquer ou Secure Rewrite avant envoi",
+  "banner.rec.low": "Niveau de risque faible — une vérification manuelle suffit",
   "banner.rec.none": "Aucune détection",
   "banner.contactMsgTitle": "Message à l'administrateur",
   "banner.contactMsgHint":
@@ -79,15 +91,26 @@ const EN: Dict = {
   "banner.notAttach": "Don’t attach",
   "banner.attachOriginal": "Attach original",
   "banner.viewingSecure": "Secure Rewrite",
-  "banner.riskLine": "Critical items: Secure Rewrite recommended.",
-  "banner.pillAlert": "Security alert · org policy",
-  "banner.pillFile": "File pending · org policy",
-  "banner.pillBlock": "Blocked by admin policy",
-  "banner.pillForce": "Masking required · policy",
+  "banner.riskLine": "We can anonymize the critical items for you.",
+  "banner.pillAlert": "Protection active · org policy",
+  "banner.pillFile": "File analyzed · org policy",
+  "banner.pillBlock": "Send not allowed by policy",
+  "banner.pillForce": "Anonymization required · policy",
+  "banner.whyScore": "Why this score?",
+  "banner.whyScoreBody":
+    "This message scores {score}/100 (level {level}) because: {detail}.",
+  "banner.whyScoreEmpty": "Score {score}/100 based on active detections.",
+  "banner.original": "Original",
+  "banner.secure": "Secured",
+  "banner.changes": "Changes",
+  "banner.changesNone": "No listed replacements (heuristics already applied).",
+  "banner.adjust": "Adjust",
+  "banner.adjustEmpty": "No replacements to adjust.",
+  "banner.restore": "Restore",
   "banner.orgName": " Organization: {name}.",
   "banner.impact": "Estimated impact: {level}",
   "banner.riskScore": "Risk {n}/100",
-  "banner.riskScoreLabel": "Risk Score: {n}/100",
+  "banner.riskScoreLabel": "Risk level: {n}/100",
   "banner.sev.high": "{n} critical",
   "banner.sev.medium": "{n} medium",
   "banner.sev.low": "{n} low",
@@ -97,10 +120,11 @@ const EN: Dict = {
   "banner.fileConcerned": "File concerned: “{file}”",
   "banner.fileShort": "File: “{file}”",
   "banner.rec.critical":
-    "Anonymize before sending (Secure Rewrite strongly recommended)",
-  "banner.rec.high": "Anonymize before sending (Secure Rewrite recommended)",
-  "banner.rec.medium": "Mask or Secure Rewrite before sending",
-  "banner.rec.low": "Low risk — manual review is enough",
+    "We can anonymize this message for you (Secure Rewrite strongly recommended)",
+  "banner.rec.high":
+    "We can anonymize this message for you (Secure Rewrite recommended)",
+  "banner.rec.medium": "We can mask or Secure Rewrite before sending",
+  "banner.rec.low": "Low risk level — a quick manual check is enough",
   "banner.rec.none": "No detections",
   "banner.contactMsgTitle": "Message to administrator",
   "banner.contactMsgHint":
@@ -122,16 +146,16 @@ export const DEFAULT_MESSAGES_BY_LANG: Record<
 > = {
   fr: {
     adminNotice:
-      "Restriction appliquée par la politique de sécurité de votre organisation (OpsGate).",
-    alertTitle: "Données sensibles détectées",
+      "OpsGate protège vos données selon la politique de sécurité de votre organisation.",
+    alertTitle: "Certaines informations sensibles ont été détectées",
     alertBody:
-      "Protection active avant envoi vers l'IA. Choisissez une action autorisée.",
-    blockTitle: "Envoi non autorisé",
+      "Enable AI. Secure Data. — choisissez une action pour continuer en sécurité.",
+    blockTitle: "Envoi non autorisé pour le moment",
     blockBody:
-      "La politique de votre organisation bloque cet envoi. Contactez l'administrateur si vous avez besoin d'une exception.",
-    maskForceTitle: "Masquage obligatoire",
+      "La politique de votre organisation empêche cet envoi. Contactez l'administrateur pour une exception si besoin.",
+    maskForceTitle: "Anonymisation requise",
     maskForceBody:
-      "Votre administrateur impose le masquage des données sensibles avant tout envoi.",
+      "Votre administrateur demande d'anonymiser les données sensibles avant tout envoi — nous pouvons le faire pour vous.",
     btnMask: "Masquer simplement",
     btnSecureRewrite: "Secure Rewrite & envoyer",
     btnSendAnyway: "Envoyer quand même",
@@ -142,22 +166,22 @@ export const DEFAULT_MESSAGES_BY_LANG: Record<
     toastSecureRewrite: "Secure Rewrite appliqué. Envoi en cours…",
     toastSendAnyway: "Envoi journalisé pour votre administrateur.",
     toastBlocked: "Envoi bloqué. Aucune donnée transmise.",
-    alertTitleFile: "Fichier : données sensibles",
+    alertTitleFile: "Fichier : informations sensibles détectées",
     alertBodyFile:
-      "Analyse du fichier avant envoi à l'IA. Choisissez une action autorisée."
+      "Nous avons analysé le fichier avant envoi à l'IA. Choisissez une action pour continuer en sécurité."
   },
   en: {
     adminNotice:
-      "This restriction is enforced by your organization's security policy (OpsGate).",
-    alertTitle: "Sensitive data detected",
+      "OpsGate protects your data according to your organization's security policy.",
+    alertTitle: "Some sensitive information was detected",
     alertBody:
-      "Protection is active before sending to AI. Choose an allowed action.",
-    blockTitle: "Sending not allowed",
+      "Enable AI. Secure Data. — choose an action to continue safely.",
+    blockTitle: "Sending is not allowed right now",
     blockBody:
-      "Your organization's policy blocks this send. Contact your administrator if you need an exception.",
-    maskForceTitle: "Masking required",
+      "Your organization's policy prevents this send. Contact your administrator if you need an exception.",
+    maskForceTitle: "Anonymization required",
     maskForceBody:
-      "Your administrator requires sensitive data to be masked before any send.",
+      "Your administrator asks to anonymize sensitive data before any send — we can do that for you.",
     btnMask: "Simple mask",
     btnSecureRewrite: "Secure Rewrite & send",
     btnSendAnyway: "Send anyway",
@@ -168,9 +192,9 @@ export const DEFAULT_MESSAGES_BY_LANG: Record<
     toastSecureRewrite: "Secure Rewrite applied. Sending…",
     toastSendAnyway: "Send logged for your administrator.",
     toastBlocked: "Send blocked. No data transmitted.",
-    alertTitleFile: "File: sensitive data",
+    alertTitleFile: "File: sensitive information detected",
     alertBodyFile:
-      "File analyzed before sending to AI. Choose an allowed action."
+      "We analyzed the file before sending to AI. Choose an action to continue safely."
   }
 }
 

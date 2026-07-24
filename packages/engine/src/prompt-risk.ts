@@ -113,31 +113,31 @@ function recommendationFor(
     return {
       rec: "secure_rewrite",
       label: en
-        ? "Anonymize before sending (Secure Rewrite strongly recommended)"
-        : "Anonymiser avant envoi (Secure Rewrite fortement recommandé)"
+        ? "We can anonymize this message for you (Secure Rewrite strongly recommended)"
+        : "Nous pouvons anonymiser ce message pour vous (Secure Rewrite fortement recommandé)"
     }
   }
   if (level === "high" || score >= 55) {
     return {
       rec: "secure_rewrite",
       label: en
-        ? "Anonymize before sending (Secure Rewrite recommended)"
-        : "Anonymiser avant envoi (Secure Rewrite recommandé)"
+        ? "We can anonymize this message for you (Secure Rewrite recommended)"
+        : "Nous pouvons anonymiser ce message pour vous (Secure Rewrite recommandé)"
     }
   }
   if (level === "medium" || score >= 30) {
     return {
       rec: "mask",
       label: en
-        ? "Mask or Secure Rewrite before sending"
-        : "Masquer ou Secure Rewrite avant envoi"
+        ? "We can mask or Secure Rewrite before sending"
+        : "Nous pouvons masquer ou Secure Rewrite avant envoi"
     }
   }
   return {
     rec: "allow",
     label: en
-      ? "Low risk — manual review is enough"
-      : "Risque faible — vérification manuelle suffisante"
+      ? "Low risk level — a quick manual check is enough"
+      : "Niveau de risque faible — une vérification manuelle suffit"
   }
 }
 

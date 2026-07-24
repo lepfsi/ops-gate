@@ -1,0 +1,469 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8" />
+<title>DailyOps.Tech · OpsGate — Concours MINPOSTEL 2026</title>
+<style>
+  @page { size: A4; margin: 0; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: "Segoe UI", Arial, Helvetica, sans-serif;
+    color: #0f172a;
+    background: #cbd5e1;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  .page {
+    width: 210mm;
+    height: 297mm;
+    margin: 12px auto;
+    background: #fff;
+    position: relative;
+    overflow: hidden;
+    box-shadow: 0 8px 30px rgba(15,23,42,.18);
+    page-break-after: always;
+    break-after: page;
+  }
+  .page:last-child { page-break-after: auto; }
+  @media print {
+    body { background: #fff; }
+    .page { margin: 0; box-shadow: none; }
+    .no-print { display: none !important; }
+  }
+
+  /* Brand tokens — Template.png */
+  :root {
+    --navy: #0a1128;
+    --navy2: #111c44;
+    --teal: #2bd9c5;
+    --cover: #0b373e;
+    --cover-deep: #082028;
+    --ink: #0f172a;
+    --muted: #94a3b8;
+    --soft: #e6faf7;
+    --line: #e2e8f0;
+  }
+
+  /* —— COVER —— */
+  .cover {
+    background: linear-gradient(180deg, var(--cover) 0%, var(--cover-deep) 100%);
+    color: #fff;
+  }
+  .bar-top, .bar-mid {
+    position: absolute; left: 0; right: 0; height: 7mm; background: var(--teal);
+  }
+  .bar-top { top: 0; }
+  .bar-mid { bottom: 16mm; }
+  .cover-inner {
+    padding: 28mm 18mm 22mm;
+    text-align: center;
+  }
+  .mark {
+    width: 52mm; height: 52mm; margin: 0 auto 8mm;
+    border-radius: 12mm;
+    background: var(--navy);
+    border: 1.2mm solid var(--teal);
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 8px 28px rgba(0,0,0,.35);
+  }
+  .mark svg { width: 34mm; height: 34mm; }
+  .cover h1 {
+    font-size: 28pt; font-weight: 750; letter-spacing: -0.03em;
+    margin-bottom: 3mm;
+  }
+  .cover .sub {
+    color: var(--teal); font-size: 11pt; font-weight: 600;
+    margin-bottom: 6mm;
+  }
+  .rule {
+    width: 52mm; height: 1.1mm; background: var(--teal);
+    margin: 0 auto 7mm; border: 0;
+  }
+  .cover .doc-title {
+    font-size: 13pt; font-weight: 700; line-height: 1.35;
+    max-width: 160mm; margin: 0 auto 4mm;
+  }
+  .cover .theme {
+    font-size: 9.5pt; color: #c8dce0; line-height: 1.45;
+    max-width: 155mm; margin: 0 auto 8mm;
+  }
+  .cover .product {
+    font-size: 14pt; font-weight: 750; color: var(--teal);
+    margin-bottom: 2mm;
+  }
+  .cover .product-sub {
+    font-size: 9.5pt; color: #e2e8f0; margin-bottom: 8mm;
+  }
+  .cover .meta {
+    font-size: 8.5pt; color: var(--muted); line-height: 1.55;
+  }
+  .cover-foot {
+    position: absolute; left: 0; right: 0; bottom: 0; height: 16mm;
+    background: var(--navy);
+    border-top: 1.1mm solid var(--teal);
+    display: flex; align-items: center; gap: 4mm;
+    padding: 0 10mm;
+  }
+  .cover-foot .mini {
+    width: 9mm; height: 9mm; border-radius: 2.2mm;
+    background: var(--navy); border: 0.6mm solid var(--teal);
+    flex-shrink: 0; display: flex; align-items: center; justify-content: center;
+  }
+  .cover-foot .mini svg { width: 6mm; height: 6mm; }
+  .cover-foot strong { color: #fff; font-size: 8.5pt; display: block; }
+  .cover-foot span { color: var(--muted); font-size: 7.5pt; }
+
+  /* —— INNER PAGES —— */
+  .inner { padding: 18mm 14mm 16mm; }
+  .topbar {
+    position: absolute; top: 0; left: 0; right: 0; height: 12mm;
+    background: var(--navy);
+    display: flex; align-items: center; gap: 3.5mm;
+    padding: 0 10mm;
+    border-bottom: 1mm solid var(--teal);
+  }
+  .topbar .mini {
+    width: 7.5mm; height: 7.5mm; border-radius: 1.8mm;
+    border: 0.5mm solid var(--teal);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .topbar .mini svg { width: 5mm; height: 5mm; }
+  .topbar span { color: #fff; font-size: 8pt; font-weight: 700; }
+  .foot {
+    position: absolute; left: 10mm; right: 10mm; bottom: 6mm;
+    border-top: 0.5mm solid var(--teal);
+    padding-top: 2mm;
+    font-size: 7.5pt; color: #64748b; text-align: center;
+  }
+
+  h2.sec {
+    font-size: 11pt; color: var(--navy); font-weight: 750;
+    margin: 4mm 0 2.5mm;
+    padding-left: 3.5mm;
+    border-left: 2.2mm solid var(--teal);
+    letter-spacing: -0.02em;
+  }
+  p {
+    font-size: 9.2pt; line-height: 1.45; color: var(--ink);
+    margin-bottom: 2.2mm; text-align: justify;
+  }
+  p.lead { font-weight: 700; color: var(--navy); font-size: 9.5pt; }
+  ul {
+    margin: 0 0 2.5mm 4.5mm; font-size: 9pt; line-height: 1.42; color: var(--ink);
+  }
+  li { margin-bottom: 1mm; }
+
+  .callout {
+    border-radius: 2.5mm;
+    padding: 3mm 3.5mm 3mm 4.5mm;
+    margin: 3mm 0 3.5mm;
+    position: relative;
+    border-left: 2mm solid var(--teal);
+  }
+  .callout.soft { background: var(--soft); }
+  .callout.dark {
+    background: var(--navy); color: #e2e8f0;
+    border-left-color: var(--teal);
+  }
+  .callout .tag {
+    font-size: 7.5pt; font-weight: 800; letter-spacing: .06em;
+    text-transform: uppercase; color: #0d9488; margin-bottom: 1mm;
+  }
+  .callout.dark .tag { color: var(--teal); }
+  .callout p { margin: 0; font-size: 8.3pt; line-height: 1.4; text-align: left; }
+  .callout.dark p { color: #cbd5e1; }
+
+  .kpis {
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 2.5mm;
+    margin: 3mm 0 4mm;
+  }
+  .kpi {
+    background: var(--navy); color: #fff; border-radius: 2mm;
+    padding: 2.8mm 2mm; text-align: center;
+    border-bottom: 1mm solid var(--teal);
+  }
+  .kpi b { display: block; color: var(--teal); font-size: 11pt; font-weight: 750; }
+  .kpi span { font-size: 6.5pt; color: var(--muted); }
+
+  .grid2 {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 3.5mm;
+    margin: 2mm 0 3mm;
+  }
+  .card {
+    background: #f7fafc; border: 0.4mm solid var(--line);
+    border-radius: 2.5mm; padding: 3mm;
+  }
+  .card h3 {
+    font-size: 8pt; color: #0d9488; font-weight: 750;
+    text-transform: uppercase; letter-spacing: .04em; margin-bottom: 1.5mm;
+  }
+  .card p { font-size: 8.2pt; margin: 0; text-align: left; }
+
+  .score {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 2mm;
+    margin: 2mm 0 3mm;
+  }
+  .score div {
+    border: 0.4mm solid var(--line); border-radius: 2mm;
+    padding: 2mm 2.5mm; font-size: 7.8pt; line-height: 1.35;
+  }
+  .score b { color: var(--navy); }
+  .score em { color: #0d9488; font-style: normal; font-weight: 700; }
+
+  .closing {
+    background: var(--navy); border-radius: 2.5mm;
+    padding: 4mm 5mm; margin-top: 4mm;
+    border-left: 2.2mm solid var(--teal);
+  }
+  .closing h3 { color: var(--teal); font-size: 9.5pt; margin-bottom: 2mm; }
+  .closing p { color: #e2e8f0; font-size: 8.5pt; margin: 0; text-align: left; }
+
+  .no-print {
+    max-width: 210mm; margin: 16px auto 8px; padding: 12px 16px;
+    background: #0a1128; color: #e2e8f0; border-radius: 10px;
+    font-size: 13px; line-height: 1.45;
+  }
+  .no-print strong { color: #2bd9c5; }
+  .no-print code { background: #1e293b; padding: 1px 6px; border-radius: 4px; }
+</style>
+</head>
+<body>
+
+<div class="no-print">
+  <strong>Impression PDF (5 pages)</strong> — Ouvrez ce fichier dans Chrome / Edge →
+  <code>Ctrl+P</code> → Destination <strong>Enregistrer au format PDF</strong> →
+  Marges <strong>Aucune</strong> · Graphiques d’arrière-plan <strong>activés</strong>.
+  <br/>Fichier cible suggéré : <code>docs/CONCOURS-MINPOSTEL-2026-DailyOps-OpsGate.pdf</code>
+  · Script Python alternatif : <code>python scripts/build-concours-minpostel-2026.py</code>
+</div>
+
+<!-- ========== PAGE 1 COVER ========== -->
+<section class="page cover">
+  <div class="bar-top"></div>
+  <div class="cover-inner">
+    <div class="mark" aria-hidden="true">
+      <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M18 42V28c0-7 6-12 14-12s14 5 14 12v14" stroke="#2bd9c5" stroke-width="3.2" stroke-linecap="round"/>
+        <path d="M26 34h12v10c0 3-2.8 5.5-6 5.5s-6-2.5-6-5.5V34z" stroke="#e2e8f0" stroke-width="2.4"/>
+        <path d="M32 28c-2.4 0-4.2 1.7-4.2 3.8V34h8.4v-2.2c0-2.1-1.8-3.8-4.2-3.8z" fill="#2bd9c5"/>
+      </svg>
+    </div>
+    <h1>DailyOps.Tech</h1>
+    <p class="sub">Startup en gestation · Yaoundé, Cameroun</p>
+    <hr class="rule" />
+    <p class="doc-title">Document de projet — Concours National du Meilleur Projet TIC 2026</p>
+    <p class="theme">
+      Thème officiel : « Protéger le cyberespace des dérives de l’intelligence
+      artificielle et promouvoir le patriotisme numérique »
+    </p>
+    <p class="product">OpsGate</p>
+    <p class="product-sub">Produit phare — Sécurité des données face à l’IA générative</p>
+    <p class="meta">
+      Porteur : <strong style="color:#fff">Steve BA-NDOUWE</strong> · Solo founder<br/>
+      steve.ba-ndouwe@dailyops.tech<br/>
+      MINPOSTEL · Semaine de l’Innovation Numérique — 5<sup>e</sup> édition · juin–juillet 2026
+    </p>
+  </div>
+  <div class="bar-mid"></div>
+  <div class="cover-foot">
+    <div class="mini">
+      <svg viewBox="0 0 64 64" fill="none"><path d="M18 42V28c0-7 6-12 14-12s14 5 14 12v14" stroke="#2bd9c5" stroke-width="4" stroke-linecap="round"/><path d="M32 28c-2.4 0-4.2 1.7-4.2 3.8V34h8.4v-2.2c0-2.1-1.8-3.8-4.2-3.8z" fill="#2bd9c5"/></svg>
+    </div>
+    <div>
+      <strong>Candidature · Prix Spécial du Président de la République</strong>
+      <span>www.ictinnovationweek.cm · Confidentiel — usage concours uniquement</span>
+    </div>
+  </div>
+</section>
+
+<!-- ========== PAGE 2 ========== -->
+<section class="page">
+  <div class="topbar">
+    <div class="mini"><svg viewBox="0 0 64 64" fill="none"><path d="M18 42V28c0-7 6-12 14-12s14 5 14 12v14" stroke="#2bd9c5" stroke-width="4" stroke-linecap="round"/><path d="M32 28c-2.4 0-4.2 1.7-4.2 3.8V34h8.4v-2.2c0-2.1-1.8-3.8-4.2-3.8z" fill="#2bd9c5"/></svg></div>
+    <span>DailyOps.Tech · OpsGate · Document de projet</span>
+  </div>
+  <div class="inner">
+    <h2 class="sec">01 — Présentation de la start-up et du projet</h2>
+    <p class="lead">DailyOps.Tech est une start-up camerounaise en gestation, fondée à Yaoundé, qui construit des outils de confiance numérique pour l’Afrique.</p>
+    <p>Nous ne sommes pas encore une société établie au sens commercial mature : nous sommes une structure fondatrice en phase de structuration, avec un <strong>produit déjà fonctionnel et démontrable</strong>. Notre conviction : l’innovation TIC africaine doit allier excellence technique, impact local et souveraineté des données.</p>
+    <p><strong>OpsGate</strong> est le produit dérivé phare de DailyOps.Tech. C’est une plateforme de prévention de fuite de données (DLP) et d’AI security, conçue pour laisser les collaborateurs utiliser librement les outils d’IA générative (ChatGPT, Gemini, Claude, Copilot, DeepSeek, Perplexity…) sans exposer secrets métier, données clients, clés API ou configurations d’infrastructure.</p>
+
+    <div class="callout dark">
+      <div class="tag">Positionnement</div>
+      <p>DailyOps.Tech = marque éditrice &amp; vision ops/cybersécurité. · OpsGate = produit concret multi-composants (extension navigateur, proxy local, API multi-tenant, console d’administration), déjà au stade pré-GA démontrable.</p>
+    </div>
+
+    <h2 class="sec">02 — Problème à résoudre / opportunité de marché</h2>
+    <p>L’IA générative s’est imposée dans les administrations, banques, télécoms et PME camerounaises. En parallèle, les fuites involontaires se multiplient : un agent colle une clé API, un IBAN, un export client ou un fragment de config réseau dans ChatGPT. Les outils classiques (antivirus, pare-feu, CASB lourds) ne couvrent pas ce « dernier mètre » du navigateur.</p>
+    <p><strong>Opportunité :</strong> un marché mondial de l’AI security en forte croissance, encore peu adressé en Afrique francophone — des solutions souveraines, déployables en local, multi-tenant pour MSP et ministères, avec privacy by design.</p>
+
+    <div class="kpis">
+      <div class="kpi"><b>DLP + IA</b><span>Catégorie produit</span></div>
+      <div class="kpi"><b>Pré-GA</b><span>Maturité OpsGate</span></div>
+      <div class="kpi"><b>Yaoundé</b><span>Siège Cameroun</span></div>
+      <div class="kpi"><b>Solo</b><span>Équipe fondatrice</span></div>
+    </div>
+
+    <h2 class="sec">03 — Résumé du projet</h2>
+    <p>OpsGate intercepte les envois vers les sites d’IA, détecte les données sensibles via un moteur de règles (secrets, PII, configs réseau, fichiers PDF/Office, OCR), puis propose une action claire : <strong>Secure Rewrite</strong> (anonymiser intelligemment), masquer, bloquer, simuler le risque, ou journaliser selon la politique. Les administrateurs pilotent tout depuis une console centrale (groupes, profils, licences, Shadow AI, scores de risque, rapports).</p>
+
+    <div class="callout soft">
+      <div class="tag">Alignement thème 2026</div>
+      <p>« Protéger le cyberespace des dérives de l’IA et promouvoir le patriotisme numérique » — OpsGate transforme l’usage de l’IA d’un risque de fuite en un geste contrôlé, éthique et traçable pour les institutions camerounaises.</p>
+    </div>
+  </div>
+  <div class="foot">DailyOps.Tech · OpsGate · Candidature MINPOSTEL 2026 · Page 1/4</div>
+</section>
+
+<!-- ========== PAGE 3 ========== -->
+<section class="page">
+  <div class="topbar">
+    <div class="mini"><svg viewBox="0 0 64 64" fill="none"><path d="M18 42V28c0-7 6-12 14-12s14 5 14 12v14" stroke="#2bd9c5" stroke-width="4" stroke-linecap="round"/><path d="M32 28c-2.4 0-4.2 1.7-4.2 3.8V34h8.4v-2.2c0-2.1-1.8-3.8-4.2-3.8z" fill="#2bd9c5"/></svg></div>
+    <span>DailyOps.Tech · OpsGate · Document de projet</span>
+  </div>
+  <div class="inner">
+    <h2 class="sec">04 — Facteur innovant</h2>
+    <p>L’innovation OpsGate n’est pas un simple bloqueur de sites. Elle combine plusieurs ruptures d’usage et d’architecture :</p>
+    <ul>
+      <li><strong>Secure Rewrite</strong> — réécriture sécurisée du prompt pour garder l’utilité métier sans coller le secret (adoption &gt; interdiction pure).</li>
+      <li><strong>Score de risque + Simulation</strong> — l’utilisateur voit l’impact avant d’envoyer.</li>
+      <li><strong>Shadow AI Discovery</strong> — inventaire des outils IA réellement utilisés (autorisés ou non).</li>
+      <li><strong>Risk Score utilisateurs</strong> — qui prend le plus de risques, avec tendance.</li>
+      <li><strong>Double filet</strong> extension + proxy local — défense en profondeur.</li>
+      <li><strong>Privacy by design</strong> — mode local : rien ne quitte le poste ; mode org : métadonnées plutôt que contenu intégral.</li>
+    </ul>
+    <div class="callout dark">
+      <div class="tag">Innovation de produit + de procédé</div>
+      <p>Produit nouveau (AI DLP navigateur + gouvernance) et procédé (pipeline détection → décision UX → preuve admin) — pas une adaptation mineure d’un antivirus existant.</p>
+    </div>
+
+    <h2 class="sec">05 — Faisabilité technique &amp; maturité</h2>
+    <p>Le projet n’est pas une idée sur papier : un monorepo opérationnel existe (extension multi-navigateurs, moteur de règles, API, console d’administration, proxy MITM, Postgres multi-tenant, packaging Chrome/Firefox/Safari, MSI proxy Windows). <strong>Maturité : V2 fonctionnelle / pré-GA</strong>, avec différenciateurs V3 (Secure Rewrite, Risk, Shadow) en code et démontrables.</p>
+    <div class="grid2">
+      <div class="card">
+        <h3>Stack maîtrisée</h3>
+        <p>TypeScript · Node · React · Postgres · extensions navigateur · packaging store · scripts de déploiement client (MDM, docs FR/EN).</p>
+      </div>
+      <div class="card">
+        <h3>Preuve de réalité</h3>
+        <p>Console, enrôlement agents, events, audit, MFA, exports, rapports PDF sécurité — stack locale reproductible pour jury et bootcamp.</p>
+      </div>
+    </div>
+
+    <h2 class="sec">06 — Cibles et bénéficiaires</h2>
+    <ul>
+      <li><strong>Primaires :</strong> DSI / RSSI d’entreprises (banques, télécoms, énergie), administrations et établissements publics camerounais.</li>
+      <li><strong>Secondaires :</strong> MSP / intégrateurs multi-clients (architecture multi-tenant).</li>
+      <li><strong>Utilisateurs finaux :</strong> collaborateurs qui utilisent l’IA — protégés sans friction inutile.</li>
+      <li><strong>Bénéficiaires sociétaux :</strong> citoyens dont les données ne fuient pas vers des services d’IA faute de garde-fous locaux.</li>
+    </ul>
+    <div class="callout soft">
+      <div class="tag">Pour le Cameroun</div>
+      <p>Former une culture d’usage responsable de l’IA, réduire la dépendance à des boîtes noires importées, et créer des compétences locales (intégration, support, formation) autour d’un produit conçu à Yaoundé.</p>
+    </div>
+  </div>
+  <div class="foot">DailyOps.Tech · OpsGate · Candidature MINPOSTEL 2026 · Page 2/4</div>
+</section>
+
+<!-- ========== PAGE 4 ========== -->
+<section class="page">
+  <div class="topbar">
+    <div class="mini"><svg viewBox="0 0 64 64" fill="none"><path d="M18 42V28c0-7 6-12 14-12s14 5 14 12v14" stroke="#2bd9c5" stroke-width="4" stroke-linecap="round"/><path d="M32 28c-2.4 0-4.2 1.7-4.2 3.8V34h8.4v-2.2c0-2.1-1.8-3.8-4.2-3.8z" fill="#2bd9c5"/></svg></div>
+    <span>DailyOps.Tech · OpsGate · Document de projet</span>
+  </div>
+  <div class="inner">
+    <h2 class="sec">07 — Modèle économique et génération de revenus</h2>
+    <p>Phase actuelle : start-up en gestation — priorités = produit, pilotes, crédibilité technique. Le modèle est clair pour un SaaS de sécurité :</p>
+    <ul>
+      <li><strong>Licences organisation</strong> (sièges agents) — abonnement annuel / mensuel.</li>
+      <li><strong>Offre MSP / multi-tenant</strong> — revente par intégrateurs et partenaires.</li>
+      <li><strong>Services d’intégration &amp; formation</strong> — déploiement, policy, sensibilisation.</li>
+      <li><strong>Horizon :</strong> support premium, packs de règles sectoriels, modules SIEM.</li>
+    </ul>
+    <p><strong>Go-to-market initial :</strong> pilotes ciblés au Cameroun (privé + administrations), puis zone CEMAC / Afrique francophone via partenaires. Tarification progressive adaptée aux budgets locaux, avec mode local-only pour les entités très sensibles.</p>
+    <div class="callout dark">
+      <div class="tag">Pérennité</div>
+      <p>Revenus récurrents (licences) + services d’intégration = viabilité. L’actif se renforce avec chaque pack de règles et chaque retour terrain — sans dépendre d’une seule vente one-shot.</p>
+    </div>
+
+    <h2 class="sec">08 — Impact socio-économique</h2>
+    <ul>
+      <li><strong>Productivité :</strong> l’IA reste utilisable — on ne bloque pas l’innovation des équipes.</li>
+      <li><strong>Emplois :</strong> intégration, support, formation, sensibilisation au Cameroun.</li>
+      <li><strong>Inclusion numérique responsable :</strong> mêmes garde-fous pour PME et grandes entités.</li>
+      <li><strong>Souveraineté :</strong> option d’hébergement control-plane local / on-prem client.</li>
+      <li><strong>Confiance :</strong> traçabilité et rapports pour comités risques et audit.</li>
+    </ul>
+
+    <h2 class="sec">09 — Utilisation de l’IA dans la solution</h2>
+    <p>OpsGate n’est pas un « wrapper ChatGPT ». L’IA est le <em>terrain d’usage à sécuriser</em> ; le cœur de valeur est la protection autour de ces usages : détection des fuites vers les LLM, Secure Rewrite, scores de risque explicables, simulation pédagogique, OCR local sans envoi cloud. <strong>Valeur :</strong> automatisation de la protection, aide à la décision, gouvernance admin.</p>
+
+    <h2 class="sec">10 — Patriotisme numérique &amp; cybersécurité</h2>
+    <p>Réponse directe au thème de la 5<sup>e</sup> Semaine de l’Innovation Numérique :</p>
+    <ul>
+      <li>Protection des données face aux dérives d’usage de l’IA ;</li>
+      <li>Lutte contre la cyber-exposition involontaire (secrets, configs, identité) ;</li>
+      <li>Usage éthique et responsable du numérique au Cameroun ;</li>
+      <li>Réduction de la dépendance exclusive à des outils étrangers sans couche locale ;</li>
+      <li>Contribution à la confiance numérique des administrations et entreprises.</li>
+    </ul>
+    <div class="callout soft">
+      <div class="tag">Cybersécurité au service du patriotisme numérique</div>
+      <p>Protéger ce que les Camerounais saisissent dans l’IA, c’est protéger la mémoire économique et institutionnelle du pays — sans renoncer à l’innovation.</p>
+    </div>
+  </div>
+  <div class="foot">DailyOps.Tech · OpsGate · Candidature MINPOSTEL 2026 · Page 3/4</div>
+</section>
+
+<!-- ========== PAGE 5 ========== -->
+<section class="page">
+  <div class="topbar">
+    <div class="mini"><svg viewBox="0 0 64 64" fill="none"><path d="M18 42V28c0-7 6-12 14-12s14 5 14 12v14" stroke="#2bd9c5" stroke-width="4" stroke-linecap="round"/><path d="M32 28c-2.4 0-4.2 1.7-4.2 3.8V34h8.4v-2.2c0-2.1-1.8-3.8-4.2-3.8z" fill="#2bd9c5"/></svg></div>
+    <span>DailyOps.Tech · OpsGate · Document de projet</span>
+  </div>
+  <div class="inner">
+    <h2 class="sec">11 — Équipe de travail</h2>
+    <p class="lead">Porteur unique du projet : Steve BA-NDOUWE</p>
+    <p>Fondateur de DailyOps.Tech · Solo founder pour l’instant · Yaoundé, Cameroun<br/>
+    E-mail : <strong>steve.ba-ndouwe@dailyops.tech</strong></p>
+    <p>Profil : conception produit, architecture logicielle, cybersécurité opérationnelle, exécution full-stack (extension, API, console, packaging). Pas de groupe constitué à ce stade : la start-up est en gestation, avec une roadmap d’élargissement d’équipe (ingénierie, commercial, partenariats) après validation marché / concours.</p>
+
+    <div class="callout dark">
+      <div class="tag">Transparence — Règlement art. 5 &amp; 7</div>
+      <p>Candidat de nationalité camerounaise, résidant au Cameroun, porteur d’un projet innovant TIC. Start-up en gestation (pas une société de notoriété établie commercialisant déjà massivement). Un seul projet présenté. Engagement de sincérité des informations fournies.</p>
+    </div>
+
+    <h2 class="sec">12 — Feuille de route &amp; scalabilité</h2>
+    <ul>
+      <li><strong>T0–3 mois :</strong> finaliser GA OpsGate, 1–2 pilotes Cameroun, documentation déploiement.</li>
+      <li><strong>3–9 mois :</strong> partenariats MSP, premiers revenus licences, recrutement technique ciblé.</li>
+      <li><strong>9–18 mois :</strong> déploiement CEMAC, packs sectoriels, renforcement hébergement souverain.</li>
+    </ul>
+    <p>Scalabilité : architecture multi-tenant déjà prévue ; extension navigateur = déploiement large à coût marginal faible ; proxy pour environnements contraints.</p>
+
+    <h2 class="sec">13 — Grille de présélection (lecture jury)</h2>
+    <div class="score">
+      <div><b>Pertinence</b> /20 — Fuite de données vers l’IA : besoin réel admin &amp; entreprises CM.</div>
+      <div><b>Innovation</b> /15 — Secure Rewrite, Simulation, Shadow AI, double filet.</div>
+      <div><b>Faisabilité</b> /15 — Produit pré-GA démontrable, stack maîtrisée.</div>
+      <div><b>Impact</b> /15 — Productivité + emplois + souveraineté numérique.</div>
+      <div><b>Modèle éco.</b> /10 — Licences SaaS + MSP + services.</div>
+      <div><b>IA</b> /10 — Protection autour des usages LLM, scores explicables.</div>
+      <div style="grid-column:1/-1"><b>Patriotisme numérique &amp; cybersécurité</b> /15 — Alignement direct thème officiel 2026.</div>
+    </div>
+
+    <h2 class="sec">14 — Pourquoi ce projet mérite le Prix Spécial</h2>
+    <p>Parce qu’il touche un problème d’intérêt national (protection des données face à l’IA), avec un produit déjà démontrable, conçu par un Camerounais à Yaoundé, aligné sur le thème officiel, et porteur d’emplois et de compétences locales. Ce n’est ni un site vitrine, ni une idée sans code : c’est une plateforme prête à être présentée, challengée et pilotée.</p>
+
+    <div class="closing">
+      <h3>Demande au Jury</h3>
+      <p>Nous sollicitons la présélection de DailyOps.Tech / OpsGate pour le bootcamp et le pitch final — avec démonstration live du produit, business model et go-to-market.<br/><br/>
+      <strong style="color:#2bd9c5">Steve BA-NDOUWE</strong> — Yaoundé — steve.ba-ndouwe@dailyops.tech<br/>
+      Protéger l’usage de l’IA pour protéger la souveraineté numérique du Cameroun.</p>
+    </div>
+  </div>
+  <div class="foot">DailyOps.Tech · OpsGate · Candidature MINPOSTEL 2026 · Page 4/4</div>
+</section>
+
+</body>
+</html>
