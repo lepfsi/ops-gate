@@ -27,9 +27,15 @@ import {
 } from "./soft-mask.js"
 import { getProxyRemoteConfig } from "./sync.js"
 
-const MAX_HOLD_BYTES = 512 * 1024
+/** Hold max — multipart uploads need more than 512 KiB (T4). Override: OPSGATE_PROXY_HOLD_MAX */
+function maxHoldBytes(): number {
+  const env = parseInt(process.env.OPSGATE_PROXY_HOLD_MAX || "", 10)
+  if (Number.isFinite(env) && env >= 256 * 1024) return env
+  // 6 Mo : PDF/DOCX typiques en upload chat ; au-delà soft-block overflow
+  return 6 * 1024 * 1024
+}
 /** Idle client → fin de rafale requête → scan final + release / mask / soft-block */
-const RELEASE_IDLE_MS = 100
+const RELEASE_IDLE_MS = 120
 
 export function mitmConnect(opts: {
   clientSocket: net.Socket
@@ -255,6 +261,11 @@ export function mitmConnect(opts: {
   }
 
   const handleSensitive = (reason: string): boolean => {
+    // T4 : secrets dans PDF/Office/SQLite → pas de mask on-wire fiable
+    if (observer.preferLocalBlock()) {
+      softBlockRequest(reason, true)
+      return false
+    }
     if (maskMode === "onwire") {
       return softMaskOnWire(reason)
     }
@@ -262,15 +273,30 @@ export function mitmConnect(opts: {
     return false
   }
 
-  const flushHoldToUpstream = (): boolean => {
+  const flushHoldToUpstream = async (): Promise<boolean> => {
     if (cleaned || discardingRequest) return false
-    // Scan final idle
+    // Scan léger
     if (!observer.isBlocked()) {
       observer.flush()
     }
+    // T4 deep scan multipart sur buffer hold complet
+    if (!observer.isBlocked() && holdBytes > 0) {
+      try {
+        await observer.flushDeep(Buffer.concat(hold))
+      } catch (e) {
+        log("warn", "mitm_flush_deep_error", {
+          host: targetHost,
+          error: e instanceof Error ? e.message : String(e)
+        })
+      }
+    }
     if (observer.isBlocked() || maskPending) {
       return handleSensitive(
-        maskPending ? "sensitive_data_mask_pending" : "sensitive_data_detected"
+        maskPending
+          ? "sensitive_data_mask_pending"
+          : observer.preferLocalBlock()
+            ? "sensitive_file_deep_scan"
+            : "sensitive_data_detected"
       )
     }
     if (!upstream || upstream.destroyed) return false
@@ -304,7 +330,7 @@ export function mitmConnect(opts: {
         beginNextRequest()
         return
       }
-      flushHoldToUpstream()
+      void flushHoldToUpstream()
     }, RELEASE_IDLE_MS)
   }
 
@@ -459,9 +485,9 @@ export function mitmConnect(opts: {
         holdBytes += chunk.length
         const block = observer.onClientData(chunk)
         if (block) {
-          if (maskMode === "onwire") {
+          if (maskMode === "onwire" && !observer.preferLocalBlock()) {
             maskPending = true
-            if (holdBytes >= MAX_HOLD_BYTES) {
+            if (holdBytes >= maxHoldBytes()) {
               softBlockRequest("enforce_buffer_overflow", true)
               return
             }
@@ -469,12 +495,14 @@ export function mitmConnect(opts: {
             return
           }
           softBlockRequest(
-            "sensitive_data_detected",
-            maskMode === "local"
+            observer.preferLocalBlock()
+              ? "sensitive_file_deep_scan"
+              : "sensitive_data_detected",
+            maskMode === "local" || observer.preferLocalBlock()
           )
           return
         }
-        if (holdBytes >= MAX_HOLD_BYTES) {
+        if (holdBytes >= maxHoldBytes()) {
           softBlockRequest(
             "enforce_buffer_overflow",
             maskMode !== "off"

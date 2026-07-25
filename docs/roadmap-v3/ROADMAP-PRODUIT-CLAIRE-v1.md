@@ -87,7 +87,7 @@ Ordre recommandé d’implémentation :
 ### Phase 4 – Anticipation (Moyen / Long terme)
 **Objectif** : Rester en avance sur le marché.
 
-- **AI Agent Guard** (protection des agents autonomes)
+- **AI Agent Protection** (agents autonomes / IDE / API — **remisé**, voir ci-dessous)
 - Classification intelligente (Public / Internal / Confidential / Restricted)
 - Modules de gouvernance et conformité avancés
 
@@ -95,17 +95,18 @@ Ordre recommandé d’implémentation :
 
 ## Vue synthétique (priorités)
 
-| Priorité | Fonctionnalité                  | Phase | Impact business | Effort |
-|----------|----------------------------------|-------|------------------|--------|
-| P0       | Shadow AI + Risk Score utilisateur | 1   | Élevé            | Moyen  |
-| P0       | Secure Rewrite                   | 2     | Très élevé       | Moyen  |
-| P0       | Risk Score par prompt            | 2     | Élevé            | Faible |
-| P0       | AI Simulation Mode               | 2     | Très élevé       | Faible/Moyen |
-| P1       | Dashboard avancé + Analytics     | 3     | Élevé            | Moyen  |
-| P1       | Politiques par département       | 3     | Moyen            | Moyen  |
-| P1       | AI Trust Score                   | 3     | Moyen/Élevé      | Moyen  |
-| P2       | AI Agent Guard                   | 4     | Élevé (futur)    | Élevé  |
-| P2       | Classification intelligente     | 4     | Élevé            | Élevé  |
+| Priorité | Fonctionnalité                  | Phase | Impact business | Effort | Statut (2026-07) |
+|----------|----------------------------------|-------|------------------|--------|------------------|
+| P0       | Shadow AI + Risk Score utilisateur | 1   | Élevé            | Moyen  | ✅ |
+| P0       | Secure Rewrite                   | 2     | Très élevé       | Moyen  | ✅ |
+| P0       | Risk Score par prompt            | 2     | Élevé            | Faible | ✅ |
+| P0       | AI Simulation Mode               | 2     | Très élevé       | Faible/Moyen | ✅ |
+| P0–P1    | Deep analysis fichiers (proxy T1–T5) | 2–3 | Élevé | Élevé | ✅ |
+| P1       | Dashboard avancé + Analytics     | 3     | Élevé            | Moyen  | ⬜ |
+| P1       | Politiques par département       | 3     | Moyen            | Moyen  | ⬜ |
+| P1       | AI Trust Score                   | 3     | Moyen/Élevé      | Moyen  | ⬜ |
+| P2       | **AI Agent Protection**          | 4     | Élevé (futur)    | Élevé  | ⏸️ Remisé |
+| P2       | Classification intelligente     | 4     | Élevé            | Élevé  | ⬜ |
 
 ---
 
@@ -115,7 +116,8 @@ Pour éviter de s’égarer, on met volontairement de côté pour l’instant :
 - Trop de règles de détection supplémentaires
 - Des fonctionnalités « nice to have » non différenciantes
 - Une refonte complète de l’architecture
-- L’IA Agent Guard (trop tôt)
+- **AI Agent Protection** (ex- « AI Agent Guard ») — agents hors navigateur, API métier, IDE : **reporté** tant que la gate pre-GA n’est pas passée et qu’une spec n’est pas arbitrée ([`DEEP-ANALYSIS-STATUS.md`](./DEEP-ANALYSIS-STATUS.md) §4)
+- PDF redact binaire natif, Access/MDB, OCR sur le chemin MITM (latence)
 
 ---
 

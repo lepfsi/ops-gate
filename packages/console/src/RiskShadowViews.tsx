@@ -1,10 +1,11 @@
 /**
- * Risk Score + Shadow AI Discovery — UI console pro (dense, soignée)
+ * Risk Score + Shadow AI Discovery — dense console views (light polish)
  */
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { api } from "./api"
 
 type Period = "7d" | "30d" | "90d"
+type TFn = (k: string, vars?: Record<string, string | number>) => string
 
 type RiskUser = {
   agent_id: string
@@ -66,45 +67,56 @@ function relativeTime(iso: string | null | undefined): string {
   if (diff < 60_000) return "< 1 min"
   if (diff < 3600_000) return `${Math.floor(diff / 60_000)} min`
   if (diff < 86400_000) return `${Math.floor(diff / 3600_000)} h`
-  return `${Math.floor(diff / 86400_000)} j`
+  return `${Math.floor(diff / 86400_000)} d`
 }
 
-const FACTOR_LABELS: Record<string, string> = {
-  high_detections: "Détections high",
-  medium_detections: "Détections medium",
-  send_anyway_high: "Send anyway (high)",
-  send_anyway_medium: "Send anyway (medium)",
-  send_anyway_low: "Send anyway (low)",
-  mask_or_rewrite: "Mask / rewrite",
-  cancel: "Annulations",
-  shadow_unauthorized: "Shadow non autorisé",
-  recurrence_days: "Récurrence"
+const FACTOR_KEYS: Record<string, string> = {
+  high_detections: "risk.factor.highDet",
+  medium_detections: "risk.factor.medDet",
+  send_anyway_high: "risk.factor.sendHigh",
+  send_anyway_medium: "risk.factor.sendMed",
+  send_anyway_low: "risk.factor.sendLow",
+  mask_or_rewrite: "risk.factor.mask",
+  cancel: "risk.factor.cancel",
+  shadow_unauthorized: "risk.factor.shadow",
+  recurrence_days: "risk.factor.recurrence"
+}
+
+function factorLabel(t: TFn, key: string): string {
+  const i18nKey = FACTOR_KEYS[key]
+  return i18nKey ? t(i18nKey) : key
 }
 
 const SHARED_CSS = `
   .rs-page {
-    background: var(--surface, #fff);
-    border: 1px solid var(--line, #e2e8f0);
-    border-radius: 10px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 12px;
     padding: 14px 16px 16px;
     margin-bottom: 16px;
+    box-shadow: var(--shadow);
   }
   .rs-head {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 12px;
+    gap: 10px 12px;
     flex-wrap: wrap;
-    margin-bottom: 12px;
-    padding-bottom: 10px;
-    border-bottom: 1px solid var(--line, #e2e8f0);
+    margin: -14px -16px 14px;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--line);
+    background:
+      linear-gradient(90deg, rgba(43, 217, 197, 0.12), transparent 42%),
+      var(--surface-2);
+    border-radius: 12px 12px 0 0;
   }
   .rs-head h2 {
     margin: 0;
-    font-size: 15px;
-    font-weight: 700;
-    letter-spacing: -0.01em;
-    color: var(--text, #0f172a);
+    font-size: 1rem;
+    font-weight: 750;
+    letter-spacing: -0.02em;
+    color: var(--ink);
+    line-height: 1.25;
   }
   .rs-tools {
     display: flex;
@@ -114,23 +126,23 @@ const SHARED_CSS = `
   }
   .rs-tools .input,
   .rs-tools select.input {
-    height: 30px;
-    min-height: 30px;
-    padding: 0 8px;
+    height: 32px;
+    min-height: 32px;
+    padding: 0 9px;
     font-size: 12px;
-    border-radius: 6px;
+    border-radius: 8px;
   }
   .rs-tools .btn {
-    height: 30px;
-    padding: 0 10px;
+    height: 32px;
+    padding: 0 12px;
     font-size: 12px;
-    border-radius: 6px;
+    border-radius: 8px;
   }
   .rs-kpis {
     display: grid;
     grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 8px;
-    margin-bottom: 12px;
+    gap: 10px;
+    margin-bottom: 14px;
   }
   @media (max-width: 900px) {
     .rs-kpis { grid-template-columns: repeat(2, 1fr); }
@@ -138,158 +150,191 @@ const SHARED_CSS = `
   .rs-kpi {
     display: flex;
     flex-direction: column;
-    gap: 2px;
-    padding: 8px 10px;
-    border-radius: 8px;
-    border: 1px solid var(--line, #e2e8f0);
-    background: var(--surface-2, #f8fafc);
-    min-height: 0;
+    gap: 3px;
+    padding: 12px 12px 11px;
+    border-radius: 10px;
+    border: 1px solid var(--line);
+    background: var(--surface);
+    min-height: 78px;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+    border-left: 3px solid var(--accent);
   }
-  .rs-kpi.rs-high { border-color: #fecaca; background: #fef2f2; }
-  .rs-kpi.rs-med { border-color: #fde68a; background: #fffbeb; }
-  .rs-kpi.rs-low { border-color: #a7f3d0; background: #ecfdf5; }
+  .rs-kpi.rs-high {
+    border-left-color: #ef4444;
+    background: linear-gradient(180deg, #fef2f2 0%, var(--surface) 70%);
+  }
+  .rs-kpi.rs-med {
+    border-left-color: #f59e0b;
+    background: linear-gradient(180deg, #fffbeb 0%, var(--surface) 70%);
+  }
+  .rs-kpi.rs-low {
+    border-left-color: #10b981;
+    background: linear-gradient(180deg, #ecfdf5 0%, var(--surface) 70%);
+  }
   .rs-kpi-l {
-    font-size: 10px;
-    font-weight: 600;
-    color: #64748b;
-    text-transform: uppercase;
-    letter-spacing: 0.03em;
+    font-size: 11px;
+    font-weight: 650;
+    color: var(--muted);
+    letter-spacing: 0.01em;
   }
   .rs-kpi-v {
-    font-size: 18px;
-    font-weight: 700;
+    font-size: 1.45rem;
+    font-weight: 750;
     font-variant-numeric: tabular-nums;
-    line-height: 1.2;
-    color: var(--text, #0f172a);
+    letter-spacing: -0.03em;
+    line-height: 1.15;
+    color: var(--ink);
   }
+  .rs-kpi-v.rs-high { color: var(--danger); }
+  .rs-kpi-v.rs-med { color: var(--warn); }
+  .rs-kpi-v.rs-low { color: var(--ok); }
   .rs-kpi-v span {
-    font-size: 11px;
-    font-weight: 600;
-    color: #94a3b8;
+    font-size: 12px;
+    font-weight: 650;
+    color: var(--gray);
     margin-left: 2px;
+    letter-spacing: 0;
   }
   .rs-kpi-s {
     font-size: 11px;
-    color: #64748b;
+    color: var(--muted);
     font-weight: 500;
+    line-height: 1.3;
   }
   .rs-grid2 {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 10px;
-    margin-bottom: 10px;
+    gap: 12px;
+    margin-bottom: 12px;
   }
   @media (max-width: 960px) {
     .rs-grid2 { grid-template-columns: 1fr; }
   }
   .rs-panel {
-    border: 1px solid var(--line, #e2e8f0);
-    border-radius: 8px;
-    background: var(--surface, #fff);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: var(--surface);
     overflow: hidden;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03);
   }
   .rs-panel-h {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 7px 10px;
-    border-bottom: 1px solid var(--line, #e2e8f0);
-    background: var(--surface-2, #f8fafc);
+    gap: 8px;
+    padding: 9px 12px;
+    border-bottom: 1px solid var(--line);
+    background: linear-gradient(180deg, var(--surface-2), var(--surface));
   }
   .rs-panel-h strong {
-    font-size: 11px;
+    font-size: 11.5px;
     font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.03em;
-    color: #475569;
+    letter-spacing: 0.01em;
+    color: var(--ink);
+    text-transform: none;
   }
   .rs-panel-b { padding: 0; }
-  .rs-dist { padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; }
+  .rs-dist { padding: 12px 12px 14px; display: flex; flex-direction: column; gap: 10px; }
   .rs-dist-row {
     display: grid;
-    grid-template-columns: 56px 1fr 28px;
-    gap: 8px;
+    grid-template-columns: 72px 1fr 32px;
+    gap: 10px;
     align-items: center;
   }
-  .rs-dist-l { font-size: 11px; font-weight: 600; color: #475569; }
+  .rs-dist-l { font-size: 12px; font-weight: 650; color: var(--ink-2); }
   .rs-dist-t {
-    height: 6px;
+    height: 9px;
     border-radius: 99px;
-    background: #e2e8f0;
+    background: #e8eef5;
     overflow: hidden;
   }
-  .rs-dist-f { height: 100%; border-radius: 99px; min-width: 2px; }
-  .rs-dist-f.rs-low { background: #34d399; }
-  .rs-dist-f.rs-med { background: #fbbf24; }
-  .rs-dist-f.rs-high { background: #f87171; }
+  .rs-dist-f { height: 100%; border-radius: 99px; min-width: 3px; }
+  .rs-dist-f.rs-low { background: linear-gradient(90deg, #34d399, #10b981); }
+  .rs-dist-f.rs-med { background: linear-gradient(90deg, #fbbf24, #f59e0b); }
+  .rs-dist-f.rs-high { background: linear-gradient(90deg, #f87171, #ef4444); }
   .rs-dist-n {
-    font-size: 11px;
-    font-weight: 700;
+    font-size: 12px;
+    font-weight: 750;
     text-align: right;
     font-variant-numeric: tabular-nums;
-    color: #334155;
+    color: var(--ink);
   }
   .rs-table {
     width: 100%;
     border-collapse: collapse;
-    font-size: 12px;
+    font-size: 12.5px;
   }
   .rs-table th {
     text-align: left;
-    font-size: 10px;
+    font-size: 10.5px;
     font-weight: 700;
     text-transform: uppercase;
-    letter-spacing: 0.03em;
-    color: #64748b;
-    padding: 6px 10px;
-    border-bottom: 1px solid var(--line, #e2e8f0);
-    background: transparent;
+    letter-spacing: 0.04em;
+    color: var(--muted);
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--line);
+    background: var(--surface-2);
     white-space: nowrap;
   }
   .rs-table td {
-    padding: 6px 10px;
-    border-bottom: 1px solid #f1f5f9;
+    padding: 9px 12px;
+    border-bottom: 1px solid #eef2f7;
     vertical-align: middle;
-    color: var(--text, #0f172a);
+    color: var(--ink);
     font-variant-numeric: tabular-nums;
   }
   .rs-table tr:last-child td { border-bottom: none; }
-  .rs-table tbody tr { cursor: pointer; transition: background 0.1s; }
-  .rs-table tbody tr:hover { background: #f8fafc; }
-  .rs-table tbody tr.is-on { background: rgba(45, 212, 191, 0.1); }
+  .rs-table tbody tr { cursor: pointer; transition: background 0.12s; }
+  .rs-table tbody tr:hover { background: #f4faf9; }
+  .rs-table tbody tr.is-on {
+    background: var(--accent-soft);
+    box-shadow: inset 3px 0 0 var(--accent);
+  }
+  .rs-table tbody tr.rs-row-unauth {
+    background: linear-gradient(90deg, rgba(254, 242, 242, 0.85), transparent 40%);
+  }
+  .rs-table tbody tr.rs-row-unauth:hover {
+    background: #fef2f2;
+  }
   .rs-badge {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    min-width: 28px;
-    padding: 1px 6px;
+    min-width: 34px;
+    padding: 2px 8px;
     border-radius: 999px;
-    font-size: 11px;
-    font-weight: 700;
+    font-size: 12px;
+    font-weight: 750;
     font-variant-numeric: tabular-nums;
   }
-  .rs-badge.rs-high { background: #fee2e2; color: #b91c1c; }
-  .rs-badge.rs-med { background: #fef3c7; color: #b45309; }
-  .rs-badge.rs-low { background: #d1fae5; color: #047857; }
+  .rs-badge.rs-high { background: #fee2e2; color: #b91c1c; border: 1px solid #fecaca; }
+  .rs-badge.rs-med { background: #fef3c7; color: #b45309; border: 1px solid #fde68a; }
+  .rs-badge.rs-low { background: #d1fae5; color: #047857; border: 1px solid #a7f3d0; }
+  .rs-badge-lg {
+    min-width: 42px;
+    padding: 4px 10px;
+    font-size: 14px;
+  }
   .rs-dot {
     display: inline-block;
-    width: 7px;
-    height: 7px;
+    width: 8px;
+    height: 8px;
     border-radius: 50%;
     vertical-align: middle;
+    box-shadow: 0 0 0 2px rgba(255,255,255,0.9);
   }
   .rs-dot.rs-high { background: #ef4444; }
   .rs-dot.rs-med { background: #f59e0b; }
   .rs-dot.rs-low { background: #10b981; }
-  .rs-muted { color: #94a3b8; font-size: 11px; }
+  .rs-muted { color: var(--gray); font-size: 11.5px; }
   .rs-link {
     border: none;
     background: transparent;
-    color: #0f766e;
-    font-size: 11px;
-    font-weight: 650;
+    color: var(--accent-ink);
+    font-size: 11.5px;
+    font-weight: 700;
     cursor: pointer;
-    padding: 0;
+    padding: 2px 0;
   }
   .rs-link:hover { text-decoration: underline; }
   .rs-pager {
@@ -297,109 +342,147 @@ const SHARED_CSS = `
     align-items: center;
     justify-content: flex-end;
     gap: 8px;
-    padding: 6px 10px 8px;
-    border-top: 1px solid #f1f5f9;
+    padding: 8px 12px 10px;
+    border-top: 1px solid var(--line);
+    background: var(--surface-2);
   }
   .rs-page-btn {
     appearance: none;
-    border: 1px solid #e2e8f0;
-    background: #fff;
-    color: #64748b;
-    font-size: 11px;
-    font-weight: 600;
-    padding: 4px 10px;
+    border: 1px solid var(--line);
+    background: var(--surface);
+    color: var(--ink-2);
+    font-size: 11.5px;
+    font-weight: 650;
+    padding: 5px 12px;
     border-radius: 999px;
     cursor: pointer;
     font-family: inherit;
     transition: border-color 0.12s, color 0.12s, background 0.12s;
   }
   .rs-page-btn:hover:not(:disabled) {
-    border-color: #99f6e4;
-    color: #0f766e;
-    background: #f0fdfa;
+    border-color: var(--accent);
+    color: var(--accent-ink);
+    background: var(--accent-soft);
   }
   .rs-page-btn:disabled {
     opacity: 0.35;
     cursor: default;
   }
   .rs-page-ind {
-    font-size: 11px;
-    font-weight: 600;
-    color: #94a3b8;
+    font-size: 11.5px;
+    font-weight: 650;
+    color: var(--muted);
     font-variant-numeric: tabular-nums;
-    min-width: 36px;
+    min-width: 40px;
     text-align: center;
   }
   .rs-split {
     display: grid;
-    grid-template-columns: minmax(0, 1.35fr) minmax(260px, 0.9fr);
-    gap: 10px;
+    grid-template-columns: minmax(0, 1.35fr) minmax(280px, 0.9fr);
+    gap: 12px;
     align-items: start;
   }
   @media (max-width: 1000px) {
     .rs-split { grid-template-columns: 1fr; }
   }
   .rs-detail {
-    border: 1px solid var(--line, #e2e8f0);
-    border-radius: 8px;
-    background: var(--surface-2, #f8fafc);
-    padding: 10px 12px;
-    min-height: 120px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background:
+      linear-gradient(180deg, rgba(43, 217, 197, 0.06), transparent 48%),
+      var(--surface);
+    padding: 12px 14px;
+    min-height: 140px;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03);
   }
   .rs-detail-title {
     display: flex;
     align-items: center;
     gap: 8px;
-    margin-bottom: 8px;
+    margin-bottom: 10px;
     flex-wrap: wrap;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--line);
   }
   .rs-detail-title strong {
-    font-size: 13px;
-    font-weight: 700;
+    font-size: 14px;
+    font-weight: 750;
+    color: var(--ink);
   }
+  .rs-score-meter {
+    height: 6px;
+    border-radius: 99px;
+    background: #e8eef5;
+    overflow: hidden;
+    margin: 0 0 10px;
+  }
+  .rs-score-meter > i {
+    display: block;
+    height: 100%;
+    border-radius: 99px;
+  }
+  .rs-score-meter > i.rs-high { background: linear-gradient(90deg, #f87171, #ef4444); }
+  .rs-score-meter > i.rs-med { background: linear-gradient(90deg, #fbbf24, #f59e0b); }
+  .rs-score-meter > i.rs-low { background: linear-gradient(90deg, #34d399, #10b981); }
   .rs-section {
-    margin-top: 10px;
+    margin-top: 12px;
   }
   .rs-section > .rs-sec-l {
-    font-size: 10px;
+    font-size: 10.5px;
     font-weight: 700;
     text-transform: uppercase;
-    letter-spacing: 0.03em;
-    color: #64748b;
-    margin-bottom: 5px;
+    letter-spacing: 0.04em;
+    color: var(--muted);
+    margin-bottom: 6px;
   }
   .rs-factors {
     list-style: none;
     margin: 0;
     padding: 0;
-    border: 1px solid var(--line, #e2e8f0);
-    border-radius: 6px;
-    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--surface);
     overflow: hidden;
   }
   .rs-factors li {
     display: flex;
     justify-content: space-between;
     gap: 10px;
-    padding: 5px 8px;
-    font-size: 11px;
-    border-bottom: 1px solid #f1f5f9;
+    padding: 7px 10px;
+    font-size: 12px;
+    border-bottom: 1px solid #eef2f7;
   }
   .rs-factors li:last-child { border-bottom: none; }
-  .rs-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+  .rs-factors li strong {
+    color: var(--ink);
+    font-variant-numeric: tabular-nums;
+  }
+  .rs-chips { display: flex; flex-wrap: wrap; gap: 5px; }
   .rs-chip {
-    font-size: 10px;
-    font-weight: 600;
-    padding: 2px 7px;
+    font-size: 11px;
+    font-weight: 650;
+    padding: 3px 9px;
     border-radius: 999px;
-    background: #e2e8f0;
-    color: #334155;
+    background: var(--accent-soft);
+    color: var(--accent-ink);
+    border: 1px solid rgba(43, 217, 197, 0.28);
   }
   .rs-empty {
-    padding: 16px 10px;
+    padding: 20px 12px;
     text-align: center;
-    color: #94a3b8;
-    font-size: 12px;
+    color: var(--gray);
+    font-size: 12.5px;
+  }
+  .rs-tool-name {
+    font-weight: 700;
+    font-size: 12.5px;
+    color: var(--ink);
+  }
+  .rs-tool-host {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    color: var(--gray);
+    margin-top: 1px;
   }
   .rs-status {
     display: inline-flex;
@@ -411,33 +494,54 @@ const SHARED_CSS = `
     padding: 2px 7px;
     border-radius: 999px;
   }
-  .rs-status.authorized { background: #d1fae5; color: #047857; }
-  .rs-status.unauthorized { background: #fee2e2; color: #b91c1c; }
-  .rs-status.unknown { background: #e2e8f0; color: #475569; }
+  .rs-status.authorized { background: #d1fae5; color: var(--ok); }
+  .rs-status.unauthorized { background: #fee2e2; color: var(--danger); }
+  .rs-status.unknown { background: var(--line); color: var(--ink-2); }
   .rs-select-sm {
-    height: 28px !important;
-    min-height: 28px !important;
-    padding: 0 6px !important;
-    font-size: 11px !important;
-    border-radius: 6px !important;
-    max-width: 132px;
+    height: 30px !important;
+    min-height: 30px !important;
+    padding: 0 8px !important;
+    font-size: 11.5px !important;
+    border-radius: 8px !important;
+    max-width: 148px;
+    font-weight: 650 !important;
+  }
+  .rs-select-sm.rs-high {
+    border-color: #fecaca !important;
+    background: #fef2f2 !important;
+    color: var(--danger) !important;
+  }
+  .rs-select-sm.rs-low {
+    border-color: #a7f3d0 !important;
+    background: #ecfdf5 !important;
+    color: var(--ok) !important;
+  }
+  .rs-select-sm.rs-med {
+    border-color: #e2e8f0 !important;
+    background: var(--surface-2) !important;
+    color: var(--ink-2) !important;
   }
   .rs-bulk {
     display: flex;
     align-items: center;
     gap: 8px;
     flex-wrap: wrap;
-    padding: 6px 10px;
-    margin-bottom: 8px;
-    border-radius: 6px;
-    border: 1px solid var(--line, #e2e8f0);
-    background: var(--surface-2, #f8fafc);
-    font-size: 12px;
+    padding: 9px 12px;
+    margin-bottom: 10px;
+    border-radius: 8px;
+    border: 1px solid rgba(43, 217, 197, 0.35);
+    background: var(--accent-soft);
+    font-size: 12.5px;
+    font-weight: 550;
   }
+  .rs-bulk .rs-muted { color: var(--accent-ink); font-weight: 650; }
   .rs-legend {
-    margin: 6px 0 0;
-    font-size: 10px;
-    color: #94a3b8;
+    margin: 0;
+    padding: 8px 12px 10px;
+    font-size: 10.5px;
+    color: var(--muted);
+    border-top: 1px solid var(--line);
+    background: var(--surface-2);
   }
 `
 
@@ -551,10 +655,11 @@ export function RiskView({
             className="input"
             value={period}
             onChange={(e) => setPeriod(e.target.value as Period)}
-            style={{ width: 84 }}>
-            <option value="7d">7 j</option>
-            <option value="30d">30 j</option>
-            <option value="90d">90 j</option>
+            style={{ width: 100 }}
+            aria-label={t("gw.period.30d")}>
+            <option value="7d">{t("gw.period.7d")}</option>
+            <option value="30d">{t("gw.period.30d")}</option>
+            <option value="90d">{t("gw.period.90d")}</option>
           </select>
           <select
             className="input"
@@ -570,7 +675,7 @@ export function RiskView({
             className="btn secondary"
             disabled={busy}
             onClick={() => void load()}>
-            {t("common.refresh") || "Actualiser"}
+            {t("common.refresh")}
           </button>
           <button
             type="button"
@@ -598,7 +703,7 @@ export function RiskView({
           <div className="rs-kpis">
             <div className={`rs-kpi ${scoreClass(summary.average_score)}`}>
               <div className="rs-kpi-l">{t("risk.avgScore")}</div>
-              <div className="rs-kpi-v">
+              <div className={`rs-kpi-v ${scoreClass(summary.average_score)}`}>
                 {summary.average_score}
                 <span>/100</span>
               </div>
@@ -610,17 +715,22 @@ export function RiskView({
             </div>
             <div className="rs-kpi rs-high">
               <div className="rs-kpi-l">{t("risk.highUsers")}</div>
-              <div className="rs-kpi-v">{summary.high_risk_users}</div>
+              <div className="rs-kpi-v rs-high">{summary.high_risk_users}</div>
               <div className="rs-kpi-s">
                 {t("risk.medUsers")} {summary.medium_risk_users} ·{" "}
                 {t("risk.lowUsers")} {summary.low_risk_users}
               </div>
             </div>
-            <div
-              className="rs-kpi"
-              title={t("risk.trendHint")}>
+            <div className="rs-kpi" title={t("risk.trendHint")}>
               <div className="rs-kpi-l">{t("risk.colTrend")}</div>
-              <div className="rs-kpi-v">
+              <div
+                className={`rs-kpi-v ${
+                  summary.trend === "up"
+                    ? "rs-high"
+                    : summary.trend === "down"
+                      ? "rs-low"
+                      : ""
+                }`}>
                 {trendGlyph(summary.trend)}
                 {trendPts != null ? (
                   <span>
@@ -631,11 +741,11 @@ export function RiskView({
               </div>
               <div className="rs-kpi-s">{t("risk.trendLegend")}</div>
             </div>
-            <div className="rs-kpi">
+            <div className={`rs-kpi ${shadowUnauth > 0 ? "rs-high" : "rs-low"}`}>
               <div className="rs-kpi-l">{t("risk.usersCount")}</div>
               <div className="rs-kpi-v">{summary.users_count}</div>
               <div className="rs-kpi-s">
-                Shadow unauth · {shadowUnauth}
+                {t("risk.shadowUnauth", { n: shadowUnauth })}
               </div>
             </div>
           </div>
@@ -651,12 +761,12 @@ export function RiskView({
               <div className="rs-dist">
                 {(
                   [
-                    ["Low", summary.low_risk_users, "rs-low"],
-                    ["Medium", summary.medium_risk_users, "rs-med"],
-                    ["High", summary.high_risk_users, "rs-high"]
+                    [t("gw.risk.low"), summary.low_risk_users, "rs-low"],
+                    [t("gw.risk.medium"), summary.medium_risk_users, "rs-med"],
+                    [t("gw.risk.high"), summary.high_risk_users, "rs-high"]
                   ] as const
                 ).map(([label, n, cls]) => (
-                  <div key={label} className="rs-dist-row">
+                  <div key={cls} className="rs-dist-row">
                     <span className="rs-dist-l">{label}</span>
                     <div className="rs-dist-t">
                       <div
@@ -683,7 +793,7 @@ export function RiskView({
                     <th>{t("risk.colUser")}</th>
                     <th style={{ width: 56 }}>{t("risk.colScore")}</th>
                     <th style={{ width: 40 }} />
-                    <th style={{ width: 40 }} />
+                    <th style={{ width: 48 }} />
                   </tr>
                 </thead>
                 <tbody>
@@ -717,7 +827,7 @@ export function RiskView({
                               } as RiskUser)
                             void openDetail(full)
                           }}>
-                          Voir
+                          {t("risk.view")}
                         </button>
                       </td>
                     </tr>
@@ -756,13 +866,11 @@ export function RiskView({
                 <th style={{ width: 22 }} />
                 <th>{t("risk.colUser")}</th>
                 <th style={{ width: 52 }}>{t("risk.colScore")}</th>
-                <th
-                  style={{ width: 36 }}
-                  title={t("risk.trendHint")}>
+                <th style={{ width: 36 }} title={t("risk.trendHint")}>
                   {t("risk.colTrend")}
                 </th>
-                <th style={{ width: 64 }}>Activité</th>
-                <th style={{ width: 48 }}>Shadow</th>
+                <th style={{ width: 64 }}>{t("risk.colActivity")}</th>
+                <th style={{ width: 52 }}>{t("risk.colTools")}</th>
               </tr>
             </thead>
             <tbody>
@@ -830,14 +938,12 @@ export function RiskView({
               </button>
             </div>
           ) : null}
-          <p className="rs-legend" style={{ padding: "0 10px 8px" }}>
-            ● High (≥70) · Medium (40–69) · Low (&lt;40) · {t("risk.trendLegend")}
-          </p>
+          <p className="rs-legend">{t("risk.legend")}</p>
         </div>
 
         <div className="rs-detail">
-          <div className="rs-sec-l rs-section" style={{ marginTop: 0 }}>
-            <span className="rs-kpi-l">{t("risk.detail")}</span>
+          <div className="rs-section" style={{ marginTop: 0 }}>
+            <div className="rs-sec-l">{t("risk.detail")}</div>
           </div>
           {!detail ? (
             <p className="rs-empty" style={{ paddingTop: 24 }}>
@@ -847,15 +953,24 @@ export function RiskView({
             <>
               <div className="rs-detail-title">
                 <strong>{detail.user.label}</strong>
-                <span className={`rs-badge ${scoreClass(detail.user.score)}`}>
+                <span
+                  className={`rs-badge rs-badge-lg ${scoreClass(detail.user.score)}`}>
                   {detail.user.score}
                 </span>
                 <span className="rs-muted">
                   {trendGlyph(detail.user.trend)}
                   {detail.user.score_previous != null
-                    ? ` vs ${detail.user.score_previous}`
+                    ? ` · ${detail.user.score_previous}`
                     : ""}
                 </span>
+              </div>
+              <div className="rs-score-meter" aria-hidden>
+                <i
+                  className={scoreClass(detail.user.score)}
+                  style={{
+                    width: `${Math.max(4, Math.min(100, detail.user.score))}%`
+                  }}
+                />
               </div>
 
               <div className="rs-section">
@@ -865,12 +980,12 @@ export function RiskView({
                     .filter(([, v]) => v)
                     .map(([k, v]) => (
                       <li key={k}>
-                        <span>{FACTOR_LABELS[k] || k}</span>
+                        <span>{factorLabel(t, k)}</span>
                         <strong>{v}</strong>
                       </li>
                     ))}
                   {!Object.values(detail.user.factors || {}).some(Boolean) && (
-                    <li className="rs-muted">Aucun facteur</li>
+                    <li className="rs-muted">{t("risk.noFactors")}</li>
                   )}
                 </ul>
               </div>
@@ -896,10 +1011,10 @@ export function RiskView({
                   <table className="rs-table">
                     <thead>
                       <tr>
-                        <th>Date</th>
-                        <th>Décision</th>
-                        <th>Hôte</th>
-                        <th>Sévérité</th>
+                        <th>{t("risk.colDate")}</th>
+                        <th>{t("risk.colDecision")}</th>
+                        <th>{t("risk.colHost")}</th>
+                        <th>{t("risk.colSeverity")}</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -988,6 +1103,12 @@ export function ShadowAiView({
     )
   }, [tools, q])
 
+  const statusLabel = (s: ShadowTool["status"]) => {
+    if (s === "authorized") return t("shadow.markAuth")
+    if (s === "unauthorized") return t("shadow.markUnauth")
+    return t("shadow.markUnknown")
+  }
+
   const setToolStatus = async (
     tool: string,
     next: "authorized" | "unauthorized" | "unknown"
@@ -995,7 +1116,7 @@ export function ShadowAiView({
     setBusy(true)
     try {
       await api.patchShadowAi(tool, next)
-      setInfo(`${tool} → ${next}`)
+      setInfo(t("shadow.updated", { tool, status: statusLabel(next) }))
       await load()
     } catch (e) {
       setError(String(e))
@@ -1011,7 +1132,12 @@ export function ShadowAiView({
       for (const tool of selected) {
         await api.patchShadowAi(tool, next)
       }
-      setInfo(`${selected.size} outil(s) → ${next}`)
+      setInfo(
+        t("shadow.bulkUpdated", {
+          n: selected.size,
+          status: statusLabel(next)
+        })
+      )
       await load()
     } catch (e) {
       setError(String(e))
@@ -1038,16 +1164,17 @@ export function ShadowAiView({
             className="input"
             value={period}
             onChange={(e) => setPeriod(e.target.value as Period)}
-            style={{ width: 84 }}>
-            <option value="7d">7 j</option>
-            <option value="30d">30 j</option>
-            <option value="90d">90 j</option>
+            style={{ width: 100 }}
+            aria-label={t("gw.period.30d")}>
+            <option value="7d">{t("gw.period.7d")}</option>
+            <option value="30d">{t("gw.period.30d")}</option>
+            <option value="90d">{t("gw.period.90d")}</option>
           </select>
           <select
             className="input"
             value={status}
             onChange={(e) => setStatus(e.target.value as typeof status)}
-            style={{ width: 120 }}>
+            style={{ width: 128 }}>
             <option value="all">{t("shadow.filterAll")}</option>
             <option value="unauthorized">{t("shadow.filterUnauth")}</option>
             <option value="authorized">{t("shadow.filterAuth")}</option>
@@ -1055,17 +1182,18 @@ export function ShadowAiView({
           </select>
           <input
             className="input"
-            placeholder="Rechercher…"
+            placeholder={t("shadow.search")}
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            style={{ width: 140 }}
+            style={{ width: 148 }}
+            aria-label={t("shadow.search")}
           />
           <button
             type="button"
             className="btn secondary"
             disabled={busy}
             onClick={() => void load()}>
-            {t("common.refresh") || "Actualiser"}
+            {t("common.refresh")}
           </button>
         </div>
       </div>
@@ -1077,13 +1205,13 @@ export function ShadowAiView({
         </div>
         <div className="rs-kpi rs-high">
           <div className="rs-kpi-l">{t("shadow.unauth")}</div>
-          <div className="rs-kpi-v">{counts.unauthorized}</div>
+          <div className="rs-kpi-v rs-high">{counts.unauthorized}</div>
         </div>
         <div className="rs-kpi rs-low">
           <div className="rs-kpi-l">{t("shadow.auth")}</div>
-          <div className="rs-kpi-v">{counts.authorized}</div>
+          <div className="rs-kpi-v rs-low">{counts.authorized}</div>
         </div>
-        <div className="rs-kpi">
+        <div className="rs-kpi rs-med">
           <div className="rs-kpi-l">{t("shadow.unknown")}</div>
           <div className="rs-kpi-v">{counts.unknown}</div>
         </div>
@@ -1091,7 +1219,9 @@ export function ShadowAiView({
 
       {selected.size > 0 && (
         <div className="rs-bulk">
-          <span className="rs-muted">{selected.size} sélectionné(s)</span>
+          <span className="rs-muted">
+            {t("shadow.selected", { n: selected.size })}
+          </span>
           <button
             type="button"
             className="btn secondary btn-sm"
@@ -1118,12 +1248,17 @@ export function ShadowAiView({
               <th style={{ width: 72 }}>{t("shadow.colAgents")}</th>
               <th style={{ width: 72 }}>{t("shadow.colEvents")}</th>
               <th style={{ width: 88 }}>{t("shadow.colLast")}</th>
-              <th style={{ width: 140 }}>{t("shadow.colStatus")}</th>
+              <th style={{ width: 148 }}>{t("shadow.colStatus")}</th>
             </tr>
           </thead>
           <tbody>
             {filtered.map((tool) => (
-              <tr key={tool.tool} style={{ cursor: "default" }}>
+              <tr
+                key={tool.tool}
+                style={{ cursor: "default" }}
+                className={
+                  tool.status === "unauthorized" ? "rs-row-unauth" : undefined
+                }>
                 <td>
                   <input
                     type="checkbox"
@@ -1133,19 +1268,23 @@ export function ShadowAiView({
                   />
                 </td>
                 <td>
-                  <div style={{ fontWeight: 650, fontSize: 12 }}>
+                  <div className="rs-tool-name">
                     {tool.display_name || tool.tool}
                   </div>
-                  <div className="rs-muted" style={{ fontFamily: "ui-monospace, monospace" }}>
-                    {tool.tool}
-                  </div>
+                  <div className="rs-tool-host">{tool.tool}</div>
                 </td>
                 <td>{tool.agents_count}</td>
                 <td>{tool.events_count}</td>
                 <td className="rs-muted">{relativeTime(tool.last_seen_at)}</td>
                 <td>
                   <select
-                    className="input rs-select-sm"
+                    className={`input rs-select-sm ${
+                      tool.status === "unauthorized"
+                        ? "rs-high"
+                        : tool.status === "authorized"
+                          ? "rs-low"
+                          : "rs-med"
+                    }`}
                     value={tool.status}
                     disabled={busy}
                     onChange={(e) =>
@@ -1154,9 +1293,11 @@ export function ShadowAiView({
                         e.target.value as ShadowTool["status"]
                       )
                     }>
-                    <option value="authorized">Autorisé</option>
-                    <option value="unauthorized">Non autorisé</option>
-                    <option value="unknown">Inconnu</option>
+                    <option value="authorized">{t("shadow.markAuth")}</option>
+                    <option value="unauthorized">
+                      {t("shadow.markUnauth")}
+                    </option>
+                    <option value="unknown">{t("shadow.markUnknown")}</option>
                   </select>
                 </td>
               </tr>

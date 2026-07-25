@@ -1281,8 +1281,8 @@ async function processQuarantinedFiles(
               (decision === "mask_send" || decision === "secure_rewrite") &&
               detections.length > 0
             ) {
-              // Secure Rewrite / mask : sortie toujours en .txt (pas de faux .docx/.pdf)
-              const dt = buildMaskedFileList(
+              // T5 : DOCX/PPTX/XLSX conservent le format ; PDF/autres → .txt
+              const dt = await buildMaskedFileList(
                 frozen,
                 scans as FileScanResult[],
                 rules,
@@ -1294,17 +1294,30 @@ async function processQuarantinedFiles(
                       : undefined
                 }
               )
-              // buildMaskedFileList produit déjà des noms .opsgate-secure.txt
+              const metaOut = (
+                dt as DataTransfer & {
+                  __meta?: { preservedFormat?: boolean; outputNames?: string[] }
+                }
+              ).__meta
               const maskedFiles = filesFromDataTransfer(dt)
               await new Promise((r) => setTimeout(r, 50))
               const ok = replaceAttachments(maskedFiles, input)
               await logDecision(decision, detections, true, "file", fileNames)
               if (ok) {
                 toastFromDecision(decision, fileMsgs)
+                const preserved = !!metaOut?.preservedFormat
+                const names = (metaOut?.outputNames || [])
+                  .filter((n) => /\.opsgate-/i.test(n))
+                  .slice(0, 3)
+                  .join(", ")
                 showToast(
-                  decision === "secure_rewrite"
-                    ? "Fichier sécurisé joint en .txt (contenu anonymisé). Envoyez le message."
-                    : "Fichier masqué joint en .txt. Envoyez le message.",
+                  preserved
+                    ? decision === "secure_rewrite"
+                      ? `Document sécurisé joint (format conservé${names ? ` : ${names}` : ""}). Envoyez le message.`
+                      : `Document masqué joint (format conservé${names ? ` : ${names}` : ""}). Envoyez le message.`
+                    : decision === "secure_rewrite"
+                      ? "Fichier sécurisé joint en .txt (contenu anonymisé). Envoyez le message."
+                      : "Fichier masqué joint en .txt. Envoyez le message.",
                   {
                     tone: "success",
                     title: "Pièce jointe prête",
@@ -1315,7 +1328,7 @@ async function processQuarantinedFiles(
                 clearAllFileInputs(input)
                 downloadMaskedFallback(maskedFiles)
                 showToast(
-                  "La page a refusé la réinjection. Un fichier .txt sécurisé a été téléchargé — joignez-le manuellement puis envoyez.",
+                  "La page a refusé la réinjection. Un fichier sécurisé a été téléchargé — joignez-le manuellement puis envoyez.",
                   {
                     tone: "warning",
                     title: "Action manuelle requise",

@@ -90,24 +90,29 @@ Les piliers techniques plus fins (Prompt Security, App Firewall, Identity, Risk 
 **Bonne formulation**  
 > *Empêcher que les **actifs numériques** quittent l’entreprise via les assistants IA.*
 
-| Famille d’actifs | Exemples | Base technique |
-|------------------|----------|----------------|
+| Famille d’actifs | Exemples | Base technique (2026-07) |
+|------------------|----------|---------------------------|
 | Données personnelles | nom, email, téléphone, clients | PII engine ●●● |
 | Secrets techniques | API keys, tokens, mots de passe, SSH | Secrets engine ●●● |
-| Documents / métier | contrats, Excel clients, code, financier | Fichiers + prompt ●●○ |
+| Documents / métier | contrats, Excel, PDF, code, dumps | Fichiers **T1–T5** ●●● (proxy + extension) |
 
-**Actions** (déjà dans le produit, à **mettre en avant** comme catalogue d’actions) :
+**Analyse fichiers / proxy (livré)** — détail : [`DEEP-ANALYSIS-STATUS.md`](./DEEP-ANALYSIS-STATUS.md)  
+
+PDF/Office/texte · OCR · SQLite · MITM multipart deep · mask OOXML format-preserving.
+
+**Actions** (catalogue à mettre en avant) :
 
 - bloquer  
-- anonymiser (Secure Rewrite)  
+- anonymiser (Secure Rewrite / mask Office conservé)  
 - demander confirmation  
 - journaliser  
 
 **Exemple commercial**  
 Utilisateur : *« Analyse cet Excel de nos clients. »*  
-OpsGate : 450 emails, 120 téléphones → **bloquer / anonymiser / confirmer / journaliser**.
+OpsGate : 450 emails, 120 téléphones → **bloquer / anonymiser (XLSX masqué) / confirmer / journaliser**.
 
-**Message** : le cœur n’est pas « détecter une chaîne » — c’est **protéger le patrimoine numérique** face à l’IA.
+**Hors promesse actuelle** : **AI Agent Protection** (agents IDE / API hors navigateur) — **remisé** (V3-G).  
+**Message** : le cœur n’est pas « détecter une chaîne » — c’est **protéger le patrimoine numérique** face à l’IA *sur le canal GenAI web + fichiers*.
 
 ---
 

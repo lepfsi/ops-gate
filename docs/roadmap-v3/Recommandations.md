@@ -189,7 +189,7 @@ Le proxy doit pouvoir recevoir un fichier et renvoyer :
 
 ---
 
-## Statut implémentation (2026-07-21)
+## Statut implémentation (2026-07-21 → 2026-07-25)
 
 | Sujet | Statut | Où |
 |-------|--------|-----|
@@ -200,5 +200,17 @@ Le proxy doit pouvoir recevoir un fichier et renvoyer :
 | PDF ≤ 30 p. extension + timeout 3,5 s | ✅ | `office-extract.ts` |
 | Messages fichiers précis | ✅ | `file-scanner.ts` userHints |
 | Contrat proxy scan-file | ✅ | `POST /opsgate-proxy/scan-file` + fallback extension |
+| **T1** PDF/Office/texte proxy (pdfjs + OOXML) | ✅ | `packages/proxy/src/content-extract.ts` |
+| **T2** OCR proxy (images + PDF scannés JPEG) | ✅ | `ocr.ts`, `pdf-images.ts` |
+| **T3** SQLite schéma + échantillon | ✅ | `sqlite-extract.ts` |
+| **T4** MITM deep multipart | ✅ | `deep-body-scan.ts`, `mitm.ts`, hold 6 Mo |
+| **T5** Mask format-preserving OOXML | ✅ | extension + `POST /opsgate-proxy/mask-file` |
+
+### Remis à plus tard (2026-07-25)
+
+Voir **[`DEEP-ANALYSIS-STATUS.md`](./DEEP-ANALYSIS-STATUS.md)** §3–4 :
+
+- **AI Agent Protection** (V3-G — agents hors navigateur / API / IDE)
+- PDF redact format-preserving, Access/MDB, OCR en MITM, legacy Office, classification ML…
 
 *Fin du brief – OpsGate*

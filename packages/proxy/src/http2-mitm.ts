@@ -30,7 +30,12 @@ import {
   type H2Frame
 } from "./http2-frames.js"
 
-const MAX_STREAM_HOLD = 512 * 1024
+/** Aligné T4 multipart (OPSGATE_PROXY_HOLD_MAX override possible via env côté h1) */
+const MAX_STREAM_HOLD = (() => {
+  const env = parseInt(process.env.OPSGATE_PROXY_HOLD_MAX || "", 10)
+  if (Number.isFinite(env) && env >= 256 * 1024) return env
+  return 6 * 1024 * 1024
+})()
 const STREAM_IDLE_MS = 200
 
 const SKIP_MASK_RULES = new Set([
@@ -51,6 +56,8 @@ type StreamState = {
   blocked: boolean
   /** Déjà forwardé (observe pass-through partiel) */
   released: boolean
+  /** finalize async en cours */
+  finalizing: boolean
 }
 
 export type Http2MitmHandles = {
@@ -104,7 +111,8 @@ export function createHttp2Mitm(opts: {
         observer: createStreamObserver({ host: `${host}#${id}` }),
         idleTimer: null,
         blocked: false,
-        released: false
+        released: false,
+        finalizing: false
       }
       streams.set(id, s)
     }
@@ -163,19 +171,50 @@ export function createHttp2Mitm(opts: {
   }
 
   const finalizeStream = (s: StreamState, why: string) => {
-    if (s.released || s.blocked) return
+    if (s.released || s.blocked || s.finalizing) return
+    s.finalizing = true
     clearStreamTimer(s)
+    void finalizeStreamAsync(s, why)
+  }
 
-    // Scan final (DATA déjà nourri frame par frame)
+  const finalizeStreamAsync = async (s: StreamState, why: string) => {
+    if (s.released || s.blocked) return
+
+    // Scan léger
     s.observer.flush()
-    const dataConcatLen = s.held
-      .filter((f) => f.type === H2_FRAME.DATA)
-      .reduce((n, f) => n + dataPayloadBytes(f).length, 0)
+
+    // T4 : concat DATA payloads → deep multipart scan
+    const dataParts: Buffer[] = []
+    for (const f of s.held) {
+      if (f.type === H2_FRAME.DATA) {
+        const p = dataPayloadBytes(f)
+        if (p.length) dataParts.push(p)
+      }
+    }
+    const dataConcat =
+      dataParts.length === 0
+        ? Buffer.alloc(0)
+        : dataParts.length === 1
+          ? dataParts[0]!
+          : Buffer.concat(dataParts)
+    const dataConcatLen = dataConcat.length
+
+    if (!s.observer.isBlocked() && dataConcatLen > 32) {
+      try {
+        await s.observer.flushDeep(dataConcat)
+      } catch (e) {
+        log("warn", "h2_flush_deep_error", {
+          host,
+          stream_id: s.id,
+          error: e instanceof Error ? e.message : String(e)
+        })
+      }
+    }
 
     const sensitive = s.observer.isBlocked()
+    const preferLocal = s.observer.preferLocalBlock()
 
     if (!enforceMode || !sensitive) {
-      // Forward held frames
       const up = getUpstream()
       safeWrite(up, framesToBuffer(s.held), "h2_release_clean")
       s.released = true
@@ -192,7 +231,7 @@ export function createHttp2Mitm(opts: {
     }
 
     // ── Sensitive ──
-    if (maskMode === "onwire") {
+    if (maskMode === "onwire" && !preferLocal) {
       const rewritten = rewriteStreamDataMasked(s.held, maskDataBody)
       if (rewritten) {
         const up = getUpstream()
@@ -208,17 +247,17 @@ export function createHttp2Mitm(opts: {
         dropStream(s.id)
         return
       }
-      // fallback RST (local-style)
       log("warn", "h2_onwire_fallback_rst", { host, stream_id: s.id })
     }
 
-    // soft-block / local : RST stream, keep connection
     s.blocked = true
     rstBoth(
       s.id,
-      maskMode === "local" || maskMode === "onwire"
-        ? `soft_mask_${maskMode}_${why}`
-        : `block_${why}`
+      preferLocal
+        ? `block_deep_file_${why}`
+        : maskMode === "local" || maskMode === "onwire"
+          ? `soft_mask_${maskMode}_${why}`
+          : `block_${why}`
     )
   }
 

@@ -33,7 +33,7 @@ OpsGate se positionne en **filet métier** *AI-specific* : extension (DOM) + **o
 | Shadow AI (outil non autorisé) | Inventaire hostname + statut auth/unauth | Dépend des events / hosts scannés |
 | Admin malveillant console | Audit WORM, MFA multi-tenant, RLS | Admin principal a pouvoir large (normal) |
 | Attaquant avec poste déjà compromis | Hors scope anti-malware | Endpoint security tierce |
-| Fuite via API backend métier (pas UI IA) | Hors scope | Agent Guard = roadmap V3-G |
+| Fuite via API backend métier (pas UI IA) | Hors scope | **AI Agent Protection** = V3-G **remisé** ([`roadmap-v3/DEEP-ANALYSIS-STATUS.md`](./roadmap-v3/DEEP-ANALYSIS-STATUS.md) §4) |
 
 **Principes** : *defense in depth* (DOM + proxy optionnel) · *least data to cloud* (metadata events) · *admin-driven policy* · *user can still work* (rewrite > block pur).
 

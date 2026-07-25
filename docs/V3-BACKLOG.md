@@ -1,9 +1,9 @@
 # Backlog V3 — différenciation produit
 
-**Mis à jour** : 18 juillet 2026  
-**Statut** : **V3-P0 livré en code** (A/B/C) · polish + V3-D/E/F/G ouverts · pre-GA V2 **toujours** le chemin commercial  
+**Mis à jour** : 25 juillet 2026  
+**Statut** : **V3-P0 livré** (A/B/C) · **analyse fichiers T1–T5 livrée** · V3-D/E/F ouverts · **V3-G AI Agent Protection remisé** · pre-GA V2 = chemin commercial  
 **Principe** : *Enable AI. Secure Data.* — peu de features **fortes**, pas de dispersion  
-**Cut** : [`RELEASE-v3.md`](./RELEASE-v3.md) · **gap** : [`STATUS-GAP-V1-V3.md`](./STATUS-GAP-V1-V3.md)
+**Cut** : [`RELEASE-v3.md`](./RELEASE-v3.md) · **gap** : [`STATUS-GAP-V1-V3.md`](./STATUS-GAP-V1-V3.md) · **deep analysis** : [`roadmap-v3/DEEP-ANALYSIS-STATUS.md`](./roadmap-v3/DEEP-ANALYSIS-STATUS.md)
 
 > **Commercial / GA** : terminer le pre-GA V2 (stores ou MDM, pilote, Stripe prod).  
 > **Produit** : P0 V3 est utilisable en démo ; ne pas bloquer les démos dessus.  
@@ -54,7 +54,8 @@ Socle déjà présent à réutiliser :
 | **V3-D Dashboard Risk / Analytics** | P1 | Moyen | Wireframes § dashboard | ⬜ |
 | **V3-E AI Trust Score (par modèle)** | P1 | Moyen | Vision § Trust Score | ⬜ |
 | **V3-F Classification intelligente** | P2 | Élevé | Vision Phase 4 | ⬜ |
-| **V3-G AI Agent Guard** | P2 | Élevé | Vision Phase 4 | ⬜ |
+| **Deep analysis fichiers (T1–T5)** | P0–P1 | Élevé | [`DEEP-ANALYSIS-STATUS.md`](./roadmap-v3/DEEP-ANALYSIS-STATUS.md) | ✅ **livré** (25/07) |
+| **V3-G AI Agent Protection** | P2–P3 | Élevé | Vision Phase 4 · §4 DEEP-ANALYSIS | ⏸️ **remisé** (pas d’impl. sans arbitrage) |
 
 ---
 
@@ -121,21 +122,25 @@ Alternative acceptable si besoin commercial RSSI d’abord : **V3-C avant V3-A**
 
 ---
 
-## 5. P1 / P2 (plus tard)
+## 5. P1 / P2 (plus tard) + remises
 
-| Epic | Description courte | Hors scope immédiat |
-|------|--------------------|---------------------|
-| **V3-D** | KPIs Risk, tendances, export, alertes score > seuil + Grafana | — |
-| **V3-E** AI Trust Score | Score de confiance par modèle (ChatGPT vs Claude…) | Besoin data usage longue durée |
-| **V3-F** Classification | Public / Internal / Confidential / Restricted (hybride règles+IA) | Complexe, légal |
-| **V3-G** AI Agent Guard | Agents autonomes / outils API hors navigateur | Trop tôt |
+| Epic | Description courte | Statut |
+|------|--------------------|--------|
+| **V3-D** | KPIs Risk, tendances, export, alertes score > seuil + Grafana | ⬜ Ouvert |
+| **V3-E** AI Trust Score | Score de confiance par modèle (ChatGPT vs Claude…) | ⬜ Ouvert (data longue durée) |
+| **V3-F** Classification | Public / Internal / Confidential / Restricted | ⬜ Ouvert (complexe, légal) |
+| **V3-G AI Agent Protection** | Agents autonomes, IDE, API LLM, MCP hors navigateur web | ⏸️ **Remisé** — spec + arbitrage avant code ([détail](./roadmap-v3/DEEP-ANALYSIS-STATUS.md#4-ai-agent-protection-reporté)) |
+| PDF redact format-preserving | Garder un PDF binaire après mask | ⏸️ Remisé (technique) |
+| Access / MDB | Bases legacy | ⏸️ Remisé |
 
 ### Explicitement **pas** V3 early
 
+- **AI Agent Protection** (V3-G) sans gate pre-GA + demande client  
 - Explosion du nombre de règles de détection sans UX  
 - Refonte architecture monorepo  
 - HA multi-région (infra client)  
 - Portal personnel déjà en V2 (Stripe) — ne pas re-spécifier  
+
 
 ---
 

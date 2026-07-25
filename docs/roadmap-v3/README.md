@@ -6,12 +6,15 @@
 
 ---
 
-## Contenu (7 fichiers)
+## Contenu
 
 | Fichier | Type | Sujet |
 |---------|------|--------|
 | [`VISION-PRODUIT-ROADMAP-STRATEGIQUE-v1.md`](./VISION-PRODUIT-ROADMAP-STRATEGIQUE-v1.md) | Vision | Positionnement « AI Security Platform », piliers, roadmap 4 phases |
 | [`ROADMAP-PRODUIT-CLAIRE-v1.md`](./ROADMAP-PRODUIT-CLAIRE-v1.md) | Roadmap | Priorités P0–P2 actionnables, ce qu’on ne fait pas |
+| [`ROADMAP-AI-SECURITY-GATEWAY.md`](./ROADMAP-AI-SECURITY-GATEWAY.md) | Packaging | 5 piliers marketing Gateway (Usage, Data, Governance, Compliance, Intel) |
+| [`DEEP-ANALYSIS-STATUS.md`](./DEEP-ANALYSIS-STATUS.md) | **Statut technique** | **T1–T5** analyse fichiers/proxy + **remises** (AI Agent Protection, …) |
+| [`Recommandations.md`](./Recommandations.md) | Brief impl. | UX Rewrite + bascule scan proxy (statut T1–T5 à jour) |
 | [`SHADOW-AI-RISK-SCORE.md`](./SHADOW-AI-RISK-SCORE.md) | Feature spec | Shadow AI Discovery + Risk Score **utilisateur** (API, tables, formule) |
 | [`SHADOW-AI-RISK-SCORE-WIREFRAMES.md`](./SHADOW-AI-RISK-SCORE-WIREFRAMES.md) | UI | Wireframes console (dashboard Risk, détail, Shadow AI) |
 | [`FEATURE-SPEC-RISK-SCORE-SIMULATION-v1.md`](./FEATURE-SPEC-RISK-SCORE-SIMULATION-v1.md) | Feature spec | Risk Score **par prompt** + Simulation Mode (extension) |
@@ -30,7 +33,7 @@ Grafana (métriques Prometheus) reste dans [`../grafana/`](../grafana/).
 | Events metadata, console, dashboard widgets | Analytics basiques | Risk Score user / Shadow AI UI |
 | Policy par profils / groupes | Policy Engine partiel | Trust Score modèles, classification |
 | Proxy MITM, SSO/MFA, multi-tenant, WORM, stores kit | AI Gateway / enterprise | — hors scope de ces specs |
-| OCR, Office multi-format | File Protection partiel | Archives profondes, etc. |
+| OCR, Office, SQLite, MITM deep, mask OOXML (T1–T5) | File Protection **solide** (proxy + extension) | AI Agent Protection, PDF redact natif, Access/MDB — voir [`DEEP-ANALYSIS-STATUS.md`](./DEEP-ANALYSIS-STATUS.md) |
 
 **En bref** : ces docs ne contredisent pas la V2 — elles **cadrent la différenciation produit** au-delà du DLP « detect + mask ».
 

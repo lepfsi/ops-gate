@@ -16,11 +16,15 @@
     "ca-path": "tsx src/index.ts ca-path",
     "enroll": "tsx src/index.ts enroll",
     "status": "tsx src/index.ts status",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "smoke:scan": "tsx src/file-scan-smoke.ts"
   },
   "dependencies": {
     "@opsgate/engine": "workspace:*",
-    "node-forge": "^1.4.0"
+    "node-forge": "^1.4.0",
+    "pdfjs-dist": "4.10.38",
+    "sql.js": "^1.12.0",
+    "tesseract.js": "5.1.1"
   },
   "devDependencies": {
     "@types/node": "20.11.5",

@@ -2673,6 +2673,14 @@ html[data-theme="dark"] .dash-context-panel {
   -webkit-overflow-scrolling: touch;
 }
 
+.dash-loading-card {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 160px;
+  text-align: center;
+}
+
 /* ========== Dashboard plein écran (Étendre) ========== */
 /* Topbar + nav gauche masquées ; contenu = viewport ; Échap pour sortir */
 html.dash-fs-active,

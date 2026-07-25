@@ -1,6 +1,6 @@
 # OpsGate — Gap analysis V1 → V3 (ce qui reste pour finir)
 
-**Date** : 18 juillet 2026  
+**Date** : 25 juillet 2026 (maj deep analysis T1–T5 + remises)  
 **Public** : concepteur / produit / ops  
 **But** : une page pour prioriser la finition (pre-GA → GA → V3 polish)
 
@@ -47,6 +47,11 @@ GA  ░░░░░░░░░░░░░░░░░░░░  Stores live + 
 - Shadow AI inventaire + risk utilisateurs  
 - UX banner / MSP / file scan profils / i18n agents  
 
+### Deep analysis fichiers / proxy (code 25/07 — T1–T5)
+- Proxy : PDF/Office/texte, OCR, SQLite, MITM multipart deep, mask-file OOXML  
+- Extension : offload proxy + mask format-preserving DOCX/PPTX/XLSX  
+- Doc de référence : [`roadmap-v3/DEEP-ANALYSIS-STATUS.md`](./roadmap-v3/DEEP-ANALYSIS-STATUS.md)  
+
 ---
 
 ## 3. Ce qui **manque** pour annoncer **V2.0 GA**
@@ -76,7 +81,9 @@ Sans stores **ou** MDM documenté chez un pilote, on reste **pre-GA**.
 | Grafana panel Risk/Shadow | V3-D | P2 | JSON dashboard existant à étendre |
 | AI Trust Score (par modèle) | V3-E | P2 | Data longue durée |
 | Classification multi-niveau | V3-F | P3 | Légal + UX |
-| AI Agent Guard (hors navigateur) | V3-G | P3 | Trop tôt |
+| **AI Agent Protection** (hors navigateur / API / IDE) | V3-G | P2–P3 | ⏸️ **Remisé** — pas d’impl. sans arbitrage produit |
+| PDF redact format-preserving | tech | P3 | Remisé (mask `.txt` OK court terme) |
+| Access / MDB | tech | P3 | Remisé |
 
 ---
 
@@ -108,7 +115,8 @@ B. Polish produit (crédibilité)
    7. Dashboard Risk analytics V3-D étendu
 
 C. Suite V3 (après GA)
-   8. Trust Score / classification / Agent Guard
+   8. Trust Score / classification
+   9. **AI Agent Protection** (V3-G) — uniquement si gate + demande client
 ```
 
 ---

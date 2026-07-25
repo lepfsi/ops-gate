@@ -378,7 +378,11 @@
 
 ---
 
-### V3-F / V3-G · Classification & Agent Guard
+### V3-F / V3-G · Classification & AI Agent Protection (remisé)
+
+> **Note 25/07/2026** : deep analysis fichiers **T1–T5 livré**  
+> ([`roadmap-v3/DEEP-ANALYSIS-STATUS.md`](./roadmap-v3/DEEP-ANALYSIS-STATUS.md)).  
+> **V3-G AI Agent Protection** (agents hors navigateur) est **remisé** — ne pas planifier dans le 90j sans arbitrage.
 | | |
 |--|--|
 | **Prio** | P2+ (icebox) |

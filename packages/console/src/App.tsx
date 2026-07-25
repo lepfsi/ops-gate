@@ -1055,7 +1055,7 @@ export default function App() {
   if (authChecking) {
     return (
       <div className="login-shell">
-        <p className="muted">Vérification session…</p>
+        <p className="muted">{t("login.checkingSession")}</p>
       </div>
     )
   }
@@ -1069,6 +1069,8 @@ export default function App() {
         health={health}
         t={t}
         onLoggedIn={async (admin) => {
+          // Évite le flash « aucune donnée » avant le premier loadTab(summary)
+          setBusy(true)
           setSessionAdmin(admin)
           try {
             const me = await api.me()
@@ -2583,6 +2585,16 @@ function SummaryView({
   }
 
   if (!summary) {
+    // Pendant le premier chargement post-login : ne pas afficher l’état « vide »
+    if (busy) {
+      return (
+        <div className="card empty dash-loading-card">
+          <p className="muted" style={{ margin: 0 }}>
+            {t("common.loading")}
+          </p>
+        </div>
+      )
+    }
     return (
       <div className="card empty">
         {t("dash.empty")}
@@ -8142,7 +8154,7 @@ function LoginScreen({
   onLoggedIn: (a: AdminRow) => void
   t: (k: string, vars?: Record<string, string | number>) => string
 }) {
-  const [email, setEmail] = useState("admin@demo.local")
+  const [email, setEmail] = useState("")
   const [password, setPassword] = useState("0000")
   const [totp, setTotp] = useState("")
   const [needMfa, setNeedMfa] = useState(false)
@@ -8675,7 +8687,7 @@ function LoginScreen({
               setErr(null)
               setInfo(null)
             }}>
-            Mot de passe oublié ?
+            {t("login.forgot")}
           </button>
         </p>
         {err && <p className="err">{err}</p>}
@@ -8696,15 +8708,13 @@ function LoginScreen({
           <div className="card" style={{ maxWidth: 400, width: "100%" }}>
             <h2 style={{ marginTop: 0 }}>
               {resetStep === "email"
-                ? "Récupération du mot de passe"
-                : "Saisir l’OTP"}
+                ? t("login.forgotTitle")
+                : t("login.forgotOtpTitle")}
             </h2>
             {resetStep === "email" ? (
               <>
-                <p className="muted">
-                  Entrez l&apos;email de l&apos;Administrator principal.
-                </p>
-                <label className="field-label">Email</label>
+                <p className="muted">{t("login.forgotHint")}</p>
+                <label className="field-label">{t("login.email")}</label>
                 <input
                   className="input"
                   value={resetEmail}
@@ -8726,7 +8736,10 @@ function LoginScreen({
                           r.mailed
                             ? r.message
                             : r.dev_otp
-                              ? `${r.message} (lab OTP affiché ci-dessous)`
+                              ? t("login.forgotDevOtp", {
+                                  msg: r.message,
+                                  otp: r.dev_otp
+                                })
                               : r.message
                         )
                         setResetStep("otp")
@@ -8736,43 +8749,45 @@ function LoginScreen({
                         setBusy(false)
                       }
                     }}>
-                    Envoyer OTP
+                    {t("login.forgotSend")}
                   </button>
                   <button
                     className="btn secondary"
                     type="button"
                     onClick={() => setResetStep(null)}>
-                    Annuler
+                    {t("common.cancel")}
                   </button>
                 </div>
               </>
             ) : (
               <>
                 <p className="muted">
-                  Un code OTP a été envoyé par e-mail
+                  {t("login.forgotOtpSent")}
                   {resetEmail ? (
                     <>
                       {" "}
-                      à <code>{resetEmail}</code>
+                      <code>{resetEmail}</code>
                     </>
                   ) : null}
                   {devOtp ? (
                     <>
                       {" "}
-                      - lab uniquement : <code>{devOtp}</code>
+                      — {t("login.forgotLabOnly")}: <code>{devOtp}</code>
                     </>
                   ) : (
-                    " (vérifiez votre boîte de réception / spam)."
+                    ` ${t("login.forgotCheckInbox")}`
                   )}
                 </p>
-                <label className="field-label">OTP</label>
+                <label className="field-label">{t("login.forgotOtp")}</label>
                 <input
                   className="input"
                   value={otp}
                   onChange={(e) => setOtp(e.target.value)}
                   autoFocus
                 />
-                <label className="field-label">Nouveau mot de passe (≥8)</label>
+                <label className="field-label">
+                  {t("login.forgotNewPassword")}
+                </label>
                 <input
                   className="input"
                   type="password"
@@ -8792,7 +8807,7 @@ function LoginScreen({
                           otpNew,
                           resetEmail || undefined
                         )
-                        setInfo("Mdp mis à jour  -  connectez-vous")
+                        setInfo(t("login.forgotDone"))
                         setPassword(otpNew)
                         setEmail(resetEmail)
                         setResetStep(null)
@@ -8804,13 +8819,13 @@ function LoginScreen({
                         setBusy(false)
                       }
                     }}>
-                    Confirmer
+                    {t("login.forgotConfirm")}
                   </button>
                   <button
                     className="btn secondary"
                     type="button"
                     onClick={() => setResetStep(null)}>
-                    Fermer
+                    {t("common.close")}
                   </button>
                 </div>
               </>

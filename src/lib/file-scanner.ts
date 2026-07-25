@@ -309,6 +309,9 @@ export async function scanFile(
         "./ocr-bitmap"
       )
       if (file.size > OCR_LIMITS.maxInputBytes) {
+        // Proxy accepte jusqu’à ~12 Mo — tenter avant d’abandonner
+        const proxy = await tryProxyFileScan(file)
+        if (proxy?.text?.trim()) return { ...base, ...proxy, category: "image" }
         const nameHits = detectSensitiveData(
           `${file.name} ${file.name.replace(/[_\-.]+/g, " ")}`,
           rules
@@ -317,7 +320,9 @@ export async function scanFile(
           ...base,
           status: "image_ocr_limited",
           detections: nameHits,
-          userHint: `Image trop grande pour OCR (> ${Math.round(OCR_LIMITS.maxInputBytes / 1_000_000)} Mo). Confirmez l’envoi - log enregistré.`
+          userHint:
+            proxy?.userHint ||
+            `Image trop grande pour OCR navigateur (> ${Math.round(OCR_LIMITS.maxInputBytes / 1_000_000)} Mo). Lancez le proxy OpsGate ou réduisez l’image.`
         }
       }
 
@@ -373,12 +378,25 @@ export async function scanFile(
         }
       }
       if (ocr.ok === true && ocr.text.trim().length < 3) {
+        // Peu de texte local → second avis proxy (meilleur worker Node)
+        const proxy = await tryProxyFileScan(file)
+        if (proxy?.text?.trim()) return { ...base, ...proxy, category: "image" }
         return {
           ...base,
           status: "scanned",
           text: "",
           detections: [],
-          userHint: "OCR : peu ou pas de texte détecté dans l’image."
+          userHint:
+            proxy?.userHint ||
+            "OCR : peu ou pas de texte détecté dans l’image."
+        }
+      }
+      // Échec OCR navigateur → proxy
+      {
+        const proxy = await tryProxyFileScan(file)
+        if (proxy?.text?.trim()) return { ...base, ...proxy, category: "image" }
+        if (proxy?.status === "office_warn" || proxy?.status === "image_ocr_failed") {
+          return { ...base, ...proxy, category: "image" }
         }
       }
       const nameHits = detectSensitiveData(
@@ -390,9 +408,11 @@ export async function scanFile(
         ...base,
         status: "image_ocr_failed",
         detections: nameHits,
-        userHint: `OCR indisponible (${errMsg}). Confirmez l’envoi - log enregistré.`
+        userHint: `OCR navigateur indisponible (${errMsg}). Lancez le proxy OpsGate pour OCR local, ou confirmez l’envoi.`
       }
     } catch (e) {
+      const proxy = await tryProxyFileScan(file)
+      if (proxy?.text?.trim()) return { ...base, ...proxy, category: "image" }
       const nameHits = detectSensitiveData(
         `${file.name} ${file.name.replace(/[_\-.]+/g, " ")}`,
         rules
@@ -401,7 +421,9 @@ export async function scanFile(
         ...base,
         status: "image_ocr_failed",
         detections: nameHits,
-        userHint: `OCR en échec (${e instanceof Error ? e.message : "error"}). Confirmez l’envoi - log enregistré.`
+        userHint:
+          proxy?.userHint ||
+          `OCR en échec (${e instanceof Error ? e.message : "error"}). Proxy OpsGate recommandé.`
       }
     }
   }
@@ -462,11 +484,14 @@ export async function scanFile(
           }
         }
         if (extracted?.errorCode === "pdf_no_text") {
+          // Proxy may extract more (better pdfjs path / future OCR)
+          const proxy = await tryProxyFileScan(file)
+          if (proxy) return { ...base, ...proxy }
           return {
             ...base,
             status: "office_warn",
             userHint:
-              "PDF sans texte extractible (scanné/image). Convertissez en DOCX texte, ou utilisez le proxy OpsGate avec OCR si policy."
+              "PDF sans texte extractible (scanné/image). Lancez le proxy OpsGate (scan local) ou convertissez en DOCX texte."
           }
         }
         if (extracted?.text?.trim()) {
@@ -495,20 +520,24 @@ export async function scanFile(
                   : undefined
           }
         }
-        // PDF/DOCX sans texte : ne jamais laisser passer en silence
+        // PDF/DOCX sans texte : essayer proxy avant d’abandonner
         console.warn(
           "[OpsGate] office scan empty",
           file.name,
           extracted?.errorCode || "no_text"
         )
+        {
+          const proxy = await tryProxyFileScan(file)
+          if (proxy) return { ...base, ...proxy }
+        }
         return {
           ...base,
           status: "office_warn",
           userHint: extracted
             ? ext === "pdf"
-              ? "PDF sans texte extractible (probablement scanné/image). Convertissez en DOCX texte ou activez l’OCR proxy."
-              : `Document ${ext.toUpperCase()} sans texte extractible. Vérifiez qu’il contient du texte sélectionnable.`
-            : `Extraction ${ext.toUpperCase()} impossible. Formats supportés : PDF texte ≤30 p., DOCX, PPTX, XLSX.`
+              ? "PDF sans texte extractible (probablement scanné/image). Proxy OpsGate recommandé pour la suite OCR."
+              : `Document ${ext.toUpperCase()} sans texte extractible. Vérifiez le contenu ou lancez le proxy OpsGate.`
+            : `Extraction ${ext.toUpperCase()} impossible. Formats : PDF texte, DOCX, PPTX, XLSX — proxy pour les fichiers lourds.`
         }
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e)
@@ -566,11 +595,40 @@ export async function scanFile(
     }
     const ext = extensionOf(file.name)
     if (ext !== "sql") {
+      // .db / .sqlite / .sqlite3 → proxy (sql.js) ; Access non supporté
+      if (
+        ext === "db" ||
+        ext === "sqlite" ||
+        ext === "sqlite3" ||
+        ext === "db3"
+      ) {
+        const proxy = await tryProxyFileScan(file)
+        if (proxy?.text?.trim()) {
+          return { ...base, ...proxy, category: "database" }
+        }
+        if (proxy?.status === "office_warn" || proxy?.status === "error") {
+          return {
+            ...base,
+            ...proxy,
+            category: "database",
+            status: "warn_confirm",
+            userHint:
+              proxy.userHint ||
+              "Scan SQLite proxy en échec. Confirmez l’envoi - log enregistré."
+          }
+        }
+        return {
+          ...base,
+          status: "warn_confirm",
+          userHint:
+            "Base SQLite : lancez le proxy OpsGate pour analyser le schéma et un échantillon de lignes, ou confirmez l’envoi."
+        }
+      }
       return {
         ...base,
         status: "warn_confirm",
         userHint:
-          "Fichier base de données binaire (.db/.sqlite) : contenu non extrait. Confirmez l’envoi - log enregistré."
+          "Fichier base de données non SQLite (.mdb/.accdb…) : non extrait. Confirmez l’envoi - log enregistré."
       }
     }
   }
@@ -630,9 +688,13 @@ async function tryProxyFileScan(
       ""
   ].filter(Boolean) as string[]
 
+  // Cap base64 payload (~20 Mo fichier) pour ne pas bloquer le content-script
+  const MAX_PROXY_BYTES = 20_000_000
   let b64: string
   try {
-    const buf = await file.arrayBuffer()
+    const slice =
+      file.size > MAX_PROXY_BYTES ? file.slice(0, MAX_PROXY_BYTES) : file
+    const buf = await slice.arrayBuffer()
     const bytes = new Uint8Array(buf)
     let binary = ""
     const chunk = 0x8000
@@ -647,17 +709,21 @@ async function tryProxyFileScan(
   for (const base of bases) {
     try {
       const ctrl = new AbortController()
-      const t = setTimeout(() => ctrl.abort(), 12_000)
-      const res = await fetch(`${base.replace(/\/$/, "")}/opsgate-proxy/scan-file`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          filename: file.name,
-          mime: file.type || "application/octet-stream",
-          content_base64: b64
-        }),
-        signal: ctrl.signal
-      })
+      // PDF multi-pages + OCR : jusqu’à ~90 s côté proxy
+      const t = setTimeout(() => ctrl.abort(), 95_000)
+      const res = await fetch(
+        `${base.replace(/\/$/, "")}/opsgate-proxy/scan-file`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            filename: file.name,
+            mime: file.type || "application/octet-stream",
+            content_base64: b64
+          }),
+          signal: ctrl.signal
+        }
+      )
       clearTimeout(t)
       if (!res.ok) continue
       const j = (await res.json()) as {
@@ -665,31 +731,57 @@ async function tryProxyFileScan(
         text?: string
         truncated?: boolean
         error?: string
+        kind?: string
+        needsOcr?: boolean
+        usedOcr?: boolean
+        ocrImages?: number
+        tableCount?: number
+        rowSamples?: number
         detections?: Detection[]
       }
       if (j.status === "failed" || j.status === "timeout") {
         return {
-          status: "office_warn",
+          status:
+            j.kind === "image" || j.usedOcr
+              ? "image_ocr_failed"
+              : "office_warn",
           userHint:
             j.error ||
-            `Proxy scan ${j.status}. Vérifiez que le proxy OpsGate est démarré (pnpm proxy:dev).`
+            `Proxy scan ${j.status}. Vérifiez que le proxy OpsGate est démarré.`
         }
       }
       const text = (j.text || "").trim()
       if (!text) continue
-      // Re-détection locale pour types Detection complets
       const detections = detectSensitiveData(text)
+      const sizeTrunc = file.size > MAX_PROXY_BYTES
+      const ocrNote =
+        j.usedOcr && j.ocrImages
+          ? ` OCR ${j.ocrImages} image(s).`
+          : j.usedOcr
+            ? " OCR."
+            : ""
+      const dbNote =
+        j.kind === "sqlite" && j.tableCount != null
+          ? ` ${j.tableCount} table(s), ${j.rowSamples ?? 0} ligne(s) échantillon.`
+          : ""
       return {
-        status: j.truncated || j.status === "partial" ? "too_large_partial" : "scanned",
+        status:
+          j.truncated || j.status === "partial" || sizeTrunc
+            ? "too_large_partial"
+            : "scanned",
         text,
         detections,
-        truncated: !!j.truncated || j.status === "partial",
-        userHint: j.truncated
-          ? "Scan proxy partiel (document volumineux)."
-          : "Scan effectué via le proxy OpsGate local."
+        truncated: !!j.truncated || j.status === "partial" || sizeTrunc,
+        userHint: sizeTrunc
+          ? "Scan proxy partiel (fichier tronqué > 20 Mo)."
+          : j.truncated
+            ? `Scan proxy partiel.${ocrNote}${dbNote}`
+            : j.kind
+              ? `Scan proxy local (${j.kind}).${ocrNote}${dbNote}`
+              : `Scan effectué via le proxy OpsGate local.${ocrNote}${dbNote}`
       }
     } catch {
-      /* proxy absent */
+      /* proxy absent ou CORS / réseau */
     }
   }
   return null
@@ -709,9 +801,7 @@ export async function scanFiles(
 }
 
 /**
- * Nom de sortie sûr après mask/rewrite.
- * IMPORTANT : ne jamais renvoyer du texte plat avec une extension .docx/.pdf —
- * les SPA (ChatGPT…) tentent de parser le format d’origine → « parsing failed ».
+ * Nom de sortie .txt (fallback PDF / formats non préservables).
  */
 export function safeRewrittenFileName(
   originalName: string,
@@ -721,18 +811,31 @@ export function safeRewrittenFileName(
   return `${base}.opsgate-${kind}.txt`
 }
 
+export type MaskedFileListMeta = {
+  /** true si au moins un fichier a gardé son format Office */
+  preservedFormat: boolean
+  /** noms produits */
+  outputNames: string[]
+}
+
 /**
- * Reconstruit un DataTransfer avec le contenu texte masqué / rewrite.
- * @param previewRewrittenText texte édité dans le bandeau (prioritaire si 1 fichier sensible)
+ * Reconstruit un DataTransfer avec mask/rewrite.
+ * T5 : DOCX/PPTX/XLSX → format préservé ; sinon .txt (PDF, images, etc.).
  */
-export function buildMaskedFileList(
+export async function buildMaskedFileList(
   original: FileList | File[],
   scans: FileScanResult[],
   rules?: DetectionRule[] | null,
   mode: "mask" | "secure_rewrite" = "mask",
   opts?: { previewRewrittenText?: string }
-): DataTransfer {
-  const dt = new DataTransfer()
+): Promise<DataTransfer & { __meta?: MaskedFileListMeta }> {
+  const { maskOfficePreserveFormat, isFormatPreserveSupported } = await import(
+    "./format-preserve-mask"
+  )
+
+  const dt = new DataTransfer() as DataTransfer & {
+    __meta?: MaskedFileListMeta
+  }
   const files = Array.from(original)
   const byName = new Map(scans.map((s) => [s.fileName + ":" + s.fileSize, s]))
   const kind = mode === "secure_rewrite" ? "secure" : "masked"
@@ -742,19 +845,20 @@ export function buildMaskedFileList(
       (s.status === "scanned" || s.status === "too_large_partial") &&
       s.text
   )
+  let preservedFormat = false
+  const outputNames: string[] = []
 
   // Preview bandeau (utilisateur a vu/édité le rewrite) — un seul fichier sensible
+  // → reste en .txt (le preview est du texte, pas du binaire Office)
   const preview = (opts?.previewRewrittenText || "").trim()
   if (mode === "secure_rewrite" && preview && sensitiveScans.length === 1) {
     const only = sensitiveScans[0]
     let body = preview
-    // Retirer en-tête agrégé « --- filename --- »
     const hdr = new RegExp(
       `^---\\s*${escapeRegExp(only.fileName)}\\s*---\\s*\\n?`,
       "i"
     )
     body = body.replace(hdr, "").trim()
-    // Si multi-sections encore présentes, prendre le corps après le premier header
     if (body.includes("--- ") && body.includes(only.fileName)) {
       const idx = body.indexOf(only.fileName)
       if (idx >= 0) {
@@ -767,17 +871,19 @@ export function buildMaskedFileList(
         "\n\n/* [OpsGate] Fichier tronqué au scan - vérifiez le reste manuellement */\n"
     }
     const outName = safeRewrittenFileName(only.fileName, "secure")
+    outputNames.push(outName)
     dt.items.add(
       new File([body], outName, {
         type: "text/plain;charset=utf-8",
         lastModified: Date.now()
       })
     )
-    // Autres fichiers non sensibles : originaux
     for (const file of files) {
       if (file.name === only.fileName && file.size === only.fileSize) continue
       dt.items.add(file)
+      outputNames.push(file.name)
     }
+    dt.__meta = { preservedFormat: false, outputNames }
     return dt
   }
 
@@ -789,6 +895,30 @@ export function buildMaskedFileList(
       (scan.status === "scanned" || scan.status === "too_large_partial") &&
       scan.text
     ) {
+      // T5 : tenter préservation de format OOXML
+      if (isFormatPreserveSupported(file.name)) {
+        try {
+          const preserved = await maskOfficePreserveFormat(file, {
+            mode,
+            rules,
+            detections: scan.detections
+          })
+          if (preserved.ok) {
+            preservedFormat = true
+            outputNames.push(preserved.fileName)
+            dt.items.add(
+              new File([preserved.blob], preserved.fileName, {
+                type: preserved.mime,
+                lastModified: Date.now()
+              })
+            )
+            continue
+          }
+        } catch {
+          /* fallback txt */
+        }
+      }
+
       const masked =
         mode === "secure_rewrite"
           ? secureRewrite(scan.text, scan.detections, {
@@ -800,8 +930,8 @@ export function buildMaskedFileList(
         ? masked +
           "\n\n/* [OpsGate] Fichier tronqué au scan - vérifiez le reste manuellement */\n"
         : masked
-      // Toujours .txt — le site ne peut pas parser un faux .docx/.pdf
       const outName = safeRewrittenFileName(file.name, kind)
+      outputNames.push(outName)
       dt.items.add(
         new File([body], outName, {
           type: "text/plain;charset=utf-8",
@@ -810,8 +940,10 @@ export function buildMaskedFileList(
       )
     } else {
       dt.items.add(file)
+      outputNames.push(file.name)
     }
   }
+  dt.__meta = { preservedFormat, outputNames }
   return dt
 }
 
