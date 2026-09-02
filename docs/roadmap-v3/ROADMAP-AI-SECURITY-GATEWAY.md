@@ -111,8 +111,11 @@ PDF/Office/texte · OCR · SQLite · MITM multipart deep · mask OOXML format-pr
 Utilisateur : *« Analyse cet Excel de nos clients. »*  
 OpsGate : 450 emails, 120 téléphones → **bloquer / anonymiser (XLSX masqué) / confirmer / journaliser**.
 
-**Hors promesse actuelle** : **AI Agent Protection** (agents IDE / API hors navigateur) — **remisé** (V3-G).  
-**Message** : le cœur n’est pas « détecter une chaîne » — c’est **protéger le patrimoine numérique** face à l’IA *sur le canal GenAI web + fichiers*.
+**Suite planifiée** (pas encore la promesse commerciale GA) :  
+**AI Agent Protection** + **tunnel OpsVault** (inject / leases / NHI) —  
+roadmap technique 3 phases : [`ROADMAP-TECHNIQUE-OPSGATE.md`](./ROADMAP-TECHNIQUE-OPSGATE.md) · contrat [`../OPSGATE_INTEGRATION.md`](../OPSGATE_INTEGRATION.md).
+
+**Message** : le cœur n’est pas « détecter une chaîne » — c’est **protéger le patrimoine numérique** face à l’IA *sur le canal GenAI web + fichiers*, puis *agents / secrets* selon la roadmap.
 
 ---
 

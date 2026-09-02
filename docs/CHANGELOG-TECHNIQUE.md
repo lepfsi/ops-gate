@@ -2,8 +2,10 @@
 
 **Public** : développeurs / mainteneurs qui reviennent dans 6 mois ou 5 ans.  
 **But** : ne pas s’égarer — *quoi a été fait, où, comment ça marche, où lire la suite*.  
-**Mis à jour** : 25 juillet 2026  
-**Maturité produit** : **V2 pre-GA + V3-P0 + deep analysis T1–T5** — [`STATUS-V2.md`](./STATUS-V2.md) · gap [`STATUS-GAP-V1-V3.md`](./STATUS-GAP-V1-V3.md) · deep [`roadmap-v3/DEEP-ANALYSIS-STATUS.md`](./roadmap-v3/DEEP-ANALYSIS-STATUS.md)
+**Mis à jour** : 29 juillet 2026  
+**Maturité produit** : **V2 pre-GA + V3-P0 + deep analysis T1–T5** · roadmap tech 3 phases + OpsVault  
+[`STATUS-V2.md`](./STATUS-V2.md) · [`STATUS-GAP-V1-V3.md`](./STATUS-GAP-V1-V3.md) ·  
+[`roadmap-v3/ROADMAP-TECHNIQUE-OPSGATE.md`](./roadmap-v3/ROADMAP-TECHNIQUE-OPSGATE.md) · [`OPSGATE_INTEGRATION.md`](./OPSGATE_INTEGRATION.md)
 
 ---
 
@@ -30,7 +32,8 @@ ops-gate/
 | Décideurs DSI | `docs/DECIDEURS-V2-FR.md` (+ PDF), `docs/DSI-FILTRAGE-DONNEES-SENSIBLES.md` |
 | Admins console | `docs/GUIDE-UTILISATEUR-V2.md` (+ PDF) |
 | Roadmap / backlog V2 | `docs/V2-BACKLOG.md`, catalogue `docs/architecture/BACKEND-V2-CATALOG.md` |
-| Deep analysis T1–T5 + remises | `docs/roadmap-v3/DEEP-ANALYSIS-STATUS.md` |
+| Deep analysis T1–T5 | `docs/roadmap-v3/DEEP-ANALYSIS-STATUS.md` |
+| Roadmap tech 3 phases + OpsVault | `docs/roadmap-v3/ROADMAP-TECHNIQUE-OPSGATE.md`, `docs/OPSGATE_INTEGRATION.md` |
 | Design d’origine V2 | `docs/architecture/PLATFORM-v2.md` (référence ; code largement livré) |
 | Règles sensibles | `packages/engine/rules/rules.json` + `packages/engine/src/rules-engine.ts` |
 | Branding PDF | `scripts/pdf_brand.py` (BrandMark login MMC) |
@@ -63,7 +66,17 @@ ops-gate/
 | Doc | Statut + **AI Agent Protection remisé** | `docs/roadmap-v3/DEEP-ANALYSIS-STATUS.md` |
 | Smoke | `pnpm --filter @opsgate/proxy smoke:scan` | `file-scan-smoke.ts` |
 
-**Remises explicites** : AI Agent Protection (V3-G), PDF redact natif, Access/MDB, OCR en MITM — pas d’impl. sans arbitrage.
+**Remises techniques fichiers** : PDF redact natif, Access/MDB, OCR en MITM.  
+**AI Agent Protection** : planifié en **Phase 2–3** de la roadmap technique (plus un « jamais »).
+
+## 0quater. Session 29 juillet 2026 (roadmap technique + OpsVault)
+
+| Sujet | Détail |
+|-------|--------|
+| Roadmap 3 phases | Consolidation → runtime agentique/MCP → posture |
+| Tunnel OpsVault | Contrat `OPSGATE_INTEGRATION.md` relié aux phases 1–3 |
+| Doc pivot | `docs/roadmap-v3/ROADMAP-TECHNIQUE-OPSGATE.md` |
+| Alignement backlog | V3-G = Phase 2–3 ; Phase 1 = next build focus |
 | File scan profils | resolveEffectiveFileScan | policy + console PolicyView |
 | Dashboard soft load | pas de flash busy si cache | `App.tsx` loadTab |
 | Risk pagination | 20 / page | `RiskShadowViews.tsx` |

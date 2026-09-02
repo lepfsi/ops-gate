@@ -1,6 +1,6 @@
 # OpsGate — Gap analysis V1 → V3 (ce qui reste pour finir)
 
-**Date** : 25 juillet 2026 (maj deep analysis T1–T5 + remises)  
+**Date** : 29 juillet 2026 (maj roadmap technique 3 phases + OpsVault)  
 **Public** : concepteur / produit / ops  
 **But** : une page pour prioriser la finition (pre-GA → GA → V3 polish)
 
@@ -81,9 +81,10 @@ Sans stores **ou** MDM documenté chez un pilote, on reste **pre-GA**.
 | Grafana panel Risk/Shadow | V3-D | P2 | JSON dashboard existant à étendre |
 | AI Trust Score (par modèle) | V3-E | P2 | Data longue durée |
 | Classification multi-niveau | V3-F | P3 | Légal + UX |
-| **AI Agent Protection** (hors navigateur / API / IDE) | V3-G | P2–P3 | ⏸️ **Remisé** — pas d’impl. sans arbitrage produit |
-| PDF redact format-preserving | tech | P3 | Remisé (mask `.txt` OK court terme) |
-| Access / MDB | tech | P3 | Remisé |
+| **AI Agent Protection** (MCP / runtime agents) | V3-G | P2 | 📅 **Phase 2–3** — [`ROADMAP-TECHNIQUE-OPSGATE.md`](./roadmap-v3/ROADMAP-TECHNIQUE-OPSGATE.md) |
+| **Tunnel OpsVault** (inject / leases / NHI) | dual produit | P1→P3 | Contrat [`OPSGATE_INTEGRATION.md`](./OPSGATE_INTEGRATION.md) |
+| PDF redact format-preserving | tech | P3 | Remisé technique |
+| Access / MDB | tech | P3 | Remisé technique |
 
 ---
 
@@ -114,9 +115,11 @@ B. Polish produit (crédibilité)
    6. Meta risk events + alertes score
    7. Dashboard Risk analytics V3-D étendu
 
-C. Suite V3 (après GA)
-   8. Trust Score / classification
-   9. **AI Agent Protection** (V3-G) — uniquement si gate + demande client
+C. Suite technique (après / en parallèle controlled de pre-GA)
+   8. **Phase 1** roadmap tech (proxy flexible, Shadow typé, API, Docker, OpsVault inject)
+      → [`ROADMAP-TECHNIQUE-OPSGATE.md`](./roadmap-v3/ROADMAP-TECHNIQUE-OPSGATE.md)
+   9. **Phase 2** runtime agentique + MCP + leases OpsVault
+  10. **Phase 3** posture + NHI policy-export + dashboards
 ```
 
 ---

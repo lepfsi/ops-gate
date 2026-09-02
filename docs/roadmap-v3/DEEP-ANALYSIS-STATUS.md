@@ -1,7 +1,8 @@
 # OpsGate — Analyse approfondie fichiers & proxy
 
-**Date** : 25 juillet 2026  
-**Statut** : **T1–T5 livrés en code** · suite explicitement **remisée**  
+**Date** : 29 juillet 2026  
+**Statut** : **T1–T5 livrés en code** · suite technique fichiers en maintenance  
+**Roadmap globale** (agents, MCP, OpsVault) : [`ROADMAP-TECHNIQUE-OPSGATE.md`](./ROADMAP-TECHNIQUE-OPSGATE.md)  
 **Philosophie** : *Enable AI. Secure Data.* — profondeur réelle localement, promesse honnête
 
 ---
@@ -48,7 +49,7 @@ pnpm --filter @opsgate/proxy smoke:scan
 
 | Sujet | Pourquoi plus tard | Epic / note |
 |-------|-------------------|-------------|
-| **AI Agent Protection** (agents autonomes, outils API, hors navigateur web) | Périmètre product + data-plane différent (pas SPA file input) ; V3-G | **V3-G** — voir §4 |
+| **AI Agent Protection** (runtime MCP / agents) | Hors scope **fichiers** ; planifié en **Phase 2–3** roadmap technique + OpsVault | Voir §4 + [`ROADMAP-TECHNIQUE-OPSGATE.md`](./ROADMAP-TECHNIQUE-OPSGATE.md) |
 | PDF **format-preserving** redact | Complexité pdfium/lib ; mask `.txt` suffit court terme | Backlog technique |
 | Access / **MDB / ACCDB** | Formats legacy ; demande rare | Backlog technique |
 | OCR **en MITM** (latence hold) | OCR volontairement off sur le chemin réseau ; extension + `/scan-file` | Design T4 |
@@ -60,18 +61,18 @@ pnpm --filter @opsgate/proxy smoke:scan
 
 ---
 
-## 4. AI Agent Protection (reporté)
+## 4. AI Agent Protection — hors scope de *ce* doc fichiers
 
-**Nom produit** : *AI Agent Protection* (aligné roadmap « AI Agent Guard » / V3-G).
+**Nom produit** : *AI Agent Protection* (ex- « AI Agent Guard » / V3-G).
 
-### Ce que ça voudrait dire
+Ce n’est **plus un oubli** : le plan d’implémentation est dans  
+**[`ROADMAP-TECHNIQUE-OPSGATE.md`](./ROADMAP-TECHNIQUE-OPSGATE.md)** :
 
-Protéger les **agents IA hors navigateur** et les canaux non couverts par l’extension SPA :
-
-- CLI / IDE agents (Cursor, Claude Code, copilots locaux)
-- Appels API LLM depuis backends métier
-- Outils MCP / function-calling qui exfiltrent des fichiers ou secrets
-- Desktop apps IA hors allowlist navigateur
+| Phase roadmap | Contenu agent |
+|---------------|---------------|
+| **Phase 1** | Consolidation, API interne, Shadow typé, **tunnel OpsVault inject P1** |
+| **Phase 2** | Runtime MCP, identité agent, policies contextuelles, **leases OpsVault P2** |
+| **Phase 3** | Posture, discovery active, **NHI policy-export OpsVault** |
 
 ### Ce que OpsGate fait **déjà** (ne pas confondre)
 
@@ -79,23 +80,14 @@ Protéger les **agents IA hors navigateur** et les canaux non couverts par l’e
 |-------|------------|
 | Sites web IA (ChatGPT, Claude, …) | Extension + policy hosts |
 | Egress HTTPS allowlist | Proxy MITM (si déployé) |
-| Kill switch agent console | `ai_access: blocked` (endpoint / extension) |
+| Kill switch agent console | `ai_access: blocked` |
 | Shadow AI inventaire hosts | Discovery web |
+| Fichiers / deep analysis | T1–T5 (ce document) |
 
-### Pourquoi ce n’est **pas** la suite immédiate de T1–T5
+### Règle
 
-1. T1–T5 sécurisent le **chemin fichier + web UI** — gap commercial le plus douloureux.  
-2. Agent Protection exige un **autre data-plane** (hooks process, SDK, reverse-proxy API, ou agent desktop).  
-3. Risque de dispersion avant GA (stores / pilote / packaging).
-
-### Quand le rouvrir
-
-- Gate pre-GA franchie (distribution + pilote)  
-- Demande client explicite « agents IDE / API »  
-- Spécification dédiée (périmètre, OS, privacy) avant code  
-
-**Statut backlog** : **V3-G — remisé** (priorité P2/P3, effort élevé).  
-Ne pas démarrer d’implémentation sans arbitrage produit.
+Ne **pas** mélanger le backlog « fichiers » (T1–T5) avec le runtime agentique :  
+finir Phase 1, **puis** Phase 2 agents/MCP + OpsVault.
 
 ---
 

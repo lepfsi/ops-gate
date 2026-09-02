@@ -105,18 +105,22 @@ Ordre recommandé d’implémentation :
 | P1       | Dashboard avancé + Analytics     | 3     | Élevé            | Moyen  | ⬜ |
 | P1       | Politiques par département       | 3     | Moyen            | Moyen  | ⬜ |
 | P1       | AI Trust Score                   | 3     | Moyen/Élevé      | Moyen  | ⬜ |
-| P2       | **AI Agent Protection**          | 4     | Élevé (futur)    | Élevé  | ⏸️ Remisé |
+| P1       | Consolidation + tunnel OpsVault (Phase 1 tech) | 3 | Élevé | Moyen | ⬜ Planifié |
+| P2       | **AI Agent Protection** / MCP runtime (Phase 2) | 4 | Élevé | Élevé | 📅 Après Phase 1 |
+| P2       | Posture + OpsVault NHI (Phase 3) | 4 | Élevé | Élevé | 📅 Après Phase 2 |
 | P2       | Classification intelligente     | 4     | Élevé            | Élevé  | ⬜ |
+
+Voir le détail des 3 phases : [`ROADMAP-TECHNIQUE-OPSGATE.md`](./ROADMAP-TECHNIQUE-OPSGATE.md) · contrat secrets [`../OPSGATE_INTEGRATION.md`](../OPSGATE_INTEGRATION.md).
 
 ---
 
 ## Ce qu’on ne fait pas maintenant
 
 Pour éviter de s’égarer, on met volontairement de côté pour l’instant :
-- Trop de règles de détection supplémentaires
+- Trop de règles de détection supplémentaires sans tests FP
 - Des fonctionnalités « nice to have » non différenciantes
 - Une refonte complète de l’architecture
-- **AI Agent Protection** (ex- « AI Agent Guard ») — agents hors navigateur, API métier, IDE : **reporté** tant que la gate pre-GA n’est pas passée et qu’une spec n’est pas arbitrée ([`DEEP-ANALYSIS-STATUS.md`](./DEEP-ANALYSIS-STATUS.md) §4)
+- **Runtime MCP / Agent Protection avant la Phase 1** (proxy flexible, API, Shadow typé, OpsVault inject)
 - PDF redact binaire natif, Access/MDB, OCR sur le chemin MITM (latence)
 
 ---

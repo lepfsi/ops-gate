@@ -1,4 +1,4 @@
-# OpsGate — Notes de développement
+# OpsGate - Notes de développement
 
 Spec produit : **OpsGate - Spécification MVP v1.0** (Google Drive).
 
@@ -112,7 +112,7 @@ Voir **`docs/demo/`** :
 
 ## Architecture plateforme (post-MVP)
 
-**Statut : GO PRODUIT v1.1** (11/07/2026) — voir [PRODUCT-GO-v1.1.md](./docs/architecture/PRODUCT-GO-v1.1.md)
+**Statut : GO PRODUIT v1.1** (11/07/2026) - voir [PRODUCT-GO-v1.1.md](./docs/architecture/PRODUCT-GO-v1.1.md)
 
 | Doc | Contenu |
 |-----|---------|
@@ -141,7 +141,7 @@ pnpm build
 pnpm e2e
 ```
 
-## Phase 4 — Validation
+## Phase 4 - Validation
 
 - Checklist manuelle : `docs/VALIDATION.md`
 - Tests règles : `pnpm test:rules`

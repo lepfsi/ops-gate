@@ -1,4 +1,4 @@
-# Go produit — OpsGate Platform v1.1
+# Go produit - OpsGate Platform v1.1
 
 **Date** : 11 juillet 2026  
 **Décision** : **GO BUILD**  
@@ -34,10 +34,10 @@
 | **PR5** Postgres store | **DONE** — + fallback memory |
 | **PR6** v1.1 pilot release | **DONE** — ed25519 + docs + e2e |
 
-**Cut produit : OpsGate v1.1.0 pilot-ready** — voir [RELEASE-v1.1.md](../RELEASE-v1.1.md).
+**Cut produit : OpsGate v1.1.0 pilot-ready** - voir [RELEASE-v1.1.md](../RELEASE-v1.1.md).
 
 ## Signature produit
 
 | Rôle | Décision |
 |------|----------|
-| Produit (Steve) | **GO** — 11/07/2026 |
+| Produit (Steve) | **GO** - 11/07/2026 |

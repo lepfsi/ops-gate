@@ -32,7 +32,7 @@ OpsGate is an **AI-specific business safety net**: extension (DOM) + optional lo
 | Shadow AI (unapproved tool) | Hostname inventory + auth/unauth status | Depends on events / scanned hosts |
 | Malicious console admin | WORM audit, multi-tenant MFA, RLS | Primary admin is powerful (normal) |
 | Attacker with already-compromised endpoint | Out of scope for anti-malware | Third-party EDR |
-| Leak via business backend API (not AI UI) | Out of scope | **AI Agent Protection** = V3-G **deferred** ([`roadmap-v3/DEEP-ANALYSIS-STATUS.md`](./roadmap-v3/DEEP-ANALYSIS-STATUS.md) §4) |
+| Leak via business backend API (not AI UI) | Out of scope **today** (browser extension / web) | **AI Agent Protection** = roadmap **Phase 2–3** + **OpsVault** tunnel ([`ROADMAP-TECHNIQUE-OPSGATE.md`](./roadmap-v3/ROADMAP-TECHNIQUE-OPSGATE.md), [`OPSGATE_INTEGRATION.md`](./OPSGATE_INTEGRATION.md)) |
 
 **Principles**: defense in depth (DOM + optional proxy) · least data to cloud (metadata events) · admin-driven policy · user can still work (rewrite > pure block).
 

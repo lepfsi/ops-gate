@@ -4,7 +4,7 @@
 
 ---
 
-## Prompt A — Sans alerte (contrôle)
+## Prompt A - Sans alerte (contrôle)
 
 ```
 Peux-tu m'expliquer la différence entre un VLAN access et un VLAN trunk,
@@ -14,7 +14,7 @@ Réponds de façon concise avec un exemple simple.
 
 ---
 
-## Prompt B — Secrets applicatifs (bandeau attendu)
+## Prompt B - Secrets applicatifs (bandeau attendu)
 
 ```
 J'ai un souci d'auth sur mon API staging. Voici la config que j'utilise :
@@ -30,7 +30,7 @@ Peux-tu me dire si mon header Authorization est correct ?
 
 ---
 
-## Prompt C — Config Fortinet (infra)
+## Prompt C - Config Fortinet (infra)
 
 ```
 Voici un extrait de ma FortiGate, tu peux m'aider à comprendre cette policy ?
@@ -51,12 +51,12 @@ config firewall policy
     next
 end
 
-fortinet — pourquoi le set allowaccess est-il trop permissif ?
+fortinet - pourquoi le set allowaccess est-il trop permissif ?
 ```
 
 ---
 
-## Prompt D — MikroTik (infra alternative)
+## Prompt D - MikroTik (infra alternative)
 
 ```
 Sur mon MikroTik j'ai collé ça, c'est OK pour la prod ?
@@ -71,7 +71,7 @@ Quels risques tu vois ?
 
 ---
 
-## Prompt E — WireGuard (VPN)
+## Prompt E - WireGuard (VPN)
 
 ```
 Voici mon peer WireGuard de test, corrige la conf si besoin :
@@ -89,7 +89,7 @@ Endpoint = vpn.demo.local:51820
 
 ---
 
-## Prompt F — Cloud (Azure / Stripe style)
+## Prompt F - Cloud (Azure / Stripe style)
 
 ```
 Pour mon script de backup Azure j'ai ça en .env, c'est safe de le mettre dans ChatGPT ?
@@ -102,7 +102,7 @@ stripe_key=sk_live_DEMO_ONLY_PLACEHOLDER_NOT_REAL_0000
 
 ---
 
-## Prompt G — Faux positif volontaire (option avancée)
+## Prompt G - Faux positif volontaire (option avancée)
 
 ```
 Dans la doc on met souvent password=password et user@example.com

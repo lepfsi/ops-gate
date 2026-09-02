@@ -2,7 +2,7 @@
 
 **Dossier** : hors Grafana (observabilité) — ici = **vision produit / features différenciantes**.  
 **Origine** : commit `V3 Roadmap` (17/07/2026), initialement déposé par erreur dans `docs/grafana/`.  
-**Statut** : specs + **P0 A/B/C livrés en code** (17–18/07) · suite V3-D+ ouverte · cut [`../RELEASE-v3.md`](../RELEASE-v3.md) · backlog [`../V3-BACKLOG.md`](../V3-BACKLOG.md).
+**Statut** : specs + **P0 A/B/C livrés** · **deep analysis T1–T5 livré** · **roadmap technique 3 phases + OpsVault** · cut [`../RELEASE-v3.md`](../RELEASE-v3.md) · backlog [`../V3-BACKLOG.md`](../V3-BACKLOG.md).
 
 ---
 
@@ -13,7 +13,9 @@
 | [`VISION-PRODUIT-ROADMAP-STRATEGIQUE-v1.md`](./VISION-PRODUIT-ROADMAP-STRATEGIQUE-v1.md) | Vision | Positionnement « AI Security Platform », piliers, roadmap 4 phases |
 | [`ROADMAP-PRODUIT-CLAIRE-v1.md`](./ROADMAP-PRODUIT-CLAIRE-v1.md) | Roadmap | Priorités P0–P2 actionnables, ce qu’on ne fait pas |
 | [`ROADMAP-AI-SECURITY-GATEWAY.md`](./ROADMAP-AI-SECURITY-GATEWAY.md) | Packaging | 5 piliers marketing Gateway (Usage, Data, Governance, Compliance, Intel) |
-| [`DEEP-ANALYSIS-STATUS.md`](./DEEP-ANALYSIS-STATUS.md) | **Statut technique** | **T1–T5** analyse fichiers/proxy + **remises** (AI Agent Protection, …) |
+| [`ROADMAP-TECHNIQUE-OPSGATE.md`](./ROADMAP-TECHNIQUE-OPSGATE.md) | **Roadmap tech 3 phases** | Consolidation → runtime agentique/MCP → posture + **tunnel OpsVault** |
+| [`../OPSGATE_INTEGRATION.md`](../OPSGATE_INTEGRATION.md) | Contrat API | OpsVault ↔ OpsGate (inject, leases, NHI) |
+| [`DEEP-ANALYSIS-STATUS.md`](./DEEP-ANALYSIS-STATUS.md) | Statut technique | **T1–T5** fichiers/proxy ; remises techniques ; agent = Phase 2–3 |
 | [`Recommandations.md`](./Recommandations.md) | Brief impl. | UX Rewrite + bascule scan proxy (statut T1–T5 à jour) |
 | [`SHADOW-AI-RISK-SCORE.md`](./SHADOW-AI-RISK-SCORE.md) | Feature spec | Shadow AI Discovery + Risk Score **utilisateur** (API, tables, formule) |
 | [`SHADOW-AI-RISK-SCORE-WIREFRAMES.md`](./SHADOW-AI-RISK-SCORE-WIREFRAMES.md) | UI | Wireframes console (dashboard Risk, détail, Shadow AI) |

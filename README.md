@@ -2,7 +2,7 @@
 
 **Utilisez l’IA librement. Protégez vos données automatiquement.**
 
-**Version : 1.2.x monorepo · maturité V2 pre-GA + V3-P0 functional** — synthèse [`docs/STATUS-V2.md`](docs/STATUS-V2.md) · gap [`docs/STATUS-GAP-V1-V3.md`](docs/STATUS-GAP-V1-V3.md) · cut V2 [`docs/RELEASE-v2.md`](docs/RELEASE-v2.md) · cut V3 [`docs/RELEASE-v3.md`](docs/RELEASE-v3.md) · socle V1 [`docs/RELEASE-v1.md`](docs/RELEASE-v1.md)
+**Version : 1.2.x monorepo · maturité V2 pre-GA + V3-P0 functional** - synthèse [`docs/STATUS-V2.md`](docs/STATUS-V2.md) · gap [`docs/STATUS-GAP-V1-V3.md`](docs/STATUS-GAP-V1-V3.md) · cut V2 [`docs/RELEASE-v2.md`](docs/RELEASE-v2.md) · cut V3 [`docs/RELEASE-v3.md`](docs/RELEASE-v3.md) · socle V1 [`docs/RELEASE-v1.md`](docs/RELEASE-v1.md)
 
 OpsGate est une plateforme de **Data Loss Prevention / AI security** pour l’IA générative : extension navigateur (**Chrome / Edge / Firefox / Safari build**, Manifest V3), **Secure Rewrite**, risk scores, Shadow AI, control plane multi-tenant, **proxy local** multi-IA, SSO/MFA/passkeys, audit WORM.
 
@@ -121,7 +121,7 @@ docs/demo/
   samples/                    # fichiers d'upload factices
 ```
 
-## Architecture (v1.1+) — GO PRODUIT
+## Architecture (v1.1+) - GO PRODUIT
 
 Console admin + sync de règles + events opt-in (EU) ; proxy en v1.2 :
 

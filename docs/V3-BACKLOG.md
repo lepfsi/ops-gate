@@ -1,9 +1,10 @@
 # Backlog V3 — différenciation produit
 
-**Mis à jour** : 25 juillet 2026  
-**Statut** : **V3-P0 livré** (A/B/C) · **analyse fichiers T1–T5 livrée** · V3-D/E/F ouverts · **V3-G AI Agent Protection remisé** · pre-GA V2 = chemin commercial  
+**Mis à jour** : 29 juillet 2026  
+**Statut** : **V3-P0 livré** · **T1–T5 fichiers livrés** · **roadmap technique 3 phases + OpsVault** · pre-GA V2 = chemin commercial  
 **Principe** : *Enable AI. Secure Data.* — peu de features **fortes**, pas de dispersion  
-**Cut** : [`RELEASE-v3.md`](./RELEASE-v3.md) · **gap** : [`STATUS-GAP-V1-V3.md`](./STATUS-GAP-V1-V3.md) · **deep analysis** : [`roadmap-v3/DEEP-ANALYSIS-STATUS.md`](./roadmap-v3/DEEP-ANALYSIS-STATUS.md)
+**Cut** : [`RELEASE-v3.md`](./RELEASE-v3.md) · **gap** : [`STATUS-GAP-V1-V3.md`](./STATUS-GAP-V1-V3.md)  
+**Roadmap tech** : [`roadmap-v3/ROADMAP-TECHNIQUE-OPSGATE.md`](./roadmap-v3/ROADMAP-TECHNIQUE-OPSGATE.md) · **OpsVault** : [`OPSGATE_INTEGRATION.md`](./OPSGATE_INTEGRATION.md)
 
 > **Commercial / GA** : terminer le pre-GA V2 (stores ou MDM, pilote, Stripe prod).  
 > **Produit** : P0 V3 est utilisable en démo ; ne pas bloquer les démos dessus.  
@@ -55,7 +56,8 @@ Socle déjà présent à réutiliser :
 | **V3-E AI Trust Score (par modèle)** | P1 | Moyen | Vision § Trust Score | ⬜ |
 | **V3-F Classification intelligente** | P2 | Élevé | Vision Phase 4 | ⬜ |
 | **Deep analysis fichiers (T1–T5)** | P0–P1 | Élevé | [`DEEP-ANALYSIS-STATUS.md`](./roadmap-v3/DEEP-ANALYSIS-STATUS.md) | ✅ **livré** (25/07) |
-| **V3-G AI Agent Protection** | P2–P3 | Élevé | Vision Phase 4 · §4 DEEP-ANALYSIS | ⏸️ **remisé** (pas d’impl. sans arbitrage) |
+| **Roadmap tech Phase 1** (consolidation + OpsVault inject) | P1 | Élevé | [`ROADMAP-TECHNIQUE-OPSGATE.md`](./roadmap-v3/ROADMAP-TECHNIQUE-OPSGATE.md) | ⬜ Planifié |
+| **V3-G AI Agent Protection** | P2 | Élevé | = **Phase 2–3** roadmap tech + [`OPSGATE_INTEGRATION.md`](./OPSGATE_INTEGRATION.md) | 📅 Après Phase 1 |
 
 ---
 
@@ -129,17 +131,18 @@ Alternative acceptable si besoin commercial RSSI d’abord : **V3-C avant V3-A**
 | **V3-D** | KPIs Risk, tendances, export, alertes score > seuil + Grafana | ⬜ Ouvert |
 | **V3-E** AI Trust Score | Score de confiance par modèle (ChatGPT vs Claude…) | ⬜ Ouvert (data longue durée) |
 | **V3-F** Classification | Public / Internal / Confidential / Restricted | ⬜ Ouvert (complexe, légal) |
-| **V3-G AI Agent Protection** | Agents autonomes, IDE, API LLM, MCP hors navigateur web | ⏸️ **Remisé** — spec + arbitrage avant code ([détail](./roadmap-v3/DEEP-ANALYSIS-STATUS.md#4-ai-agent-protection-reporté)) |
-| PDF redact format-preserving | Garder un PDF binaire après mask | ⏸️ Remisé (technique) |
-| Access / MDB | Bases legacy | ⏸️ Remisé |
+| **V3-G AI Agent Protection** | MCP, identité agent, policies runtime | 📅 **Phase 2–3** [`ROADMAP-TECHNIQUE-OPSGATE.md`](./roadmap-v3/ROADMAP-TECHNIQUE-OPSGATE.md) |
+| **OpsVault tunnel** | Inject / leases / NHI feed | 📅 Phase 1→3 · contrat [`OPSGATE_INTEGRATION.md`](./OPSGATE_INTEGRATION.md) |
+| PDF redact format-preserving | Garder un PDF binaire après mask | ⏸️ Remisé technique |
+| Access / MDB | Bases legacy | ⏸️ Remisé technique |
 
-### Explicitement **pas** V3 early
+### Explicitement **pas** en parallèle de la Phase 1
 
-- **AI Agent Protection** (V3-G) sans gate pre-GA + demande client  
-- Explosion du nombre de règles de détection sans UX  
+- Runtime MCP / Agent Protection **avant** consolidation Phase 1  
+- Explosion du nombre de règles sans UX / tests FP  
 - Refonte architecture monorepo  
 - HA multi-région (infra client)  
-- Portal personnel déjà en V2 (Stripe) — ne pas re-spécifier  
+- Implémenter OpsVault **dans** ce repo (produit séparé ; OpsGate = client PEP)  
 
 
 ---

@@ -23,7 +23,8 @@ La V3 transforme OpsGate de « DLP léger pour l’IA » en **plateforme d’AI 
 | **Deep analysis T1–T5** | Proxy scan + OCR + SQLite + MITM deep + mask format-preserving | ✅ **Livré** (25/07) |
 | **V3-D Dashboard Risk analytics** | Alertes seuil, Grafana, export | ⬜ Suite |
 | **V3-E / F** | Trust Score modèles, classification | ⬜ Plus tard |
-| **V3-G AI Agent Protection** | Agents hors navigateur (IDE, API, MCP…) | ⏸️ **Remisé** |
+| **V3-G AI Agent Protection** | MCP / runtime agents + OpsVault | 📅 **Phase 2–3** [`ROADMAP-TECHNIQUE-OPSGATE.md`](./roadmap-v3/ROADMAP-TECHNIQUE-OPSGATE.md) |
+| **OpsVault tunnel** | Inject / leases / NHI | 📅 Phase 1→3 [`OPSGATE_INTEGRATION.md`](./OPSGATE_INTEGRATION.md) |
 
 ---
 
